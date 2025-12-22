@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Apigee Dynamic Chart</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>Dynamic Apigee Operation Bar Chart</h1>
+    
+    <div style="width: 70%; margin: auto;">
+        <canvas id="apigeeBarChart"></canvas>
+    </div>
+
+    <script>
+        // 3. Get the data passed from the Django view
+        // The |safe filter is necessary here because the data is already a JSON string
+        const labels = JSON.parse('{{ chart_labels_json|safe }}');
+        const dataValues = JSON.parse('{{ chart_values_json|safe }}');
+
+        const ctx = document.getElementById('apigeeBarChart').getContext('2d');
+        
+        // 4. Initialize the Chart
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels, // The operation names
+                datasets: [{
+                    label: 'Operation Value',
+                    data: dataValues, // The counts/values
+                    backgroundColor: [
+                        'rgba(255, 99, 132, 0.5)', // Reddish for Start
+                        'rgba(54, 162, 235, 0.5)',  // Bluish for Stop
+                        'rgba(75, 192, 192, 0.5)'  // Greenish for Status
+                    ],
+                    borderColor: [
+                        'rgba(255, 99, 132, 1)',
+                        'rgba(54, 162, 235, 1)',
+                        'rgba(75, 192, 192, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                // Makes the chart responsive
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
