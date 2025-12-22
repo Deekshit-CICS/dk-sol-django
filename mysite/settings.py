@@ -37,7 +37,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'mcp_server',
+    'django_mcp_server',
+    'django_extensions',
 ]
 
 MIDDLEWARE = [
@@ -52,7 +53,6 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'mysite.urls'
 
-print(f"BASE_DIR {BASE_DIR}")
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -67,8 +67,6 @@ TEMPLATES = [
         },
     },
 ]
-
-print(TEMPLATES)
 
 WSGI_APPLICATION = 'mysite.wsgi.application'
 
@@ -119,3 +117,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+MCP_SERVER_REQUIRE_AUTH = True
+
+DJANGO_MCP_TOOLSETS = [
+    'polls.mcp_tools.CalculatorTools',
+]
