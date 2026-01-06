@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simplified Forensic RCA</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.75);
+            --glass-border: rgba(255, 255, 255, 0.9);
+            --blue: #007aff;
+            --purple: #5856d6;
+            --red: #ff3b30;
+            --text-main: #1d1d1f;
+            --text-sec: #86868b;
+        }
+
+        body { background-color: var(--apple-bg); color: var(--text-main); font-family: -apple-system, sans-serif; padding: 40px 0; }
+        .dashboard-container { max-width: 1400px; margin: auto; position: relative; }
+
+        /* UI Components */
+        .apple-search { background: rgba(0,0,0,0.05); border: 1px solid transparent; border-radius: 10px; padding: 10px 18px; width: 300px; transition: 0.2s; }
+        .apple-search:focus { background: #fff; border-color: var(--blue); outline: none; }
+        .btn-analyze { background: var(--blue); color: white; border: none; padding: 10px 28px; border-radius: 10px; font-weight: 600; }
+
+        /* Glass Cards */
+        .apple-card {
+            background: var(--glass);
+            backdrop-filter: blur(20px) saturate(180%);
+            border-radius: 18px;
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);
+            margin-bottom: 24px;
+            z-index: 2;
+            position: relative;
+        }
+
+        /* Drill-down List Item */
+        .drill-list-item {
+            padding: 12px 15px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid transparent;
+        }
+        .drill-list-item:hover { background: rgba(0, 122, 255, 0.05); }
+        .drill-list-item.active { background: white; border-color: var(--blue); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+        /* Connectors */
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { fill: none; stroke: rgba(0, 0, 0, 0.06); stroke-width: 2; stroke-dasharray: 4; }
+
+        .table-selected { border-left: 4px solid var(--blue) !important; background: rgba(0, 122, 255, 0.05) !important; }
+        pre { font-family: 'SF Mono', monospace; font-size: 0.85rem; padding: 15px; border-radius: 12px; background: rgba(255, 59, 48, 0.03); }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container" id="main-canvas">
+    <svg id="flow-canvas">
+        <path id="line1" class="connector" />
+        <path id="line2" class="connector" />
+        <path id="line3" class="connector" />
+    </svg>
+
+    <header class="d-flex justify-content-between align-items-center mb-5 px-3">
+        <div>
+            <h1 class="h3 fw-bold mb-0">Forensic RCA Dashboard</h1>
+            <p class="text-secondary small mb-0" id="app-display-header">Application ID: <span class="fw-bold text-dark">Not Selected</span></p>
+        </div>
+        <div class="d-flex gap-3">
+            <input type="text" class="apple-search" id="appSearchInput" placeholder="Enter App ID (e.g. APP-501)">
+            <button class="btn-analyze" onclick="startAnalysis()">Analyze</button>
+        </div>
+    </header>
+
+    <div class="row g-3 px-3 align-items-center">
+        
+        <div class="col-md-2">
+            <div id="node-inc" class="apple-card p-4 text-center">
+                <h4 class="fw-bold text-primary mb-1" id="display-inc">INC0123456</h4>
+                <div class="small text-secondary" id="display-desc">Auth timeout</div>
+            </div>
+        </div>
+
+        <div class="col-md-2">
+            <div id="node-chg" class="apple-card p-3">
+                <div class="small text-secondary fw-bold mb-3 text-uppercase" style="letter-spacing: 0.5px; font-size: 0.7rem;">Change</div>
+                <div class="drill-list-item active text-center d-block">
+                    <div class="fw-bold" id="display-chg">CHG-9902</div>
+                    <div class="badge bg-success bg-opacity-10 text-success rounded-pill mt-1" style="font-size: 0.6rem;">Applied</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div id="node-ci" class="apple-card p-3">
+                <div class="small text-secondary fw-bold mb-3 text-uppercase" style="letter-spacing: 0.5px; font-size: 0.7rem;">Affected CIs</div>
+                <div id="ci-container">
+                    <div class="drill-list-item" onclick="selectCI(this, 'SRV-LOGIN-01', 'FATAL: Connection pool exhausted at java.base/jdbc.Pool.getConnection')">
+                        <span>SRV-LOGIN-01</span>
+                        <span class="badge bg-danger bg-opacity-10 text-danger rounded-pill" style="font-size: 0.6rem;">Error</span>
+                    </div>
+                    <div class="drill-list-item" onclick="selectCI(this, 'DB-AUTH-PROD', 'TIMEOUT: DB response > 5000ms')">
+                        <span>DB-AUTH-PROD</span>
+                        <span class="badge bg-warning bg-opacity-10 text-warning rounded-pill" style="font-size: 0.6rem;">Warn</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-5">
+            <div id="node-error" class="apple-card p-3 border-start border-danger border-4">
+                <div class="small text-danger fw-bold mb-3 text-uppercase" style="letter-spacing: 0.5px; font-size: 0.7rem;">CI Error Log</div>
+                <div id="error-output">
+                    <p class="text-secondary small">Select a CI to view forensic logs.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <section class="px-3 mt-4">
+        <div class="apple-card overflow-hidden">
+            <table class="table mb-0 table-hover" style="cursor: pointer;">
+                <thead class="table-light small text-secondary">
+                    <tr><th>Incident ID</th><th>Short Description</th><th>Linked Change</th></tr>
+                </thead>
+                <tbody id="incidentTable">
+                    <tr class="table-selected" onclick="updateIncident(this, 'INC0123456', 'Auth timeout in US-East-1', 'CHG-9902')">
+                        <td class="fw-bold">INC0123456</td>
+                        <td>Auth timeout in US-East-1</td>
+                        <td><code>CHG-9902</code></td>
+                    </tr>
+                    <tr onclick="updateIncident(this, 'INC0123999', 'Database Latency Spike', 'CHG-8810')">
+                        <td class="fw-bold">INC0123999</td>
+                        <td>Database Latency Spike</td>
+                        <td><code>CHG-8810</code></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+<script>
+    function startAnalysis() {
+        const appId = document.getElementById('appSearchInput').value;
+        const display = document.getElementById('app-display-header');
+        if(!appId) return alert("Please enter an Application ID");
+        display.innerHTML = `Application ID: <span class="fw-bold text-primary">${appId}</span>`;
+        drawConnectors();
+    }
+
+    function updateIncident(row, id, desc, chg) {
+        document.querySelectorAll('tr').forEach(r => r.classList.remove('table-selected'));
+        row.classList.add('table-selected');
+        
+        document.getElementById('display-inc').innerText = id;
+        document.getElementById('display-desc').innerText = desc;
+        document.getElementById('display-chg').innerText = chg;
+        
+        document.getElementById('error-output').innerHTML = '<p class="text-secondary small">Select a CI to view forensic logs.</p>';
+        document.querySelectorAll('#node-ci .drill-list-item').forEach(i => i.classList.remove('active'));
+        
+        drawConnectors();
+    }
+
+    function selectCI(el, name, error) {
+        document.querySelectorAll('#node-ci .drill-list-item').forEach(item => item.classList.remove('active'));
+        el.classList.add('active');
+        
+        document.getElementById('error-output').innerHTML = `
+            <div class="fw-bold small mb-1">${name}</div>
+            <pre class="text-danger mb-0">${error}</pre>
+        `;
+        drawConnectors();
+    }
+
+    function drawConnectors() {
+        const container = document.getElementById('main-canvas').getBoundingClientRect();
+        const getBox = (id) => {
+            const el = document.getElementById(id);
+            const r = el.getBoundingClientRect();
+            return {
+                cx: r.left - container.left + (r.width / 2),
+                cy: r.top - container.top + (r.height / 2),
+                left: r.left - container.left,
+                right: r.right - container.left
+            };
+        };
+
+        const inc = getBox('node-inc');
+        const chg = getBox('node-chg');
+        const ci = getBox('node-ci');
+        const err = getBox('node-error');
+
+        document.getElementById('line1').setAttribute('d', `M ${inc.right} ${inc.cy} L ${chg.left} ${chg.cy}`);
+        document.getElementById('line2').setAttribute('d', `M ${chg.right} ${chg.cy} L ${ci.left} ${ci.cy}`);
+        document.getElementById('line3').setAttribute('d', `M ${ci.right} ${ci.cy} L ${err.left} ${err.cy}`);
+    }
+
+    window.onload = () => { setTimeout(drawConnectors, 100); };
+    window.onresize = drawConnectors;
+</script>
+</body>
+</html>

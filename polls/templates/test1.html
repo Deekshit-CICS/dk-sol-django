@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apple Style RCA Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.8);
+            --shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
+            --blue: #007aff;
+            --yellow: #ff9f0a;
+            --green: #34c759;
+            --purple: #5856d6;
+            --red: #ff3b30;
+        }
+
+        body {
+            background-color: var(--apple-bg);
+            color: #1d1d1f;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+            min-height: 100vh;
+            padding-bottom: 100px;
+        }
+
+        .dashboard-wrapper {
+            max-width: 1100px;
+            margin: 40px auto;
+            position: relative;
+            padding: 20px;
+        }
+
+        /* Apple Glass Card */
+        .apple-card {
+            background: var(--glass);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border-radius: 20px;
+            border: 1px solid var(--glass-border);
+            padding: 24px;
+            position: relative;
+            z-index: 2;
+            box-shadow: var(--shadow);
+            transition: all 0.3s ease;
+        }
+
+        /* Table Styling */
+        .table-container { margin-bottom: 50px; }
+        .apple-table { border-collapse: separate; border-spacing: 0 8px; width: 100%; }
+        .apple-table tr { cursor: pointer; transition: transform 0.2s; }
+        .apple-table tr:hover { transform: scale(1.01); }
+        .apple-table td { 
+            background: white; 
+            padding: 16px; 
+            border: none;
+        }
+        .apple-table td:first-child { border-radius: 12px 0 0 12px; }
+        .apple-table td:last-child { border-radius: 0 12px 12px 0; }
+        .active-row td { background: #eef6ff !important; border: 1px solid var(--blue); }
+
+        .indicator { height: 4px; width: 40px; border-radius: 2px; margin-bottom: 12px; }
+        .card-label { font-size: 0.7rem; font-weight: 600; color: #86868b; text-transform: uppercase; letter-spacing: 0.5px; }
+        .log-text { font-family: 'SF Mono', monospace; font-size: 0.8rem; color: var(--red); white-space: pre-wrap; }
+
+        .apple-search { 
+            background: rgba(0,0,0,0.05); border: none; border-radius: 10px; padding: 8px 16px; width: 280px; 
+        }
+        .btn-analyze { background: var(--blue); color: #fff; border-radius: 10px; font-weight: 500; padding: 8px 24px; border: none; }
+
+        #connector-svg {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .connector-line { fill: none; stroke: rgba(0, 0, 0, 0.08); stroke-width: 2; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-wrapper" id="canvas">
+    <svg id="connector-svg">
+        <path id="path1" class="connector-line" />
+        <path id="path2" class="connector-line" />
+        <path id="path3" class="connector-line" />
+        <path id="path4" class="connector-line" />
+    </svg>
+
+    <header class="d-flex justify-content-between align-items-end mb-5">
+        <div>
+            <h1 class="h3 mb-1 fw-bold">Root Cause Analysis</h1>
+            <p class="text-secondary small mb-0">System Monitor • APP-ID: 7721</p>
+        </div>
+        <div class="d-flex gap-2">
+            <input type="text" class="apple-search" placeholder="Search App ID...">
+            <button class="btn-analyze shadow-sm">Analyze</button>
+        </div>
+    </header>
+
+    <div class="table-container">
+        <h6 class="card-label mb-3 ps-2">Linked Incidents & Changes</h6>
+        <table class="apple-table">
+            <tbody id="incident-table-body">
+                <tr class="active-row" onclick="updateRCA('INC0123456', 'CHG-902', 'Auth microservice reporting 503 errors across us-east regions.', 'socket_error: connection refused\npool_exhausted: max_connections=5000')">
+                    <td class="fw-bold">INC0123456</td>
+                    <td class="text-secondary">Auth Timeout</td>
+                    <td class="font-monospace small">CHG-902</td>
+                    <td class="text-end pe-4"><span class="badge rounded-pill bg-danger bg-opacity-10 text-danger px-3">Active</span></td>
+                </tr>
+                <tr onclick="updateRCA('INC0123999', 'CHG-850', 'Database latency detected in secondary cluster.', 'db_query_timeout: 5000ms\nretry_limit_exceeded: node_04')">
+                    <td class="fw-bold">INC0123999</td>
+                    <td class="text-secondary">DB Latency</td>
+                    <td class="font-monospace small">CHG-850</td>
+                    <td class="text-end pe-4"><span class="badge rounded-pill bg-success bg-opacity-10 text-success px-3">Resolved</span></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-md-5">
+            <div id="box-incident" class="apple-card">
+                <div class="indicator" style="background: var(--blue);"></div>
+                <span class="card-label">Current Incident</span>
+                <h2 id="display-inc" class="mb-0 fw-bold" style="color: var(--blue);">INC0123456</h2>
+            </div>
+        </div>
+
+        <div class="col-md-5 offset-md-1">
+            <div id="box-diagnosis" class="apple-card">
+                <div class="indicator" style="background: var(--yellow);"></div>
+                <span class="card-label">Diagnosis</span>
+                <p id="display-diag" class="mb-0 mt-2">Authentication microservice reporting 503 errors across us-east regions.</p>
+            </div>
+        </div>
+
+        <div class="col-md-4 offset-md-1">
+            <div id="box-history" class="apple-card">
+                <div class="indicator" style="background: var(--green);"></div>
+                <span class="card-label">Deployment Path</span>
+                <div class="mt-2">
+                    <div id="display-chg" class="small py-1 fw-bold">CHG-902</div>
+                    <div class="small text-secondary">Verified by System Integrity</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div id="box-events" class="apple-card">
+                <div class="indicator" style="background: var(--red);"></div>
+                <span class="card-label">Live Log Stream</span>
+                <div id="display-logs" class="log-text mt-2">&bull; socket_error: connection refused<br>&bull; pool_exhausted: max_connections=5000</div>
+            </div>
+        </div>
+
+        <div class="col-md-4 offset-md-4">
+            <div id="box-nodes" class="apple-card">
+                <div class="indicator" style="background: var(--purple);"></div>
+                <span class="card-label">Involved Nodes</span>
+                <div class="d-flex justify-content-between mt-2 small">
+                    <span class="fw-medium">APP-SRV-01</span>
+                    <span class="badge rounded-pill bg-light text-dark border">Primary</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function updateRCA(inc, chg, diag, logs) {
+        // Highlight active row
+        const rows = document.querySelectorAll('.apple-table tr');
+        rows.forEach(r => r.classList.remove('active-row'));
+        event.currentTarget.classList.add('active-row');
+
+        // Update Text
+        document.getElementById('display-inc').innerText = inc;
+        document.getElementById('display-diag').innerText = diag;
+        document.getElementById('display-chg').innerText = chg;
+        document.getElementById('display-logs').innerHTML = logs.split('\n').map(l => '&bull; ' + l).join('<br>');
+
+        // Refresh Paths
+        setTimeout(updatePaths, 50);
+    }
+
+    function updatePaths() {
+        const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+        const getBox = (id) => {
+            const el = document.getElementById(id);
+            const r = el.getBoundingClientRect();
+            return {
+                cx: r.left - canvasRect.left + r.width / 2,
+                cy: r.top - canvasRect.top + r.height / 2,
+                left: r.left - canvasRect.left,
+                right: r.right - canvasRect.left,
+                top: r.top - canvasRect.top,
+                bottom: r.bottom - canvasRect.top
+            };
+        };
+
+        const b1 = getBox('box-incident');
+        const b2 = getBox('box-diagnosis');
+        const b3 = getBox('box-history');
+        const b4 = getBox('box-events');
+        const b5 = getBox('box-nodes');
+
+        document.getElementById('path1').setAttribute('d', `M ${b1.right} ${b1.cy} L ${b2.left} ${b2.cy}`);
+        document.getElementById('path2').setAttribute('d', `M ${b2.cx} ${b2.bottom} Q ${b2.cx} ${b3.top} ${b3.cx} ${b3.top}`);
+        document.getElementById('path3').setAttribute('d', `M ${b3.left} ${b3.cy} Q ${b4.cx} ${b3.cy} ${b4.cx} ${b4.top}`);
+        document.getElementById('path4').setAttribute('d', `M ${b4.right} ${b4.cy} C ${b4.right + 40} ${b4.cy}, ${b5.left - 40} ${b5.cy}, ${b5.left} ${b5.cy}`);
+    }
+
+    window.addEventListener('load', updatePaths);
+    window.addEventListener('resize', updatePaths);
+</script>
+</body>
+</html>
