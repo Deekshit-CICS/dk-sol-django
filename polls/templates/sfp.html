@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brocade Port Auditor - Incident Manager</title>
+    <title>Brocade Port Auditor - Auto Resolver</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <style>
@@ -27,27 +27,35 @@
 
         .dashboard-container { max-width: 1200px; margin: auto; position: relative; }
 
-        /* Header UI */
-        .apple-search { 
-            background: rgba(0,0,0,0.05); 
-            border: 1px solid transparent; 
-            border-radius: 12px 0 0 12px; 
-            padding: 12px 20px; 
-            width: 300px; 
-            transition: 0.3s;
-        }
-        .apple-search:focus { background: #fff; border-color: var(--blue); outline: none; }
-        
-        .btn-run-audit {
+        /* Resolver Controls */
+        .btn-start {
             background: var(--blue);
             color: white;
             border: none;
-            border-radius: 0 12px 12px 0;
-            padding: 0 25px;
+            border-radius: 12px;
+            padding: 10px 24px;
             font-weight: 600;
             transition: 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
-        .btn-run-audit:hover { background: #0056b3; }
+        .btn-start:hover { background: #0063d1; transform: translateY(-1px); }
+        .btn-start:active { transform: translateY(0); }
+
+        .btn-stop {
+            background: #fff;
+            color: var(--red);
+            border: 1px solid rgba(255, 59, 48, 0.2);
+            border-radius: 12px;
+            padding: 10px 24px;
+            font-weight: 600;
+            transition: 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-stop:hover { background: #fff1f0; border-color: var(--red); }
 
         .btn-resolve {
             background: linear-gradient(180deg, #34d058 0%, #28a745 100%);
@@ -61,10 +69,10 @@
             align-items: center;
             gap: 8px;
             transition: all 0.2s;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .btn-resolve:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3); }
 
+        /* Layout UI */
         .apple-card {
             background: var(--glass);
             backdrop-filter: blur(20px) saturate(180%);
@@ -75,18 +83,17 @@
             z-index: 2;
         }
 
-        /* Table & Layout */
-        .apple-table thead th { background: rgba(0,0,0,0.02); color: var(--text-sec); font-size: 0.75rem; text-transform: uppercase; border: none; padding: 15px 20px; }
-        .apple-table tr { vertical-align: middle; transition: 0.2s; cursor: pointer; }
+        .apple-table tr { vertical-align: middle; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.03); }
         .apple-table tr.selected { background: rgba(0, 122, 255, 0.05) !important; }
 
         #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
         .connector { fill: none; stroke: var(--blue); stroke-width: 2; stroke-dasharray: 6; opacity: 0.2; }
 
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        /* Animations */
+        .live-indicator { width: 10px; height: 10px; background: #86868b; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        .active-pulse { background: var(--green); animation: pulse 1.5s infinite; }
         
-        @keyframes pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(0, 122, 255, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(0, 122, 255, 0); } 100% { box-shadow: 0 0 0 0 rgba(0, 122, 255, 0); } }
-        .analyzing { animation: pulse-blue 1.5s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.7); } 70% { box-shadow: 0 0 0 8px rgba(52, 199, 89, 0); } 100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0); } }
     </style>
 </head>
 <body>
@@ -96,41 +103,48 @@
 
     <header class="d-flex justify-content-between align-items-center mb-5 px-4">
         <div>
-            <h1 class="h3 fw-bold mb-0">Change Window Auditor</h1>
-            <p class="text-secondary small mb-0">Brocade Fabric Port Health Analysis</p>
+            <h1 class="h3 fw-bold mb-0">Port Auto-Resolver</h1>
+            <p class="text-secondary small mb-0">
+                <span class="live-indicator" id="status-dot"></span>
+                <span id="status-text">Resolver Idle</span>
+            </p>
         </div>
-        <div class="d-flex">
-            <input type="text" class="apple-search" id="searchInput" placeholder="Search Change Ticket...">
-            <button class="btn-run-audit" onclick="triggerAudit()"><i class="bi bi-cpu-fill me-2"></i>Run Audit</button>
+        <div class="d-flex gap-3">
+            <button class="btn-start" onclick="toggleResolver(true)">
+                <i class="bi bi-play-fill"></i> Start Resolver
+            </button>
+            <button class="btn-stop" onclick="toggleResolver(false)">
+                <i class="bi bi-stop-fill"></i> Stop Resolver
+            </button>
         </div>
     </header>
 
     <section class="px-4 mb-5">
         <div class="apple-card overflow-hidden">
-            <table class="table apple-table mb-0" id="mainTable">
+            <table class="table apple-table mb-0">
                 <thead>
-                    <tr>
-                        <th>Incident</th>
+                    <tr class="text-secondary small text-uppercase" style="font-size: 0.7rem; letter-spacing: 0.5px;">
+                        <th class="ps-4">Incident</th>
                         <th>Switch Name</th>
                         <th>Port</th>
                         <th>Status</th>
-                        <th class="text-end">Action</th>
+                        <th class="text-end pe-4">Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr class="selected" onclick="updateView(this, 'INC-8821', 'BRCD-NY-01', 'FC 1/4', 'Online', 'Health check passed. Automatically resolving incident.')">
-                        <td class="fw-bold text-primary">INC-8821</td>
+                        <td class="ps-4 fw-bold text-primary">INC-8821</td>
                         <td><code>BRCD-NY-01</code></td>
                         <td>Port 04</td>
-                        <td><span class="badge bg-success bg-opacity-10 text-success"><span class="status-dot bg-success"></span>Active</span></td>
-                        <td class="text-end"><button class="btn-resolve" onclick="event.stopPropagation()"><i class="bi bi-check-all"></i> Resolve</button></td>
+                        <td><span class="badge bg-success bg-opacity-10 text-success">Active</span></td>
+                        <td class="text-end pe-4"><button class="btn-resolve"><i class="bi bi-check2-circle"></i> Resolve</button></td>
                     </tr>
                     <tr onclick="updateView(this, 'INC-9042', 'BRCD-LON-05', 'FC 2/12', 'Offline', 'Fault detected. Light level below threshold. Added comment to INC-9042.')">
-                        <td class="fw-bold text-primary">INC-9042</td>
+                        <td class="ps-4 fw-bold text-primary">INC-9042</td>
                         <td><code>BRCD-LON-05</code></td>
                         <td>Port 12</td>
-                        <td><span class="badge bg-danger bg-opacity-10 text-danger"><span class="status-dot bg-danger"></span>Fault</span></td>
-                        <td class="text-end"><button class="btn-resolve" onclick="event.stopPropagation()"><i class="bi bi-check-all"></i> Resolve</button></td>
+                        <td><span class="badge bg-danger bg-opacity-10 text-danger">Fault</span></td>
+                        <td class="text-end pe-4"><button class="btn-resolve"><i class="bi bi-check2-circle"></i> Resolve</button></td>
                     </tr>
                 </tbody>
             </table>
@@ -141,31 +155,34 @@
         <div class="col-md-3"><div id="node-inc" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">INCIDENT</div><h5 class="fw-bold mb-0" id="flow-inc">INC-8821</h5></div></div>
         <div class="col-md-3"><div id="node-sw" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">SWITCH</div><h5 class="fw-bold mb-0" id="flow-sw">BRCD-NY-01</h5></div></div>
         <div class="col-md-3"><div id="node-port" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">PORT</div><h5 class="fw-bold mb-0" id="flow-port">FC 1/4</h5></div></div>
-        <div class="col-md-3"><div id="node-health" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">HEALTH</div><h5 class="fw-bold mb-0" id="flow-health">Online</h5></div></div>
+        <div class="col-md-3"><div id="node-health" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">PORT HEALTH</div><h5 class="fw-bold mb-0" id="flow-health">Online</h5></div></div>
     </section>
 
     <section class="px-4">
         <div class="apple-card p-4 border-start border-4" id="action-box" style="border-color: var(--green);">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <span class="small fw-bold text-uppercase">Automation Engine Log</span>
+                <span class="small fw-bold text-uppercase">Automation Result</span>
                 <span class="badge bg-success" id="log-status">Resolved</span>
             </div>
-            <pre class="mb-0" id="flow-log">Health check passed. Automatically resolving incident.</pre>
+            <pre class="mb-0" id="flow-log" style="font-family: 'SF Mono', monospace; font-size: 0.9rem;">Health check passed. Automatically resolving incident.</pre>
         </div>
     </section>
 </div>
 
 <script>
-    function triggerAudit() {
-        const btn = document.querySelector('.btn-run-audit');
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Auditing...';
-        btn.classList.add('analyzing');
+    function toggleResolver(start) {
+        const dot = document.getElementById('status-dot');
+        const text = document.getElementById('status-text');
         
-        setTimeout(() => {
-            btn.innerHTML = '<i class="bi bi-cpu-fill me-2"></i>Run Audit';
-            btn.classList.remove('analyzing');
-            alert("Audit complete for the selected change window.");
-        }, 1500);
+        if(start) {
+            dot.classList.add('active-pulse');
+            text.innerText = "Resolver Active - Scanning Brocade Fabric...";
+            text.style.color = "var(--green)";
+        } else {
+            dot.classList.remove('active-pulse');
+            text.innerText = "Resolver Idle";
+            text.style.color = "var(--text-sec)";
+        }
     }
 
     function updateView(row, inc, sw, port, health, log) {
