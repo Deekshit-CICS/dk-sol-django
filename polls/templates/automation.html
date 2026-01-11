@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Toolkit | Centralized Operations</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.8);
+            --blue: #007aff;
+            --text-main: #1d1d1f;
+            --text-sec: #86868b;
+        }
+
+        body { 
+            background-color: var(--apple-bg); 
+            color: var(--text-main); 
+            font-family: -apple-system, system-ui, sans-serif;
+            padding-bottom: 50px;
+        }
+
+        /* Sidebar Navigation */
+        .sidebar {
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid var(--glass-border);
+            height: 100vh;
+            position: fixed;
+            padding: 24px;
+            width: 260px;
+        }
+
+        .nav-pill {
+            padding: 12px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: 0.2s;
+            color: var(--text-main);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .nav-pill i { margin-right: 12px; font-size: 1.1rem; }
+        .nav-pill:hover { background: rgba(0,0,0,0.05); }
+        .nav-pill.active { background: var(--blue); color: white; }
+
+        /* Main Content */
+        .main-content { margin-left: 260px; padding: 40px; }
+
+        /* Tower Section Heading */
+        .section-header {
+            margin-bottom: 24px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+
+        /* Automation Cards */
+        .automation-card {
+            background: #ffffff;
+            border-radius: 16px;
+            border: 1px solid rgba(0,0,0,0.05);
+            padding: 20px;
+            transition: all 0.3s ease;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .automation-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 24px rgba(0,0,0,0.08);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-online { background: #34c759; box-shadow: 0 0 8px #34c759; }
+
+        .btn-jenkins {
+            background: #f2f2f7;
+            border: none;
+            color: var(--blue);
+            font-weight: 600;
+            border-radius: 8px;
+            padding: 8px 16px;
+            width: 100%;
+            margin-top: 15px;
+            transition: 0.2s;
+        }
+        .btn-jenkins:hover { background: var(--blue); color: white; }
+
+        .tower-badge {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: rgba(0, 122, 255, 0.1);
+            color: var(--blue);
+        }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <div class="mb-5 px-2">
+        <h4 class="fw-bold"><i class="bi bi-cpu-fill text-primary"></i> Toolkit</h4>
+        <p class="small text-secondary">Global Operations Center</p>
+    </div>
+
+    <div class="nav-pill active" onclick="filterTower('all')"><i class="bi bi-grid-fill"></i> All Towers</div>
+    <div class="nav-pill" onclick="filterTower('unix')"><i class="bi bi-terminal"></i> Unix</div>
+    <div class="nav-pill" onclick="filterTower('windows')"><i class="bi bi-microsoft"></i> Windows</div>
+    <div class="nav-pill" onclick="filterTower('middleware')"><i class="bi bi-layers"></i> Middleware</div>
+    <div class="nav-pill" onclick="filterTower('storage')"><i class="bi bi-database"></i> Storage & Backup</div>
+</div>
+
+<div class="main-content">
+    <header class="d-flex justify-content-between align-items-center mb-5">
+        <div>
+            <h2 class="fw-bold mb-0">Automation Hub</h2>
+            <p class="text-secondary" id="current-tower-text">Displaying all Jenkins automations</p>
+        </div>
+        <div class="d-flex align-items-center">
+            <span class="small me-3 text-secondary"><span class="status-dot status-online"></span> Jenkins Master: Connected</span>
+            <img src="https://ui-avatars.com/api/?name=GOC+User&background=007aff&color=fff" class="rounded-circle" width="40" alt="Profile">
+        </div>
+    </header>
+
+    <div class="row g-4" id="automation-grid">
+        <div class="col-md-4 tower-item" data-tower="unix">
+            <div class="automation-card">
+                <div>
+                    <span class="tower-badge">Unix</span>
+                    <h5 class="fw-bold mt-2">User Provisioning</h5>
+                    <p class="small text-secondary">Automated LDAP/Local user creation & sudoers config.</p>
+                </div>
+                <button class="btn-jenkins" onclick="triggerJob('Unix_User_Prov')">Run Job</button>
+            </div>
+        </div>
+
+        <div class="col-md-4 tower-item" data-tower="unix">
+            <div class="automation-card">
+                <div>
+                    <span class="tower-badge">Unix</span>
+                    <h5 class="fw-bold mt-2">Patching Compliance</h5>
+                    <p class="small text-secondary">YUM/APT security updates and kernel reboot cycle.</p>
+                </div>
+                <button class="btn-jenkins" onclick="triggerJob('Unix_Patching')">Run Job</button>
+            </div>
+        </div>
+
+        <div class="col-md-4 tower-item" data-tower="windows">
+            <div class="automation-card">
+                <div>
+                    <span class="tower-badge">Windows</span>
+                    <h5 class="fw-bold mt-2">AD Health Check</h5>
+                    <p class="small text-secondary">PowerShell script to verify replication and DNS health.</p>
+                </div>
+                <button class="btn-jenkins" onclick="triggerJob('Win_AD_Check')">Run Job</button>
+            </div>
+        </div>
+
+        <div class="col-md-4 tower-item" data-tower="middleware">
+            <div class="automation-card">
+                <div>
+                    <span class="tower-badge">Middleware</span>
+                    <h5 class="fw-bold mt-2">WebSphere Restart</h5>
+                    <p class="small text-secondary">Graceful restart of JVM instances across clusters.</p>
+                </div>
+                <button class="btn-jenkins" onclick="triggerJob('MW_WAS_Restart')">Run Job</button>
+            </div>
+        </div>
+
+        <div class="col-md-4 tower-item" data-tower="storage">
+            <div class="automation-card">
+                <div>
+                    <span class="tower-badge">Storage</span>
+                    <h5 class="fw-bold mt-2">LUN Provisioning</h5>
+                    <p class="small text-secondary">Auto-assign storage quotas and map to initiators.</p>
+                </div>
+                <button class="btn-jenkins" onclick="triggerJob('Storage_LUN_Tool')">Run Job</button>
+            </div>
+        </div>
+
+        <div class="col-md-4 tower-item" data-tower="storage">
+            <div class="automation-card">
+                <div>
+                    <span class="tower-badge">Backup</span>
+                    <h5 class="fw-bold mt-2">NetBackup Catalog</h5>
+                    <p class="small text-secondary">Integrity check and maintenance of backup catalogs.</p>
+                </div>
+                <button class="btn-jenkins" onclick="triggerJob('Backup_Catalog')">Run Job</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function filterTower(tower) {
+        // Update Nav UI
+        document.querySelectorAll('.nav-pill').forEach(el => el.classList.remove('active'));
+        event.currentTarget.classList.add('active');
+
+        // Update Text
+        document.getElementById('current-tower-text').innerText = 
+            tower === 'all' ? "Displaying all Jenkins automations" : `Displaying ${tower.charAt(0).toUpperCase() + tower.slice(1)} automations`;
+
+        // Filter Grid
+        const items = document.querySelectorAll('.tower-item');
+        items.forEach(item => {
+            if (tower === 'all' || item.getAttribute('data-tower') === tower) {
+                item.style.display = 'block';
+            } else {
+                item.style.display = 'none';
+            }
+        });
+    }
+
+    function triggerJob(jobName) {
+        alert(`Requesting Jenkins to start: ${jobName}`);
+        // Here you would typically use fetch() to call the Jenkins API
+    }
+</script>
+
+</body>
+</html>

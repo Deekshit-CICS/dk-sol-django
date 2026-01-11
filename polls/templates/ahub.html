@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> Toolkit | Enterprise Automation Hub</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.9);
+            --blue: #007aff;
+            --text-main: #1d1d1f;
+            --text-sec: #86868b;
+        }
+
+        body { 
+            background-color: var(--apple-bg); 
+            color: var(--text-main); 
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+            overflow-x: hidden;
+        }
+
+        /* --- Sidebar --- */
+        .sidebar {
+            background: var(--glass);
+            backdrop-filter: blur(30px) saturate(180%);
+            border-right: 1px solid var(--glass-border);
+            height: 100vh;
+            position: fixed;
+            width: 280px;
+            padding: 32px 20px;
+            z-index: 1000;
+        }
+
+        .nav-pill {
+            padding: 12px 16px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: 0.2s all;
+            color: var(--text-main);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .nav-pill i { margin-right: 15px; font-size: 1.2rem; }
+        .nav-pill:hover { background: rgba(0,0,0,0.04); }
+        .nav-pill.active { background: var(--blue); color: white; box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3); }
+
+        /* --- Main Content --- */
+        .main-content { margin-left: 280px; padding: 40px; min-height: 100vh; }
+
+        .header-section { margin-bottom: 40px; }
+        
+        /* --- Automation Cards --- */
+        .automation-card {
+            background: white;
+            border-radius: 20px;
+            border: 1px solid rgba(0,0,0,0.05);
+            padding: 24px;
+            transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .automation-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.06);
+        }
+
+        .tower-badge {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: rgba(0, 122, 255, 0.1);
+            color: var(--blue);
+            display: inline-block;
+            margin-bottom: 12px;
+        }
+
+        .btn-run {
+            background: #f2f2f7;
+            border: none;
+            color: var(--blue);
+            font-weight: 600;
+            border-radius: 10px;
+            padding: 10px;
+            width: 100%;
+            transition: 0.2s;
+        }
+        .btn-run:hover { background: var(--blue); color: white; }
+
+        /* --- Parameter Modal (The "Sheet") --- */
+        .modal-content {
+            border-radius: 24px;
+            border: none;
+            background: rgba(255,255,255,0.85);
+            backdrop-filter: blur(25px);
+        }
+        .form-control-apple {
+            background: rgba(0,0,0,0.05);
+            border: 1px solid transparent;
+            border-radius: 12px;
+            padding: 12px;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .form-control-apple:focus {
+            background: white; border-color: var(--blue); outline: none; box-shadow: 0 0 0 4px rgba(0,122,255,0.1);
+        }
+
+        /* --- Console Bar --- */
+        .console-fixed {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            left: 300px;
+            background: #1d1d1f;
+            color: #34c759;
+            font-family: 'SF Mono', monospace;
+            font-size: 0.75rem;
+            padding: 15px 20px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+
+<nav class="sidebar">
+    <div class="mb-5 px-2 text-center text-md-start">
+        <h3 class="fw-bold mb-0">Toolkit</h3>
+        <p class="text-secondary small">Global Ops Center</p>
+    </div>
+
+    <div class="nav-pill active" onclick="filterTower('all', this)"><i class="bi bi-grid-fill"></i> All Automations</div>
+    <div class="nav-pill" onclick="filterTower('unix', this)"><i class="bi bi-terminal"></i> Unix</div>
+    <div class="nav-pill" onclick="filterTower('windows', this)"><i class="bi bi-microsoft"></i> Windows</div>
+    <div class="nav-pill" onclick="filterTower('middleware', this)"><i class="bi bi-layers"></i> Middleware</div>
+    <div class="nav-pill" onclick="filterTower('storage', this)"><i class="bi bi-database"></i> Storage & Backup</div>
+    
+    <hr class="my-4 opacity-10">
+    <div class="nav-pill text-danger"><i class="bi bi-power"></i> Logout</div>
+</nav>
+
+<main class="main-content">
+    <header class="header-section d-flex justify-content-between align-items-end">
+        <div>
+            <h1 class="fw-bold tracking-tight">Automation Hub</h1>
+            <p class="text-secondary mb-0" id="filter-status">Centralized Jenkins control for all infrastructure towers.</p>
+        </div>
+        <div class="text-end d-none d-md-block">
+            <span class="badge bg-success bg-opacity-10 text-success p-2 px-3 rounded-pill">
+                <i class="bi bi-check-circle-fill me-1"></i> Jenkins Online
+            </span>
+        </div>
+    </header>
+
+    <div class="row g-4" id="automation-grid">
+        <div class="col-xl-3 col-lg-4 col-md-6 tower-item" data-tower="unix">
+            <div class="automation-card">
+                <div>
+                    <span class="tower-badge">Unix</span>
+                    <h5 class="fw-bold">User Provisioning</h5>
+                    <p class="small text-secondary">Automated LDAP/Local user creation with sudoers config.</p>
+                </div>
+                <button class="btn-run" onclick="initiateJob('Unix_User_Prov')">Configure & Run</button>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-lg-4 col-md-6 tower-item" data-tower="windows">
+            <div class="automation-card">
+                <div>
+                    <span class="tower-badge">Windows</span>
+                    <h5 class="fw-bold">Patch Compliance</h5>
+                    <p class="small text-secondary">Scan and apply pending KBs to specific clusters.</p>
+                </div>
+                <button class="btn-run" onclick="initiateJob('Win_Patching')">Configure & Run</button>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-lg-4 col-md-6 tower-item" data-tower="middleware">
+            <div class="automation-card">
+                <div>
+                    <span class="tower-badge">Middleware</span>
+                    <h5 class="fw-bold">JVM Restart</h5>
+                    <p class="small text-secondary">Rolling restart of WebSphere/Tomcat instances.</p>
+                </div>
+                <button class="btn-run" onclick="initiateJob('MW_JVM_Restart')">Configure & Run</button>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-lg-4 col-md-6 tower-item" data-tower="storage">
+            <div class="automation-card">
+                <div>
+                    <span class="tower-badge">Storage</span>
+                    <h5 class="fw-bold">Snapshot Cleanup</h5>
+                    <p class="small text-secondary">Identify and purge aged snapshots on NetApp/Pure.</p>
+                </div>
+                <button class="btn-run" onclick="initiateJob('Storage_Cleanup')">Run Quick Job</button>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div class="modal fade" id="paramSheet" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="fw-bold pt-2" id="modalTitle">Job Configuration</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div id="dynamicFields"></div>
+                <button class="btn-run bg-primary text-white mt-2" onclick="submitBuild()">Launch Automation</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="console-fixed" id="status-console">
+    <span><i class="bi bi-terminal me-2"></i> Ready for operations...</span>
+    <span class="text-secondary" id="last-action">Idle</span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // Job Parameter Definitions
+    const configRegistry = {
+        'Unix_User_Prov': [
+            { id: 'uid', label: 'Employee ID', type: 'text' },
+            { id: 'env', label: 'Target Environment', type: 'select', options: ['Prod', 'UAT', 'Dev'] },
+            { id: 'sudo', label: 'Elevated Privileges', type: 'switch' }
+        ],
+        'Win_Patching': [
+            { id: 'cluster', label: 'Cluster Name', type: 'text' },
+            { id: 'reboot', label: 'Auto-Reboot', type: 'switch' }
+        ],
+        'MW_JVM_Restart': [
+            { id: 'app', label: 'Application Name', type: 'select', options: ['Portal-API', 'Payment-GW', 'Auth-Svc'] },
+            { id: 'delay', label: 'Interval (seconds)', type: 'text' }
+        ]
+    };
+
+    let activeJob = "";
+
+    function filterTower(tower, el) {
+        document.querySelectorAll('.nav-pill').forEach(nav => nav.classList.remove('active'));
+        el.classList.add('active');
+        
+        document.getElementById('filter-status').innerText = tower === 'all' ? 
+            "Centralized Jenkins control for all infrastructure towers." : 
+            `Showing ${tower.toUpperCase()} specific automations.`;
+
+        document.querySelectorAll('.tower-item').forEach(item => {
+            item.style.display = (tower === 'all' || item.dataset.tower === tower) ? 'block' : 'none';
+        });
+    }
+
+    function initiateJob(jobId) {
+        activeJob = jobId;
+        const config = configRegistry[jobId];
+        
+        if(config) {
+            const container = document.getElementById('dynamicFields');
+            container.innerHTML = "";
+            document.getElementById('modalTitle').innerText = jobId;
+
+            config.forEach(field => {
+                let html = `<label class="small fw-bold text-secondary mb-1">${field.label}</label>`;
+                if(field.type === 'text') {
+                    html += `<input type="text" id="in-${field.id}" class="form-control-apple" placeholder="Enter value...">`;
+                } else if(field.type === 'select') {
+                    html += `<select id="in-${field.id}" class="form-control-apple">` + 
+                            field.options.map(o => `<option>${o}</option>`).join('') + `</select>`;
+                } else if(field.type === 'switch') {
+                    html = `<div class="form-check form-switch mb-4">
+                                <input class="form-check-input" type="checkbox" id="in-${field.id}">
+                                <label class="form-check-label small fw-bold text-secondary ms-2">${field.label}</label>
+                            </div>`;
+                }
+                container.innerHTML += html;
+            });
+
+            new bootstrap.Modal(document.getElementById('paramSheet')).show();
+        } else {
+            updateConsole(`Triggering ${jobId} (No params required)...`);
+        }
+    }
+
+    function submitBuild() {
+        updateConsole(`Building ${activeJob} with custom parameters...`);
+        bootstrap.Modal.getInstance(document.getElementById('paramSheet')).hide();
+        
+        setTimeout(() => {
+            updateConsole(`Success: Build #412 started for ${activeJob}.`, "SUCCESS");
+        }, 1500);
+    }
+
+    function updateConsole(msg, type="INFO") {
+        const consoleEl = document.getElementById('status-console');
+        const lastAction = document.getElementById('last-action');
+        consoleEl.querySelector('span:first-child').innerHTML = `<i class="bi bi-terminal me-2"></i> ${msg}`;
+        lastAction.innerText = new Date().toLocaleTimeString();
+        
+        if(type === "SUCCESS") {
+            consoleEl.style.background = "#000";
+            setTimeout(() => consoleEl.style.background = "#1d1d1f", 2000);
+        }
+    }
+</script>
+</body>
+</html>

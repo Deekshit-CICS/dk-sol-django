@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brocade Port Auditor - Auto Resolver</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.8);
+            --glass-border: rgba(255, 255, 255, 0.9);
+            --blue: #007aff;
+            --green: #34c759;
+            --red: #ff3b30;
+            --text-main: #1d1d1f;
+            --text-sec: #86868b;
+        }
+
+        body { background-color: var(--apple-bg); color: var(--text-main); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; padding: 40px 0; }
+        .dashboard-container { max-width: 1200px; margin: auto; position: relative; }
+
+        /* Resolver Controls */
+        .btn-start { background: var(--blue); color: white; border: none; border-radius: 12px; padding: 10px 24px; font-weight: 600; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-start:disabled { background: #b0b0b7; cursor: not-allowed; }
+        .btn-stop { background: #fff; color: var(--red); border: 1px solid rgba(255, 59, 48, 0.2); border-radius: 12px; padding: 10px 24px; font-weight: 600; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+
+        /* Loading Bar Styles */
+        #resolver-progress-container { height: 6px; width: 100%; background: rgba(0,0,0,0.05); border-radius: 10px; margin-bottom: 15px; overflow: hidden; display: none; }
+        #resolver-progress-bar { height: 100%; width: 0%; background: var(--blue); transition: width 0.4s ease; }
+
+        /* Layout UI */
+        .apple-card { background: var(--glass); backdrop-filter: blur(20px) saturate(180%); border-radius: 20px; border: 1px solid var(--glass-border); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.04); margin-bottom: 24px; z-index: 2; position: relative; }
+        .apple-table tr { vertical-align: middle; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.03); }
+        .apple-table tr.selected { background: rgba(0, 122, 255, 0.05) !important; }
+
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { fill: none; stroke: var(--blue); stroke-width: 2; stroke-dasharray: 6; opacity: 0.2; }
+
+        .active-pulse { background: var(--green); animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.7); } 70% { box-shadow: 0 0 0 8px rgba(52, 199, 89, 0); } 100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0); } }
+        .live-indicator { width: 10px; height: 10px; background: #86868b; border-radius: 50%; display: inline-block; margin-right: 8px; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container" id="main-canvas">
+    <svg id="flow-canvas"><path id="line1" class="connector"/><path id="line2" class="connector"/><path id="line3" class="connector"/></svg>
+
+    <header class="d-flex justify-content-between align-items-center mb-5 px-4">
+        <div>
+            <h1 class="h3 fw-bold mb-0">Port Auto-Resolver</h1>
+            <p class="text-secondary small mb-0">
+                <span class="live-indicator" id="status-dot"></span>
+                <span id="status-text">Resolver Idle</span>
+            </p>
+        </div>
+        <div class="d-flex gap-3">
+            <button class="btn-start" id="startBtn" onclick="runResolverAPI()">
+                <i class="bi bi-play-fill"></i> Start Resolver
+            </button>
+            <button class="btn-stop" id="stopBtn" onclick="stopResolver()">
+                <i class="bi bi-stop-fill"></i> Stop Resolver
+            </button>
+        </div>
+    </header>
+
+    <section class="px-4 mb-5">
+        <div id="resolver-progress-container">
+            <div id="resolver-progress-bar"></div>
+        </div>
+
+        <div class="apple-card overflow-hidden">
+            <table class="table apple-table mb-0" id="incident-table">
+                <thead>
+                    <tr class="text-secondary small text-uppercase" style="font-size: 0.7rem; letter-spacing: 0.5px;">
+                        <th class="ps-4">Incident</th>
+                        <th>Switch Name</th>
+                        <th>Port</th>
+                        <th>Status</th>
+                        <th class="text-end pe-4">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="table-body">
+                    <tr class="selected" onclick="updateView(this, 'INC-8821', 'BRCD-NY-01', 'FC 1/4', 'Online', 'Health check passed.')">
+                        <td class="ps-4 fw-bold text-primary">INC-8821</td>
+                        <td><code>BRCD-NY-01</code></td>
+                        <td>Port 04</td>
+                        <td><span class="badge bg-success bg-opacity-10 text-success">Active</span></td>
+                        <td class="text-end pe-4"><button class="btn-resolve" style="background: var(--green); color: white; border:none; border-radius: 20px; padding: 4px 12px;"><i class="bi bi-check2"></i></button></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="row g-4 px-4 mb-4">
+        <div class="col-md-3"><div id="node-inc" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">INCIDENT</div><h5 class="fw-bold mb-0" id="flow-inc">---</h5></div></div>
+        <div class="col-md-3"><div id="node-sw" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">SWITCH</div><h5 class="fw-bold mb-0" id="flow-sw">---</h5></div></div>
+        <div class="col-md-3"><div id="node-port" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">PORT</div><h5 class="fw-bold mb-0" id="flow-port">---</h5></div></div>
+        <div class="col-md-3"><div id="node-health" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">HEALTH</div><h5 class="fw-bold mb-0" id="flow-health">---</h5></div></div>
+    </section>
+</div>
+
+<script>
+    let abortController; // To allow stopping the fetch request
+
+    async function runResolverAPI() {
+        const progressBarContainer = document.getElementById('resolver-progress-container');
+        const progressBar = document.getElementById('resolver-progress-bar');
+        const startBtn = document.getElementById('startBtn');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+
+        // UI Setup for "Running" State
+        startBtn.disabled = true;
+        progressBarContainer.style.display = 'block';
+        progressBar.style.width = '30%'; // Initial simulated jump
+        statusDot.classList.add('active-pulse');
+        statusText.innerText = "Resolver Active - Fetching Brocade Data...";
+
+        abortController = new AbortController();
+
+        try {
+            // REPLACE THIS URL with your actual Django endpoint
+            // const response = await fetch('/api/resolve-incidents/', { signal: abortController.signal });
+            // const data = await response.json();
+
+            // Simulating API latency for demonstration
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            progressBar.style.width = '100%';
+
+            // Logic to update table would go here:
+            // updateTableContent(data);
+
+            setTimeout(() => {
+                progressBarContainer.style.display = 'none';
+                progressBar.style.width = '0%';
+                startBtn.disabled = false;
+                alert("Audit data refreshed successfully via Django API.");
+            }, 500);
+
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log('Fetch aborted');
+            } else {
+                console.error('API Error:', error);
+                statusText.innerText = "Error fetching data";
+            }
+        }
+    }
+
+    function stopResolver() {
+        if (abortController) {
+            abortController.abort();
+        }
+        const startBtn = document.getElementById('startBtn');
+        const progressBarContainer = document.getElementById('resolver-progress-container');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+
+        startBtn.disabled = false;
+        progressBarContainer.style.display = 'none';
+        statusDot.classList.remove('active-pulse');
+        statusText.innerText = "Resolver Idle";
+    }
+
+    // Function to handle workflow lines and view updates
+    function updateView(row, inc, sw, port, health, log) {
+        document.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+        row.classList.add('selected');
+        document.getElementById('flow-inc').innerText = inc;
+        document.getElementById('flow-sw').innerText = sw;
+        document.getElementById('flow-port').innerText = port;
+        document.getElementById('flow-health').innerText = health;
+        drawLines();
+    }
+
+    function drawLines() {
+        const container = document.getElementById('main-canvas').getBoundingClientRect();
+        const getCoord = (id) => {
+            const el = document.getElementById(id);
+            if(!el) return {x:0, y:0};
+            const r = el.getBoundingClientRect();
+            return { x: r.left - container.left + (r.width / 2), y: r.top - container.top + (r.height / 2), right: r.right - container.left, left: r.left - container.left };
+        };
+        const n1 = getCoord('node-inc');
+        const n2 = getCoord('node-sw');
+        const n3 = getCoord('node-port');
+        const n4 = getCoord('node-health');
+        document.getElementById('line1').setAttribute('d', `M ${n1.right} ${n1.y} L ${n2.left} ${n2.y}`);
+        document.getElementById('line2').setAttribute('d', `M ${n2.right} ${n2.y} L ${n3.left} ${n3.y}`);
+        document.getElementById('line3').setAttribute('d', `M ${n3.right} ${n3.y} L ${n4.left} ${n4.y}`);
+    }
+
+    window.addEventListener('load', drawLines);
+    window.addEventListener('resize', drawLines);
+</script>
+</body>
+</html>
