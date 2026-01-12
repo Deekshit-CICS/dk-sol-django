@@ -23,7 +23,6 @@
             padding-bottom: 50px;
         }
 
-        /* Sidebar Navigation */
         .sidebar {
             background: var(--glass);
             backdrop-filter: blur(20px);
@@ -49,16 +48,8 @@
         .nav-pill:hover { background: rgba(0,0,0,0.05); }
         .nav-pill.active { background: var(--blue); color: white; }
 
-        /* Main Content */
         .main-content { margin-left: 260px; padding: 40px; }
 
-        .section-header {
-            margin-bottom: 24px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid rgba(0,0,0,0.05);
-        }
-
-        /* Automation Cards */
         .automation-card {
             background: #ffffff;
             border-radius: 16px;
@@ -121,7 +112,8 @@
     <div class="nav-pill" onclick="filterTower('unix', event)"><i class="bi bi-terminal"></i> Unix</div>
     <div class="nav-pill" onclick="filterTower('windows', event)"><i class="bi bi-microsoft"></i> Windows</div>
     <div class="nav-pill" onclick="filterTower('middleware', event)"><i class="bi bi-layers"></i> Middleware</div>
-    <div class="nav-pill" onclick="filterTower('storage', event)"><i class="bi bi-database"></i> Storage</div>
+    <div class="nav-pill" onclick="filterTower('database', event)"><i class="bi bi-stack"></i> Database</div>
+    <div class="nav-pill" onclick="filterTower('storage', event)"><i class="bi bi-hdd-stack"></i> Storage</div>
     <div class="nav-pill" onclick="filterTower('backup', event)"><i class="bi bi-shield-check"></i> Backup</div>
 </div>
 
@@ -140,66 +132,42 @@
     <div class="row g-4" id="automation-grid">
         <div class="col-md-4 tower-item" data-tower="unix">
             <div class="automation-card">
-                <div>
-                    <span class="tower-badge">Unix</span>
-                    <h5 class="fw-bold mt-2">User Provisioning</h5>
-                    <p class="small text-secondary">Automated LDAP/Local user creation & sudoers config.</p>
-                </div>
+                <div><span class="tower-badge">Unix</span><h5 class="fw-bold mt-2">User Provisioning</h5><p class="small text-secondary">LDAP/Local user creation.</p></div>
                 <button class="btn-jenkins" onclick="triggerJob('Unix_User_Prov')">Run Job</button>
-            </div>
-        </div>
-
-        <div class="col-md-4 tower-item" data-tower="unix">
-            <div class="automation-card">
-                <div>
-                    <span class="tower-badge">Unix</span>
-                    <h5 class="fw-bold mt-2">Patching Compliance</h5>
-                    <p class="small text-secondary">YUM/APT security updates and kernel reboot cycle.</p>
-                </div>
-                <button class="btn-jenkins" onclick="triggerJob('Unix_Patching')">Run Job</button>
             </div>
         </div>
 
         <div class="col-md-4 tower-item" data-tower="windows">
             <div class="automation-card">
-                <div>
-                    <span class="tower-badge">Windows</span>
-                    <h5 class="fw-bold mt-2">AD Health Check</h5>
-                    <p class="small text-secondary">PowerShell script to verify replication and DNS health.</p>
-                </div>
+                <div><span class="tower-badge">Windows</span><h5 class="fw-bold mt-2">AD Health Check</h5><p class="small text-secondary">PowerShell AD verification.</p></div>
                 <button class="btn-jenkins" onclick="triggerJob('Win_AD_Check')">Run Job</button>
             </div>
         </div>
 
         <div class="col-md-4 tower-item" data-tower="middleware">
             <div class="automation-card">
-                <div>
-                    <span class="tower-badge">Middleware</span>
-                    <h5 class="fw-bold mt-2">WebSphere Restart</h5>
-                    <p class="small text-secondary">Graceful restart of JVM instances across clusters.</p>
-                </div>
+                <div><span class="tower-badge">Middleware</span><h5 class="fw-bold mt-2">WebSphere Restart</h5><p class="small text-secondary">Graceful JVM restarts.</p></div>
                 <button class="btn-jenkins" onclick="triggerJob('MW_WAS_Restart')">Run Job</button>
+            </div>
+        </div>
+
+        <div class="col-md-4 tower-item" data-tower="database">
+            <div class="automation-card">
+                <div><span class="tower-badge">Database</span><h5 class="fw-bold mt-2">Oracle Tablespace</h5><p class="small text-secondary">Monitor and extend data files automatically.</p></div>
+                <button class="btn-jenkins" onclick="triggerJob('DB_Oracle_Extend')">Run Job</button>
             </div>
         </div>
 
         <div class="col-md-4 tower-item" data-tower="storage">
             <div class="automation-card">
-                <div>
-                    <span class="tower-badge">Storage</span>
-                    <h5 class="fw-bold mt-2">LUN Provisioning</h5>
-                    <p class="small text-secondary">Auto-assign storage quotas and map to initiators.</p>
-                </div>
+                <div><span class="tower-badge">Storage</span><h5 class="fw-bold mt-2">LUN Provisioning</h5><p class="small text-secondary">Auto-assign storage quotas.</p></div>
                 <button class="btn-jenkins" onclick="triggerJob('Storage_LUN_Tool')">Run Job</button>
             </div>
         </div>
 
         <div class="col-md-4 tower-item" data-tower="backup">
             <div class="automation-card">
-                <div>
-                    <span class="tower-badge">Backup</span>
-                    <h5 class="fw-bold mt-2">NetBackup Catalog</h5>
-                    <p class="small text-secondary">Integrity check and maintenance of backup catalogs.</p>
-                </div>
+                <div><span class="tower-badge">Backup</span><h5 class="fw-bold mt-2">NetBackup Catalog</h5><p class="small text-secondary">Integrity check and maintenance.</p></div>
                 <button class="btn-jenkins" onclick="triggerJob('Backup_Catalog')">Run Job</button>
             </div>
         </div>
@@ -208,25 +176,15 @@
 
 <script>
     function filterTower(tower, event) {
-        // Update Nav UI
         document.querySelectorAll('.nav-pill').forEach(el => el.classList.remove('active'));
-        if(event) {
-            event.currentTarget.classList.add('active');
-        }
+        if(event) event.currentTarget.classList.add('active');
 
-        // Update Header Text
         const title = tower.charAt(0).toUpperCase() + tower.slice(1);
         document.getElementById('current-tower-text').innerText = 
             tower === 'all' ? "Displaying all Jenkins automations" : `Displaying ${title} automations`;
 
-        // Filter Grid
-        const items = document.querySelectorAll('.tower-item');
-        items.forEach(item => {
-            if (tower === 'all' || item.getAttribute('data-tower') === tower) {
-                item.style.display = 'block';
-            } else {
-                item.style.display = 'none';
-            }
+        document.querySelectorAll('.tower-item').forEach(item => {
+            item.style.display = (tower === 'all' || item.getAttribute('data-tower') === tower) ? 'block' : 'none';
         });
     }
 
