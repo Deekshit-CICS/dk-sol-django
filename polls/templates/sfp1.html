@@ -23,24 +23,23 @@
 
         /* Resolver Controls */
         .btn-start { background: var(--blue); color: white; border: none; border-radius: 12px; padding: 10px 24px; font-weight: 600; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
-        .btn-start:disabled { background: #b0b0b7; cursor: not-allowed; }
         .btn-stop { background: #fff; color: var(--red); border: 1px solid rgba(255, 59, 48, 0.2); border-radius: 12px; padding: 10px 24px; font-weight: 600; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
 
-        /* Loading Bar Styles */
-        #resolver-progress-container { height: 6px; width: 100%; background: rgba(0,0,0,0.05); border-radius: 10px; margin-bottom: 15px; overflow: hidden; display: none; }
-        #resolver-progress-bar { height: 100%; width: 0%; background: var(--blue); transition: width 0.4s ease; }
+        /* Loading Bar */
+        #progress-container { height: 6px; background: rgba(0,0,0,0.05); border-radius: 10px; margin-bottom: 20px; overflow: hidden; display: none; }
+        #progress-bar { height: 100%; width: 0%; background: var(--blue); transition: width 0.4s ease; }
 
         /* Layout UI */
-        .apple-card { background: var(--glass); backdrop-filter: blur(20px) saturate(180%); border-radius: 20px; border: 1px solid var(--glass-border); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.04); margin-bottom: 24px; z-index: 2; position: relative; }
+        .apple-card { background: var(--glass); backdrop-filter: blur(20px) saturate(180%); border-radius: 20px; border: 1px solid var(--glass-border); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.04); margin-bottom: 24px; z-index: 2; }
         .apple-table tr { vertical-align: middle; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.03); }
         .apple-table tr.selected { background: rgba(0, 122, 255, 0.05) !important; }
-
+        
         #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
         .connector { fill: none; stroke: var(--blue); stroke-width: 2; stroke-dasharray: 6; opacity: 0.2; }
 
+        .live-indicator { width: 10px; height: 10px; background: #86868b; border-radius: 50%; display: inline-block; margin-right: 8px; }
         .active-pulse { background: var(--green); animation: pulse 1.5s infinite; }
         @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.7); } 70% { box-shadow: 0 0 0 8px rgba(52, 199, 89, 0); } 100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0); } }
-        .live-indicator { width: 10px; height: 10px; background: #86868b; border-radius: 50%; display: inline-block; margin-right: 8px; }
     </style>
 </head>
 <body>
@@ -57,117 +56,123 @@
             </p>
         </div>
         <div class="d-flex gap-3">
-            <button class="btn-start" id="startBtn" onclick="runResolverAPI()">
+            <button class="btn-start" id="start-btn" onclick="startResolver()">
                 <i class="bi bi-play-fill"></i> Start Resolver
             </button>
-            <button class="btn-stop" id="stopBtn" onclick="stopResolver()">
+            <button class="btn-stop" onclick="stopResolver()">
                 <i class="bi bi-stop-fill"></i> Stop Resolver
             </button>
         </div>
     </header>
 
-    <section class="px-4 mb-5">
-        <div id="resolver-progress-container">
-            <div id="resolver-progress-bar"></div>
+    <section class="px-4">
+        <div id="progress-container">
+            <div id="progress-bar"></div>
         </div>
 
         <div class="apple-card overflow-hidden">
-            <table class="table apple-table mb-0" id="incident-table">
+            <table class="table apple-table mb-0">
                 <thead>
                     <tr class="text-secondary small text-uppercase" style="font-size: 0.7rem; letter-spacing: 0.5px;">
                         <th class="ps-4">Incident</th>
                         <th>Switch Name</th>
                         <th>Port</th>
+                        <th>RX Value</th>
                         <th>Status</th>
                         <th class="text-end pe-4">Action</th>
                     </tr>
                 </thead>
                 <tbody id="table-body">
-                    <tr class="selected" onclick="updateView(this, 'INC-8821', 'BRCD-NY-01', 'FC 1/4', 'Online', 'Health check passed.')">
+                    <tr class="selected" onclick="updateView(this, 'INC-8821', 'BRCD-NY-01', 'FC 1/4', '-3.2 dBm', 'Online', 'Health check passed.')">
                         <td class="ps-4 fw-bold text-primary">INC-8821</td>
                         <td><code>BRCD-NY-01</code></td>
                         <td>Port 04</td>
+                        <td class="fw-medium text-dark">-3.2 dBm</td>
                         <td><span class="badge bg-success bg-opacity-10 text-success">Active</span></td>
-                        <td class="text-end pe-4"><button class="btn-resolve" style="background: var(--green); color: white; border:none; border-radius: 20px; padding: 4px 12px;"><i class="bi bi-check2"></i></button></td>
+                        <td class="text-end pe-4"><button class="btn-resolve" style="background:var(--green); color:white; border:none; border-radius:20px; padding:4px 12px;"><i class="bi bi-check2"></i></button></td>
+                    </tr>
+                    <tr onclick="updateView(this, 'INC-9042', 'BRCD-LON-05', 'FC 2/12', '-18.5 dBm', 'Offline', 'Low light detected.')">
+                        <td class="ps-4 fw-bold text-primary">INC-9042</td>
+                        <td><code>BRCD-LON-05</code></td>
+                        <td>Port 12</td>
+                        <td class="fw-medium text-danger">-18.5 dBm</td>
+                        <td><span class="badge bg-danger bg-opacity-10 text-danger">Fault</span></td>
+                        <td class="text-end pe-4"><button class="btn-resolve" style="background:var(--green); color:white; border:none; border-radius:20px; padding:4px 12px;"><i class="bi bi-check2"></i></button></td>
                     </tr>
                 </tbody>
             </table>
         </div>
     </section>
 
-    <section class="row g-4 px-4 mb-4">
-        <div class="col-md-3"><div id="node-inc" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">INCIDENT</div><h5 class="fw-bold mb-0" id="flow-inc">---</h5></div></div>
-        <div class="col-md-3"><div id="node-sw" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">SWITCH</div><h5 class="fw-bold mb-0" id="flow-sw">---</h5></div></div>
-        <div class="col-md-3"><div id="node-port" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">PORT</div><h5 class="fw-bold mb-0" id="flow-port">---</h5></div></div>
-        <div class="col-md-3"><div id="node-health" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">HEALTH</div><h5 class="fw-bold mb-0" id="flow-health">---</h5></div></div>
+    <section class="row g-4 px-4 mb-4 mt-2">
+        <div class="col-md-3"><div id="node-inc" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">INCIDENT</div><h5 class="fw-bold mb-0" id="flow-inc">INC-8821</h5></div></div>
+        <div class="col-md-3"><div id="node-sw" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">SWITCH</div><h5 class="fw-bold mb-0" id="flow-sw">BRCD-NY-01</h5></div></div>
+        <div class="col-md-3"><div id="node-port" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">PORT</div><h5 class="fw-bold mb-0" id="flow-port">FC 1/4</h5></div></div>
+        <div class="col-md-3"><div id="node-health" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">PORT HEALTH</div><h5 class="fw-bold mb-0" id="flow-health">Online</h5></div></div>
     </section>
 </div>
 
 <script>
-    let abortController; // To allow stopping the fetch request
+    let abortController;
 
-    async function runResolverAPI() {
-        const progressBarContainer = document.getElementById('resolver-progress-container');
-        const progressBar = document.getElementById('resolver-progress-bar');
-        const startBtn = document.getElementById('startBtn');
-        const statusDot = document.getElementById('status-dot');
-        const statusText = document.getElementById('status-text');
-
-        // UI Setup for "Running" State
-        startBtn.disabled = true;
-        progressBarContainer.style.display = 'block';
-        progressBar.style.width = '30%'; // Initial simulated jump
-        statusDot.classList.add('active-pulse');
-        statusText.innerText = "Resolver Active - Fetching Brocade Data...";
+    async function startResolver() {
+        const bar = document.getElementById('progress-bar');
+        const container = document.getElementById('progress-container');
+        const btn = document.getElementById('start-btn');
+        
+        // UI Reset
+        container.style.display = 'block';
+        bar.style.width = '0%';
+        btn.disabled = true;
+        toggleStatusUI(true);
 
         abortController = new AbortController();
 
         try {
-            // REPLACE THIS URL with your actual Django endpoint
-            // const response = await fetch('/api/resolve-incidents/', { signal: abortController.signal });
+            // Simulated Progress step 1
+            setTimeout(() => bar.style.width = '40%', 100);
+
+            // Trigger Django API
+            // const response = await fetch('/your-django-api-endpoint/', { signal: abortController.signal });
             // const data = await response.json();
-
-            // Simulating API latency for demonstration
+            
+            // Simulating API Latency
             await new Promise(resolve => setTimeout(resolve, 2000));
-            progressBar.style.width = '100%';
-
-            // Logic to update table would go here:
-            // updateTableContent(data);
-
+            
+            bar.style.width = '100%';
             setTimeout(() => {
-                progressBarContainer.style.display = 'none';
-                progressBar.style.width = '0%';
-                startBtn.disabled = false;
-                alert("Audit data refreshed successfully via Django API.");
+                container.style.display = 'none';
+                btn.disabled = false;
             }, 500);
 
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                console.log('Fetch aborted');
-            } else {
-                console.error('API Error:', error);
-                statusText.innerText = "Error fetching data";
-            }
+        } catch (err) {
+            console.error("Resolver error:", err);
+            stopResolver();
         }
     }
 
     function stopResolver() {
-        if (abortController) {
-            abortController.abort();
-        }
-        const startBtn = document.getElementById('startBtn');
-        const progressBarContainer = document.getElementById('resolver-progress-container');
-        const statusDot = document.getElementById('status-dot');
-        const statusText = document.getElementById('status-text');
-
-        startBtn.disabled = false;
-        progressBarContainer.style.display = 'none';
-        statusDot.classList.remove('active-pulse');
-        statusText.innerText = "Resolver Idle";
+        if(abortController) abortController.abort();
+        document.getElementById('progress-container').style.display = 'none';
+        document.getElementById('start-btn').disabled = false;
+        toggleStatusUI(false);
     }
 
-    // Function to handle workflow lines and view updates
-    function updateView(row, inc, sw, port, health, log) {
+    function toggleStatusUI(isActive) {
+        const dot = document.getElementById('status-dot');
+        const text = document.getElementById('status-text');
+        if(isActive) {
+            dot.classList.add('active-pulse');
+            text.innerText = "Resolver Active - Scanning Brocade Fabric...";
+            text.style.color = "var(--green)";
+        } else {
+            dot.classList.remove('active-pulse');
+            text.innerText = "Resolver Idle";
+            text.style.color = "var(--text-sec)";
+        }
+    }
+
+    function updateView(row, inc, sw, port, rx, health, log) {
         document.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
         row.classList.add('selected');
         document.getElementById('flow-inc').innerText = inc;
@@ -181,7 +186,6 @@
         const container = document.getElementById('main-canvas').getBoundingClientRect();
         const getCoord = (id) => {
             const el = document.getElementById(id);
-            if(!el) return {x:0, y:0};
             const r = el.getBoundingClientRect();
             return { x: r.left - container.left + (r.width / 2), y: r.top - container.top + (r.height / 2), right: r.right - container.left, left: r.left - container.left };
         };
