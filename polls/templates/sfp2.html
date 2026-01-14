@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brocade Port Auditor - Auto Resolver</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.8);
+            --glass-border: rgba(255, 255, 255, 0.9);
+            --blue: #007aff;
+            --green: #34c759;
+            --red: #ff3b30;
+            --text-main: #1d1d1f;
+            --text-sec: #86868b;
+        }
+
+        body { background-color: var(--apple-bg); color: var(--text-main); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; padding: 40px 0; }
+        .dashboard-container { max-width: 1200px; margin: auto; position: relative; }
+
+        /* Resolver Controls */
+        .btn-start { background: var(--blue); color: white; border: none; border-radius: 12px; padding: 10px 24px; font-weight: 600; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-stop { background: #fff; color: var(--red); border: 1px solid rgba(255, 59, 48, 0.2); border-radius: 12px; padding: 10px 24px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-resolve { background: linear-gradient(180deg, #34d058 0%, #28a745 100%); color: white; border: none; padding: 8px 18px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s; }
+
+        /* Apple Cards & Tables */
+        .apple-card { background: var(--glass); backdrop-filter: blur(20px) saturate(180%); border-radius: 20px; border: 1px solid var(--glass-border); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.04); margin-bottom: 24px; z-index: 2; }
+        .apple-table tr { vertical-align: middle; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.03); }
+        .apple-table tr.selected { background: rgba(0, 122, 255, 0.05) !important; }
+
+        /* Detail Logic Styling */
+        .detail-list { list-style: none; padding: 0; margin: 0; text-align: left; }
+        .detail-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,0.05); font-size: 0.85rem; }
+        .detail-item:last-child { border-bottom: none; }
+        .val-pass { color: var(--green); }
+        .val-fail { color: var(--red); }
+
+        /* Connector Canvas */
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { fill: none; stroke: var(--blue); stroke-width: 2; stroke-dasharray: 6; opacity: 0.2; }
+        .live-indicator { width: 10px; height: 10px; background: #86868b; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        .active-pulse { background: var(--green); animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.7); } 70% { box-shadow: 0 0 0 8px rgba(52, 199, 89, 0); } 100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0); } }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container" id="main-canvas">
+    <svg id="flow-canvas"><path id="line1" class="connector"/><path id="line2" class="connector"/><path id="line3" class="connector"/></svg>
+
+    <header class="d-flex justify-content-between align-items-center mb-5 px-4">
+        <div>
+            <h1 class="h3 fw-bold mb-0">Port Auto-Resolver</h1>
+            <p class="text-secondary small mb-0">
+                <span class="live-indicator" id="status-dot"></span>
+                <span id="status-text">Resolver Idle</span>
+            </p>
+        </div>
+        <div class="d-flex gap-3">
+            <button class="btn-start" onclick="toggleResolver(true)">
+                <i class="bi bi-play-fill"></i> Start Resolver
+            </button>
+            <button class="btn-stop" onclick="toggleResolver(false)">
+                <i class="bi bi-stop-fill"></i> Stop Resolver
+            </button>
+        </div>
+    </header>
+
+    <section class="px-4 mb-5">
+        <div class="apple-card overflow-hidden">
+            <table class="table apple-table mb-0">
+                <thead>
+                    <tr class="text-secondary small text-uppercase" style="font-size: 0.7rem; letter-spacing: 0.5px;">
+                        <th class="ps-4">Incident</th>
+                        <th>Switch Name</th>
+                        <th>Port</th>
+                        <th>Status</th>
+                        <th class="text-end pe-4">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="selected" onclick="updateView(this, 'INC-8821', 'BRCD-NY-01', 'FC 1/4', 'Online', 'Health check passed. Automatically resolving incident.', 0, 0, 0, 0, 0)">
+                        <td class="ps-4 fw-bold text-primary">INC-8821</td>
+                        <td><code>BRCD-NY-01</code></td>
+                        <td>Port 04</td>
+                        <td><span class="badge bg-success bg-opacity-10 text-success">Active</span></td>
+                        <td class="text-end pe-4"><button class="btn-resolve"><i class="bi bi-check2-circle"></i> Resolve</button></td>
+                    </tr>
+                    <tr onclick="updateView(this, 'INC-9042', 'BRCD-LON-05', 'FC 2/12', 'Offline', 'Fault detected. Light level below threshold. Added comment to INC-9042.', 1, 5, 2, 8, 12)">
+                        <td class="ps-4 fw-bold text-primary">INC-9042</td>
+                        <td><code>BRCD-LON-05</code></td>
+                        <td>Port 12</td>
+                        <td><span class="badge bg-danger bg-opacity-10 text-danger">Fault</span></td>
+                        <td class="text-end pe-4"><button class="btn-resolve"><i class="bi bi-check2-circle"></i> Resolve</button></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="row g-4 px-4 mb-4">
+        <div class="col-md-3"><div id="node-inc" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">INCIDENT</div><h5 class="fw-bold mb-0" id="flow-inc">INC-8821</h5></div></div>
+        <div class="col-md-3"><div id="node-sw" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">SWITCH</div><h5 class="fw-bold mb-0" id="flow-sw">BRCD-NY-01</h5></div></div>
+        
+        <div class="col-md-3">
+            <div id="node-port" class="apple-card p-4">
+                <div class="small text-secondary fw-bold mb-3 text-center">PORT VERIFICATION</div>
+                <div class="detail-list">
+                    <div class="detail-item"><span>Port: <strong id="flow-port">FC 1/4</strong></span> <span id="tick-port"></span></div>
+                    <div class="detail-item"><span>RX Value: <strong id="val-rx">0</strong></span> <span id="tick-rx"></span></div>
+                    <div class="detail-item"><span>CRC g_rof: <strong id="val-g_rof">0</strong></span> <span id="tick-g_rof"></span></div>
+                    <div class="detail-item"><span>CRC err: <strong id="val-err">0</strong></span> <span id="tick-err"></span></div>
+                    <div class="detail-item"><span>enc-in: <strong id="val-encin">0</strong></span> <span id="tick-encin"></span></div>
+                    <div class="detail-item"><span>enc-out: <strong id="val-encout">0</strong></span> <span id="tick-encout"></span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3"><div id="node-health" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">PORT HEALTH</div><h5 class="fw-bold mb-0" id="flow-health">Online</h5></div></div>
+    </section>
+
+    <section class="px-4">
+        <div class="apple-card p-4 border-start border-4" id="action-box" style="border-color: var(--green);">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <span class="small fw-bold text-uppercase">Automation Result</span>
+                <span class="badge bg-success" id="log-status">Resolved</span>
+            </div>
+            <pre class="mb-0" id="flow-log" style="font-family: 'SF Mono', monospace; font-size: 0.9rem; white-space: pre-wrap;">Health check passed. Automatically resolving incident.</pre>
+        </div>
+    </section>
+</div>
+
+<script>
+    function toggleResolver(start) {
+        const dot = document.getElementById('status-dot');
+        const text = document.getElementById('status-text');
+        if(start) {
+            dot.classList.add('active-pulse');
+            text.innerText = "Resolver Active - Scanning Brocade Fabric...";
+            text.style.color = "var(--green)";
+        } else {
+            dot.classList.remove('active-pulse');
+            text.innerText = "Resolver Idle";
+            text.style.color = "var(--text-sec)";
+        }
+    }
+
+    function getTick(value) {
+        // Returns green check if value is 0, else red X
+        return (value === 0 || value === "0") 
+            ? '<i class="bi bi-check-circle-fill val-pass"></i>' 
+            : '<i class="bi bi-x-circle-fill val-fail"></i>';
+    }
+
+    function updateView(row, inc, sw, port, health, log, rx, grof, err, encin, encout) {
+        document.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+        row.classList.add('selected');
+
+        // Update Labels
+        document.getElementById('flow-inc').innerText = inc;
+        document.getElementById('flow-sw').innerText = sw;
+        document.getElementById('flow-port').innerText = port;
+        document.getElementById('flow-health').innerText = health;
+        document.getElementById('flow-log').innerText = log;
+
+        // Update Counter Values
+        document.getElementById('val-rx').innerText = rx;
+        document.getElementById('val-g_rof').innerText = grof;
+        document.getElementById('val-err').innerText = err;
+        document.getElementById('val-encin').innerText = encin;
+        document.getElementById('val-encout').innerText = encout;
+
+        // Update Tick Icons
+        document.getElementById('tick-port').innerHTML = (health.toLowerCase() === 'online') ? getTick(0) : getTick(1);
+        document.getElementById('tick-rx').innerHTML = getTick(rx);
+        document.getElementById('tick-g_rof').innerHTML = getTick(grof);
+        document.getElementById('tick-err').innerHTML = getTick(err);
+        document.getElementById('tick-encin').innerHTML = getTick(encin);
+        document.getElementById('tick-encout').innerHTML = getTick(encout);
+
+        // UI Color Logic
+        const healthEl = document.getElementById('flow-health');
+        const logBox = document.getElementById('action-box');
+        const logStatus = document.getElementById('log-status');
+
+        if(health.toLowerCase() === 'online') {
+            healthEl.style.color = 'var(--green)';
+            logBox.style.borderColor = 'var(--green)';
+            logStatus.innerText = "Resolved";
+            logStatus.className = "badge bg-success";
+        } else {
+            healthEl.style.color = 'var(--red)';
+            logBox.style.borderColor = 'var(--red)';
+            logStatus.innerText = "Comment Added";
+            logStatus.className = "badge bg-warning text-dark";
+        }
+        drawLines();
+    }
+
+    function drawLines() {
+        const container = document.getElementById('main-canvas').getBoundingClientRect();
+        const getCoord = (id) => {
+            const el = document.getElementById(id);
+            const r = el.getBoundingClientRect();
+            return { x: r.left - container.left + (r.width / 2), y: r.top - container.top + (r.height / 2), right: r.right - container.left, left: r.left - container.left };
+        };
+        const n1 = getCoord('node-inc');
+        const n2 = getCoord('node-sw');
+        const n3 = getCoord('node-port');
+        const n4 = getCoord('node-health');
+        document.getElementById('line1').setAttribute('d', `M ${n1.right} ${n1.y} L ${n2.left} ${n2.y}`);
+        document.getElementById('line2').setAttribute('d', `M ${n2.right} ${n2.y} L ${n3.left} ${n3.y}`);
+        document.getElementById('line3').setAttribute('d', `M ${n3.right} ${n3.y} L ${n4.left} ${n4.y}`);
+    }
+
+    window.addEventListener('load', () => {
+        // Trigger initial view for the selected row
+        updateView(document.querySelector('tr.selected'), 'INC-8821', 'BRCD-NY-01', 'FC 1/4', 'Online', 'Health check passed. Automatically resolving incident.', 0, 0, 0, 0, 0);
+    });
+    window.addEventListener('resize', drawLines);
+</script>
+</body>
+</html>

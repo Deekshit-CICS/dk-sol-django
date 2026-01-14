@@ -14,6 +14,7 @@
             --blue: #007aff;
             --green: #34c759;
             --red: #ff3b30;
+            --yellow: #ff9f0a;
             --text-main: #1d1d1f;
             --text-sec: #86868b;
         }
@@ -25,17 +26,19 @@
         .btn-start { background: var(--blue); color: white; border: none; border-radius: 12px; padding: 10px 24px; font-weight: 600; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
         .btn-stop { background: #fff; color: var(--red); border: 1px solid rgba(255, 59, 48, 0.2); border-radius: 12px; padding: 10px 24px; font-weight: 600; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
 
-        /* Loading Bar */
+        /* Progress Bar */
         #progress-container { height: 6px; background: rgba(0,0,0,0.05); border-radius: 10px; margin-bottom: 20px; overflow: hidden; display: none; }
         #progress-bar { height: 100%; width: 0%; background: var(--blue); transition: width 0.4s ease; }
 
-        /* Layout UI */
-        .apple-card { background: var(--glass); backdrop-filter: blur(20px) saturate(180%); border-radius: 20px; border: 1px solid var(--glass-border); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.04); margin-bottom: 24px; z-index: 2; }
-        .apple-table tr { vertical-align: middle; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.03); }
-        .apple-table tr.selected { background: rgba(0, 122, 255, 0.05) !important; }
+        /* Apple Cards */
+        .apple-card { background: var(--glass); backdrop-filter: blur(20px) saturate(180%); border-radius: 20px; border: 1px solid var(--glass-border); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.04); margin-bottom: 24px; z-index: 2; transition: transform 0.3s; }
+        
+        /* Table Styles */
+        .apple-table tr { vertical-align: middle; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.03); transition: 0.2s; }
+        .apple-table tr.selected { background: rgba(0, 122, 255, 0.05) !important; box-shadow: inset 4px 0 0 var(--blue); }
         
         #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-        .connector { fill: none; stroke: var(--blue); stroke-width: 2; stroke-dasharray: 6; opacity: 0.2; }
+        .connector { fill: none; stroke: var(--blue); stroke-width: 2; stroke-dasharray: 6; opacity: 0.15; }
 
         .live-indicator { width: 10px; height: 10px; background: #86868b; border-radius: 50%; display: inline-block; margin-right: 8px; }
         .active-pulse { background: var(--green); animation: pulse 1.5s infinite; }
@@ -83,20 +86,20 @@
                     </tr>
                 </thead>
                 <tbody id="table-body">
-                    <tr class="selected" onclick="updateView(this, 'INC-8821', 'BRCD-NY-01', 'FC 1/4', '-3.2 dBm', 'Online', 'Health check passed.')">
+                    <tr class="selected" onclick="updateView(this, 'INC-8821', 'BRCD-NY-01', 'FC 1/4', -7.2, 'Online')">
                         <td class="ps-4 fw-bold text-primary">INC-8821</td>
                         <td><code>BRCD-NY-01</code></td>
                         <td>Port 04</td>
-                        <td class="fw-medium text-dark">-3.2 dBm</td>
+                        <td class="fw-medium">-7.2 dBm</td>
                         <td><span class="badge bg-success bg-opacity-10 text-success">Active</span></td>
                         <td class="text-end pe-4"><button class="btn-resolve" style="background:var(--green); color:white; border:none; border-radius:20px; padding:4px 12px;"><i class="bi bi-check2"></i></button></td>
                     </tr>
-                    <tr onclick="updateView(this, 'INC-9042', 'BRCD-LON-05', 'FC 2/12', '-18.5 dBm', 'Offline', 'Low light detected.')">
-                        <td class="ps-4 fw-bold text-primary">INC-9042</td>
-                        <td><code>BRCD-LON-05</code></td>
-                        <td>Port 12</td>
-                        <td class="fw-medium text-danger">-18.5 dBm</td>
-                        <td><span class="badge bg-danger bg-opacity-10 text-danger">Fault</span></td>
+                    <tr onclick="updateView(this, 'INC-9055', 'BRCD-TX-02', 'FC 1/9', -2.1, 'Online')">
+                        <td class="ps-4 fw-bold text-primary">INC-9055</td>
+                        <td><code>BRCD-TX-02</code></td>
+                        <td>Port 09</td>
+                        <td class="fw-medium text-warning">-2.1 dBm</td>
+                        <td><span class="badge bg-warning bg-opacity-10 text-warning">Warning</span></td>
                         <td class="text-end pe-4"><button class="btn-resolve" style="background:var(--green); color:white; border:none; border-radius:20px; padding:4px 12px;"><i class="bi bi-check2"></i></button></td>
                     </tr>
                 </tbody>
@@ -108,7 +111,7 @@
         <div class="col-md-3"><div id="node-inc" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">INCIDENT</div><h5 class="fw-bold mb-0" id="flow-inc">INC-8821</h5></div></div>
         <div class="col-md-3"><div id="node-sw" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">SWITCH</div><h5 class="fw-bold mb-0" id="flow-sw">BRCD-NY-01</h5></div></div>
         <div class="col-md-3"><div id="node-port" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">PORT</div><h5 class="fw-bold mb-0" id="flow-port">FC 1/4</h5></div></div>
-        <div class="col-md-3"><div id="node-health" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">PORT HEALTH</div><h5 class="fw-bold mb-0" id="flow-health">Online</h5></div></div>
+        <div class="col-md-3"><div id="node-health" class="apple-card p-4 text-center"><div class="small text-secondary fw-bold mb-2">AUDIT STATUS</div><h5 class="fw-bold mb-0" id="flow-health">Healthy</h5></div></div>
     </section>
 </div>
 
@@ -120,7 +123,6 @@
         const container = document.getElementById('progress-container');
         const btn = document.getElementById('start-btn');
         
-        // UI Reset
         container.style.display = 'block';
         bar.style.width = '0%';
         btn.disabled = true;
@@ -129,26 +131,16 @@
         abortController = new AbortController();
 
         try {
-            // Simulated Progress step 1
-            setTimeout(() => bar.style.width = '40%', 100);
-
-            // Trigger Django API
-            // const response = await fetch('/your-django-api-endpoint/', { signal: abortController.signal });
-            // const data = await response.json();
-            
-            // Simulating API Latency
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Simulated API step
+            setTimeout(() => bar.style.width = '50%', 200);
+            await new Promise(resolve => setTimeout(resolve, 1500));
             
             bar.style.width = '100%';
             setTimeout(() => {
                 container.style.display = 'none';
                 btn.disabled = false;
             }, 500);
-
-        } catch (err) {
-            console.error("Resolver error:", err);
-            stopResolver();
-        }
+        } catch (err) { stopResolver(); }
     }
 
     function stopResolver() {
@@ -163,7 +155,7 @@
         const text = document.getElementById('status-text');
         if(isActive) {
             dot.classList.add('active-pulse');
-            text.innerText = "Resolver Active - Scanning Brocade Fabric...";
+            text.innerText = "Resolver Active - Auditing Optical RX Power...";
             text.style.color = "var(--green)";
         } else {
             dot.classList.remove('active-pulse');
@@ -172,13 +164,30 @@
         }
     }
 
-    function updateView(row, inc, sw, port, rx, health, log) {
+    function updateView(row, inc, sw, port, rxValue, status) {
         document.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
         row.classList.add('selected');
+        
+        // Logical check for RX Value threshold
+        let auditHealth = "Healthy";
+        let healthColor = "var(--green)";
+
+        if (status === 'Online' && rxValue > -4) {
+            auditHealth = "Warning (High RX)";
+            healthColor = "var(--yellow)";
+        } else if (status !== 'Online') {
+            auditHealth = "Critical";
+            healthColor = "var(--red)";
+        }
+
         document.getElementById('flow-inc').innerText = inc;
         document.getElementById('flow-sw').innerText = sw;
         document.getElementById('flow-port').innerText = port;
-        document.getElementById('flow-health').innerText = health;
+        
+        const healthNode = document.getElementById('flow-health');
+        healthNode.innerText = auditHealth;
+        healthNode.style.color = healthColor;
+
         drawLines();
     }
 
