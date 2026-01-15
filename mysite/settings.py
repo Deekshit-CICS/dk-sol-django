@@ -13,6 +13,34 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 import os
 import sys
+
+
+import ldap
+from django_auth_ldap.config import LDAPSearch, GroupOfNamesType
+
+# 1. Connection Settings
+AUTH_LDAP_SERVER_URI = "ldap://your-ad-server.company.com"
+AUTH_LDAP_BIND_DN = "CN=ServiceAccount,OU=ServiceAccounts,DC=company,DC=com"
+AUTH_LDAP_BIND_PASSWORD = "your-password"
+AUTH_LDAP_USER_SEARCH = LDAPSearch("OU=Users,DC=company,DC=com", ldap.SCOPE_SUBTREE, "(sAMAccountName=%(user)s)")
+
+# 2. RBAC: Group Mapping
+# Maps AD Groups to Django user attributes (is_staff/is_superuser)
+AUTH_LDAP_USER_FLAGS_BY_GROUP = {
+    "is_active": "CN=GOC_Operators,OU=Groups,DC=company,DC=com",
+    "is_staff": "CN=GOC_Admins,OU=Groups,DC=company,DC=com",
+}
+
+# 3. Custom RBAC Mapping for Towers
+# You can check these in your views to hide/show towers (Unix, Middleware, etc.)
+AUTH_LDAP_FIND_GROUP_PERMS = True
+
+AUTHENTICATION_BACKENDS = [
+    "django_auth_ldap.backend.LDAPBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
+
 # LOGGING = {
 #     'version': 1,
 #     'disable_existing_loggers': False,

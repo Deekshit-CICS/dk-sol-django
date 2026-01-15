@@ -1,6 +1,8 @@
 from django.shortcuts import render
 import json # Used to safely dump Python lists into JavaScripts
 from django.http import HttpResponse
+from django.contrib.auth import authenticate, login
+
 
 
 # def index(request):
@@ -25,3 +27,20 @@ def apigee_dynamic_chart_view(request):
         'chart_values_json': json.dumps(values),
     }
     return render(request, 'apigee_chart_js_template.html', context)
+
+
+def login_view(request):
+    if request.method == "POST":
+        email = request.POST.get('email')
+        password = request.POST.get('password')
+        
+        # Django-auth-ldap intercepts this and checks AD
+        user = authenticate(request, username=email, password=password)
+        
+        if user is not None:
+            login(request, user)
+            return JsonResponse({"status": "success", "redirect": "/dashboard/"})
+        else:
+            return JsonResponse({"status": "error", "message": "Invalid AD Credentials"}, status=401)
+            
+    return render(request, 'index.html')

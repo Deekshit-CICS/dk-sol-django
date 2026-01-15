@@ -116,6 +116,41 @@
         btn.innerHTML = 'Authenticating...';
         setTimeout(() => alert("Redirecting to GOC Dashboard..."), 1000);
     }
+    async function handleLogin(e) {
+    e.preventDefault();
+    const btn = document.getElementById('loginBtn');
+    const email = e.target.querySelector('input[type="email"]').value;
+    const password = e.target.querySelector('input[type="password"]').value;
+
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Authenticating with AD...';
+    btn.disabled = true;
+
+    const formData = new FormData();
+    formData.append('email', email);
+    formData.append('password', password);
+    formData.append('csrfmiddlewaretoken', '{{ csrf_token }}'); // Required by Django
+
+    try {
+        const response = await fetch("{% url 'login' %}", {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            window.location.href = data.redirect;
+        } else {
+            alert(data.message || "Authentication Failed");
+            btn.innerHTML = 'Sign In';
+            btn.disabled = false;
+        }
+    } catch (error) {
+        alert("Server communication error");
+        btn.disabled = false;
+    }
+}
 </script>
 </body>
 </html>
+
