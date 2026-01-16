@@ -6,6 +6,7 @@
     <title>Brocade Port Auditor - Auto Resolver</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    
     <style>
         :root {
             --apple-bg: #f5f5f7;
@@ -18,37 +19,92 @@
             --text-sec: #86868b;
         }
 
-        body { background-color: var(--apple-bg); color: var(--text-main); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; padding: 40px 0; }
+        body { 
+            background-color: var(--apple-bg); 
+            color: var(--text-main); 
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; 
+            padding: 40px 0; 
+            overflow-x: hidden;
+        }
+
         .dashboard-container { max-width: 1200px; margin: auto; position: relative; }
 
-        /* Resolver Controls */
+        /* Buttons */
         .btn-start { background: var(--blue); color: white; border: none; border-radius: 12px; padding: 10px 24px; font-weight: 600; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
-        .btn-stop { background: #fff; color: var(--red); border: 1px solid rgba(255, 59, 48, 0.2); border-radius: 12px; padding: 10px 24px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
-        .btn-resolve { background: linear-gradient(180deg, #34d058 0%, #28a745 100%); color: white; border: none; padding: 8px 18px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s; }
+        .btn-stop { background: #fff; color: var(--red); border: 1px solid rgba(255, 59, 48, 0.2); border-radius: 12px; padding: 10px 24px; font-weight: 600; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        
+        /* Resolve Button - Hidden by default, controlled by JS */
+        .btn-resolve { 
+            background: linear-gradient(180deg, #34d058 0%, #28a745 100%); 
+            color: white; border: none; padding: 6px 16px; border-radius: 20px; 
+            font-size: 0.85rem; font-weight: 600; display: none; align-items: center; gap: 8px; 
+        }
 
         /* Apple Cards & Tables */
-        .apple-card { background: var(--glass); backdrop-filter: blur(20px) saturate(180%); border-radius: 20px; border: 1px solid var(--glass-border); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.04); margin-bottom: 24px; z-index: 2; }
+        .apple-card { 
+            background: var(--glass); 
+            backdrop-filter: blur(20px) saturate(180%); 
+            border-radius: 20px; 
+            border: 1px solid var(--glass-border); 
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.04); 
+            margin-bottom: 24px; 
+            z-index: 2; 
+        }
+
         .apple-table tr { vertical-align: middle; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.03); }
         .apple-table tr.selected { background: rgba(0, 122, 255, 0.05) !important; }
 
-        /* Detail Logic Styling */
-        .detail-list { list-style: none; padding: 0; margin: 0; text-align: left; }
+        /* Details List */
+        .detail-list { list-style: none; padding: 0; margin: 0; }
         .detail-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,0.05); font-size: 0.85rem; }
         .detail-item:last-child { border-bottom: none; }
         .val-pass { color: var(--green); }
         .val-fail { color: var(--red); }
 
-        /* Connector Canvas */
+        /* Canvas & Indicators */
         #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
         .connector { fill: none; stroke: var(--blue); stroke-width: 2; stroke-dasharray: 6; opacity: 0.2; }
         .live-indicator { width: 10px; height: 10px; background: #86868b; border-radius: 50%; display: inline-block; margin-right: 8px; }
         .active-pulse { background: var(--green); animation: pulse 1.5s infinite; }
+        
         @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.7); } 70% { box-shadow: 0 0 0 8px rgba(52, 199, 89, 0); } 100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0); } }
+
+        /* Modal Customization */
+        .modal-content { border-radius: 24px; border: none; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+        .form-control { border-radius: 10px; padding: 12px; border: 1px solid #ddd; }
     </style>
 </head>
 <body>
 
-
+<div class="modal fade" id="ldapModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content p-4">
+            <div class="text-center mb-4">
+                <div class="h4 fw-bold">Fabric Authentication</div>
+                <p class="text-secondary small">Please enter your LDAP credentials to access the Brocade Resolver.</p>
+            </div>
+            <form id="loginForm">
+                <div class="mb-3">
+                    <label class="form-label small fw-bold text-secondary">LDAP USERNAME</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-transparent border-end-0"><i class="bi bi-person text-secondary"></i></span>
+                        <input type="text" class="form-control border-start-0" id="username" placeholder="e.g. admin_corp" required>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="form-label small fw-bold text-secondary">PASSWORD</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-transparent border-end-0"><i class="bi bi-shield-lock text-secondary"></i></span>
+                        <input type="password" class="form-control border-start-0" id="password" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn-start w-100 justify-content-center py-3">
+                    <i class="bi bi-key-fill"></i> Authenticate with LDAP
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
 
 <div class="dashboard-container" id="main-canvas">
     <svg id="flow-canvas"><path id="line1" class="connector"/><path id="line2" class="connector"/><path id="line3" class="connector"/></svg>
@@ -84,14 +140,14 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr class="selected" onclick="updateView(this, 'INC-8821', 'BRCD-NY-01', 'FC 1/4', 'Online', 'Health check passed. Automatically resolving incident.', 0, 0, 0, 0, 0)">
+                    <tr class="selected" onclick="updateView(this, 'INC-8821', 'BRCD-NY-01', 'FC 1/4', 'Online', 'Health check passed. No action required.', 0, 0, 0, 0, 0)">
                         <td class="ps-4 fw-bold text-primary">INC-8821</td>
                         <td><code>BRCD-NY-01</code></td>
                         <td>Port 04</td>
                         <td><span class="badge bg-success bg-opacity-10 text-success">Active</span></td>
                         <td class="text-end pe-4"><button class="btn-resolve"><i class="bi bi-check2-circle"></i> Resolve</button></td>
                     </tr>
-                    <tr onclick="updateView(this, 'INC-9042', 'BRCD-LON-05', 'FC 2/12', 'Offline', 'Fault detected. Light level below threshold. Added comment to INC-9042.', 1, 5, 2, 8, 12)">
+                    <tr onclick="updateView(this, 'INC-9042', 'BRCD-LON-05', 'FC 2/12', 'Offline', 'Fault detected. Light level below threshold. Review required.', 1, 5, 2, 8, 12)">
                         <td class="ps-4 fw-bold text-primary">INC-9042</td>
                         <td><code>BRCD-LON-05</code></td>
                         <td>Port 12</td>
@@ -125,39 +181,36 @@
     </section>
 
     <section class="px-4">
-        <div class="apple-card p-4 border-start border-4" id="action-box" style="border-color: var(--green);">
+        <div class="apple-card p-4 border-start border-4" id="action-box">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <span class="small fw-bold text-uppercase">Automation Result</span>
-                <span class="badge bg-success" id="log-status">Resolved</span>
+                <span class="badge" id="log-status">Status</span>
             </div>
-            <pre class="mb-0" id="flow-log" style="font-family: 'SF Mono', monospace; font-size: 0.9rem; white-space: pre-wrap;">Health check passed. Automatically resolving incident.</pre>
+            <pre class="mb-0" id="flow-log" style="font-family: 'SF Mono', monospace; font-size: 0.9rem; white-space: pre-wrap;"></pre>
         </div>
     </section>
-    <div class="modal fade" id="loginModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content apple-card" style="border:none;">
-            <div class="modal-header border-0">
-                <h5 class="modal-title fw-bold">Fabric LDAP Authentication</h5>
-            </div>
-            <div class="modal-body">
-                <form id="ldapLoginForm">
-                    <div class="mb-3">
-                        <label class="form-label small fw-bold">Username</label>
-                        <input type="text" class="form-control border-0 bg-light" id="ldapUser" required placeholder="e.g. jdoe">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label small fw-bold">Password</label>
-                        <input type="password" class="form-control border-0 bg-light" id="ldapPass" required>
-                    </div>
-                    <button type="submit" class="btn-start w-100 justify-content-center">Authenticate</button>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    // 1. LDAP Authentication Logic
+    const ldapModal = new bootstrap.Modal(document.getElementById('ldapModal'));
+    
+    window.addEventListener('load', () => {
+        ldapModal.show();
+        updateView(document.querySelector('tr.selected'), 'INC-8821', 'BRCD-NY-01', 'FC 1/4', 'Online', 'Health check passed.', 0, 0, 0, 0, 0);
+    });
+
+    document.getElementById('loginForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const user = document.getElementById('username').value;
+        // Mock LDAP check
+        console.log(`Authenticating ${user}...`);
+        ldapModal.hide();
+        alert(`Welcome, ${user}. Authentication successful via LDAP.`);
+    });
+
+    // 2. Resolver Controls
     function toggleResolver(start) {
         const dot = document.getElementById('status-dot');
         const text = document.getElementById('status-text');
@@ -172,22 +225,24 @@
         }
     }
 
-    window.addEventListener('load', () => {
-    const loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
-    loginModal.show();
-    
-    // Add logic here to POST the credentials to your Django LDAP endpoint
-    });
-
+    // 3. UI Update Logic
     function getTick(value) {
-        // Returns green check if value is 0, else red X
         return (value === 0 || value === "0") 
             ? '<i class="bi bi-check-circle-fill val-pass"></i>' 
             : '<i class="bi bi-x-circle-fill val-fail"></i>';
     }
 
     function updateView(row, inc, sw, port, health, log, rx, grof, err, encin, encout) {
-        document.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+        // Toggle table row selection and Resolve button visibility
+        document.querySelectorAll('tr').forEach(r => {
+            r.classList.remove('selected');
+            const btn = r.querySelector('.btn-resolve');
+            if(btn) {
+                const status = r.cells[3].innerText;
+                btn.style.display = (status.includes('Fault')) ? 'inline-flex' : 'none';
+            }
+        });
+
         row.classList.add('selected');
 
         // Update Labels
@@ -197,14 +252,14 @@
         document.getElementById('flow-health').innerText = health;
         document.getElementById('flow-log').innerText = log;
 
-        // Update Counter Values
+        // Update Verification values
         document.getElementById('val-rx').innerText = rx;
         document.getElementById('val-g_rof').innerText = grof;
         document.getElementById('val-err').innerText = err;
         document.getElementById('val-encin').innerText = encin;
         document.getElementById('val-encout').innerText = encout;
 
-        // Update Tick Icons
+        // Update Verification Ticks
         document.getElementById('tick-port').innerHTML = (health.toLowerCase() === 'online') ? getTick(0) : getTick(1);
         document.getElementById('tick-rx').innerHTML = getTick(rx);
         document.getElementById('tick-g_rof').innerHTML = getTick(grof);
@@ -212,7 +267,7 @@
         document.getElementById('tick-encin').innerHTML = getTick(encin);
         document.getElementById('tick-encout').innerHTML = getTick(encout);
 
-        // UI Color Logic
+        // Action Box Logic
         const healthEl = document.getElementById('flow-health');
         const logBox = document.getElementById('action-box');
         const logStatus = document.getElementById('log-status');
@@ -225,16 +280,18 @@
         } else {
             healthEl.style.color = 'var(--red)';
             logBox.style.borderColor = 'var(--red)';
-            logStatus.innerText = "Comment Added";
-            logStatus.className = "badge bg-warning text-dark";
+            logStatus.innerText = "Attention Required";
+            logStatus.className = "badge bg-danger";
         }
         drawLines();
     }
 
+    // 4. Drawing Canvas Connections
     function drawLines() {
         const container = document.getElementById('main-canvas').getBoundingClientRect();
         const getCoord = (id) => {
             const el = document.getElementById(id);
+            if(!el) return {x:0, y:0, right:0, left:0};
             const r = el.getBoundingClientRect();
             return { x: r.left - container.left + (r.width / 2), y: r.top - container.top + (r.height / 2), right: r.right - container.left, left: r.left - container.left };
         };
@@ -247,10 +304,6 @@
         document.getElementById('line3').setAttribute('d', `M ${n3.right} ${n3.y} L ${n4.left} ${n4.y}`);
     }
 
-    window.addEventListener('load', () => {
-        // Trigger initial view for the selected row
-        updateView(document.querySelector('tr.selected'), 'INC-8821', 'BRCD-NY-01', 'FC 1/4', 'Online', 'Health check passed. Automatically resolving incident.', 0, 0, 0, 0, 0);
-    });
     window.addEventListener('resize', drawLines);
 </script>
 </body>

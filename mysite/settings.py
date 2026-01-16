@@ -15,14 +15,14 @@ import os
 import sys
 
 
-import ldap
-from django_auth_ldap.config import LDAPSearch, GroupOfNamesType
+# import ldap
+# from django_auth_ldap.config import LDAPSearch, GroupOfNamesType
 
-# 1. Connection Settings
-AUTH_LDAP_SERVER_URI = "ldap://your-ad-server.company.com"
-AUTH_LDAP_BIND_DN = "CN=ServiceAccount,OU=ServiceAccounts,DC=company,DC=com"
-AUTH_LDAP_BIND_PASSWORD = "your-password"
-AUTH_LDAP_USER_SEARCH = LDAPSearch("OU=Users,DC=company,DC=com", ldap.SCOPE_SUBTREE, "(sAMAccountName=%(user)s)")
+# # 1. Connection Settings
+# AUTH_LDAP_SERVER_URI = "ldap://your-ad-server.company.com"
+# AUTH_LDAP_BIND_DN = "CN=ServiceAccount,OU=ServiceAccounts,DC=company,DC=com"
+# AUTH_LDAP_BIND_PASSWORD = "your-password"
+# AUTH_LDAP_USER_SEARCH = LDAPSearch("OU=Users,DC=company,DC=com", ldap.SCOPE_SUBTREE, "(sAMAccountName=%(user)s)")
 
 # 2. RBAC: Group Mapping
 # Maps AD Groups to Django user attributes (is_staff/is_superuser)
