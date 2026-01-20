@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forensic RCA - Ultimate Edition</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.9);
+            --blue: #007aff;
+            --text-sec: #6e6e73;
+            --connector: #444446; /* High Visibility Dark */
+        }
+
+        body { background-color: var(--apple-bg); font-family: -apple-system, sans-serif; padding: 30px 0; }
+        .dashboard-container { max-width: 1550px; margin: auto; position: relative; }
+
+        /* High Visibility Connectors */
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { fill: none; stroke: var(--connector); stroke-width: 2.5; stroke-dasharray: 6; transition: 0.4s; }
+        .line-hidden { opacity: 0; }
+
+        /* Card Styling */
+        .apple-card {
+            background: var(--glass);
+            backdrop-filter: blur(20px) saturate(180%);
+            border-radius: 20px;
+            border: 1px solid #fff;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05);
+            margin-bottom: 24px;
+            z-index: 2;
+            position: relative;
+            transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* Dedicated Collapse Button */
+        .collapse-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(0,0,0,0.05);
+            border: none;
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: 0.2s;
+            z-index: 10;
+        }
+        .collapse-btn:hover { background: var(--blue); color: white; }
+
+        /* Expand/Collapse Animation */
+        .details-content { max-height: 0; opacity: 0; transition: all 0.4s ease; overflow: hidden; }
+        .details-content.expanded { max-height: 450px; opacity: 1; margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(0,0,0,0.1); }
+
+        /* Search UI */
+        .apple-search { background: rgba(0,0,0,0.05); border: 1px solid transparent; border-radius: 12px; padding: 10px 18px; width: 320px; }
+        .apple-search:focus { background: #fff; border-color: var(--blue); outline: none; }
+        .btn-analyze { background: var(--blue); color: white; border: none; padding: 10px 30px; border-radius: 12px; font-weight: 600; }
+
+        /* Metadata Text */
+        .meta-label { font-size: 0.65rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 10px; }
+        .meta-value { font-size: 0.88rem; margin-bottom: 2px; color: #1d1d1f; }
+
+        /* CI Selection */
+        .ci-list { max-height: 180px; overflow-y: auto; padding-right: 5px; }
+        .ci-item { padding: 10px; border-radius: 12px; cursor: pointer; background: rgba(0,0,0,0.02); margin-bottom: 8px; border: 1px solid transparent; }
+        .ci-item.active { background: white; border-color: var(--blue); box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+
+        pre { font-family: 'SF Mono', monospace; font-size: 0.78rem; padding: 15px; border-radius: 12px; background: rgba(255, 59, 48, 0.05); color: #d70000; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container" id="main-canvas">
+    <svg id="flow-canvas">
+        <path id="line-inc-chg" class="connector" />
+        <path id="line-chg-ci" class="connector" />
+        <path id="line-direct" class="connector line-hidden" />
+        <path id="line-ci-err" class="connector" />
+    </svg>
+
+    <header class="d-flex justify-content-between align-items-center mb-5 px-3">
+        <div>
+            <h1 class="h3 fw-bold mb-0">Forensic Investigation</h1>
+            <p id="header-app-id" class="text-secondary small">App ID: <span class="fw-bold text-dark">NOT LOADED</span></p>
+        </div>
+        <div class="d-flex gap-2">
+            <input type="text" id="appInput" class="apple-search" placeholder="Search Application (e.g. APP-802)">
+            <button class="btn-analyze" onclick="analyzeApp()">Analyze</button>
+        </div>
+    </header>
+
+    <div class="row g-3 px-3">
+        <div class="col-md-3">
+            <div id="node-inc" class="apple-card p-4 text-center">
+                <button class="collapse-btn" onclick="toggleBlock('inc-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <h4 class="fw-bold text-primary mb-1" id="disp-inc">---</h4>
+                <div class="small text-secondary" id="disp-desc">Select an Incident</div>
+                <div id="inc-details" class="details-content">
+                    <div class="meta-label">Opened By</div><div class="meta-value" id="m-opener">-</div>
+                    <div class="meta-label">Group</div><div class="meta-value" id="m-group">-</div>
+                    <div class="meta-label">Assigned To</div><div class="meta-value" id="m-assignee">-</div>
+                    <div class="meta-label">Opened At</div><div class="meta-value" id="m-time">-</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-2">
+            <div id="node-chg" class="apple-card p-4 text-center">
+                <button class="collapse-btn" onclick="toggleBlock('chg-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="small text-secondary fw-bold mb-1 text-uppercase" style="font-size: 0.6rem;">Change</div>
+                <h4 class="fw-bold mb-1" id="disp-chg">---</h4>
+                <div id="chg-details" class="details-content">
+                    <div class="meta-label">Type</div><div class="meta-value" id="m-chg-type">-</div>
+                    <div class="meta-label">Risk</div><div class="meta-value" id="m-chg-risk">-</div>
+                    <div class="meta-label">Status</div><div class="meta-value" id="m-chg-status">-</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div id="node-ci" class="apple-card p-3">
+                <button class="collapse-btn" onclick="toggleBlock('ci-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="small text-secondary fw-bold mb-3 text-uppercase" style="font-size: 0.65rem;">Affected CIs</div>
+                <div id="ci-list" class="ci-list"></div>
+                
+                <div id="ci-details" class="details-content">
+                    <div class="fw-bold text-primary border-bottom pb-1 mb-2" id="m-ci-name">Asset Info</div>
+                    <div class="row g-0">
+                        <div class="col-6">
+                            <div class="meta-label">Location</div><div class="meta-value" id="m-ci-loc">-</div>
+                            <div class="meta-label">Environment</div><div class="meta-value" id="m-ci-env">-</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="meta-label">OS</div><div class="meta-value" id="m-ci-os">-</div>
+                            <div class="meta-label">Owner</div><div class="meta-value" id="m-ci-owner">-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div id="node-error" class="apple-card p-3 border-start border-danger border-4">
+                <div class="small text-danger fw-bold mb-3 text-uppercase" style="font-size: 0.65rem;">Forensic Log</div>
+                <div id="log-output">
+                    <p class="text-secondary small">Choose a CI to inspect logs.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="px-3">
+        <div class="apple-card overflow-hidden">
+            <table class="table mb-0 table-hover" style="cursor:pointer">
+                <thead class="table-light small">
+                    <tr><th>Incident</th><th>Short Description</th><th>Linked Change</th><th>Opened By</th></tr>
+                </thead>
+                <tbody id="incTable"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    const data = [
+        {
+            id: 'INC0011', desc: 'API Gateway Timeout', chg: 'CHG-501',
+            opener: 'Monitoring Bot', group: 'SRE-Edge', assignee: 'David T.', time: '2026-01-20 08:30',
+            chgType: 'Infrastructure Update', chgRisk: 'Moderate', chgStatus: 'Closed',
+            cis: [
+                { name: 'GW-PROD-01', status: 'Error', loc: 'US-East-1', os: 'Alpine Linux', env: 'Prod', owner: 'Edge-Team', log: '504 Timeout: No healthy upstream servers found in group "api-cluster".' },
+                { name: 'GW-PROD-02', status: 'Warn', loc: 'US-East-2', os: 'Alpine Linux', env: 'Prod', owner: 'Edge-Team', log: 'High Latency: 99th percentile response time > 2000ms.' }
+            ]
+        },
+        {
+            id: 'INC0022', desc: 'Broken Load Balancer', chg: null,
+            opener: 'Admin User', group: 'Network-Ops', assignee: 'Jane Doe', time: '2026-01-20 10:15',
+            chgType: 'N/A', chgRisk: 'N/A', chgStatus: 'N/A',
+            cis: [
+                { name: 'F5-LB-09', status: 'Error', loc: 'DC-Primary', os: 'TMOS 15.1', env: 'Prod', owner: 'Net-Team', log: 'Hardware: Power supply failure in Slot 1. Redundancy lost.' }
+            ]
+        }
+    ];
+
+    function analyzeApp() {
+        const val = document.getElementById('appInput').value;
+        if(!val) return;
+        document.getElementById('header-app-id').innerHTML = `App ID: <span class="fw-bold text-primary">${val}</span>`;
+        drawLines();
+    }
+
+    function initTable() {
+        const body = document.getElementById('incTable');
+        data.forEach((inc, idx) => {
+            const tr = document.createElement('tr');
+            if(idx === 0) tr.className = 'table-selected';
+            tr.innerHTML = `<td><b>${inc.id}</b></td><td>${inc.desc}</td><td>${inc.chg || 'None'}</td><td>${inc.opener}</td>`;
+            tr.onclick = () => loadInc(tr, inc);
+            body.appendChild(tr);
+        });
+        loadInc(null, data[0]);
+    }
+
+    function loadInc(row, inc) {
+        if(row) {
+            document.querySelectorAll('tr').forEach(r => r.classList.remove('table-selected'));
+            row.classList.add('table-selected');
+        }
+
+        document.getElementById('disp-inc').innerText = inc.id;
+        document.getElementById('disp-desc').innerText = inc.desc;
+        document.getElementById('m-opener').innerText = inc.opener;
+        document.getElementById('m-group').innerText = inc.group;
+        document.getElementById('m-assignee').innerText = inc.assignee;
+        document.getElementById('m-time').innerText = inc.time;
+
+        const cNode = document.getElementById('node-chg');
+        const lIncChg = document.getElementById('line-inc-chg');
+        const lChgCi = document.getElementById('line-chg-ci');
+        const lDirect = document.getElementById('line-direct');
+
+        if(!inc.chg) {
+            cNode.style.opacity = '0.3';
+            document.getElementById('disp-chg').innerText = "N/A";
+            lIncChg.classList.add('line-hidden'); lChgCi.classList.add('line-hidden');
+            lDirect.classList.remove('line-hidden');
+        } else {
+            cNode.style.opacity = '1';
+            document.getElementById('disp-chg').innerText = inc.chg;
+            document.getElementById('m-chg-type').innerText = inc.chgType;
+            document.getElementById('m-chg-risk').innerText = inc.chgRisk;
+            document.getElementById('m-chg-status').innerText = inc.chgStatus;
+            lIncChg.classList.remove('line-hidden'); lChgCi.classList.remove('line-hidden');
+            lDirect.classList.add('line-hidden');
+        }
+
+        const list = document.getElementById('ci-list');
+        list.innerHTML = '';
+        inc.cis.forEach(ci => {
+            const d = document.createElement('div');
+            d.className = 'ci-item d-flex justify-content-between align-items-center';
+            d.innerHTML = `<span>${ci.name}</span> <span class="badge ${ci.status === 'Error' ? 'bg-danger' : 'bg-warning'} bg-opacity-10 ${ci.status === 'Error' ? 'text-danger' : 'text-warning'} rounded-pill" style="font-size:0.6rem">${ci.status}</span>`;
+            d.onclick = (e) => { e.stopPropagation(); selectCI(d, ci); };
+            list.appendChild(d);
+        });
+
+        // Close all expanded areas on switch
+        document.querySelectorAll('.details-content').forEach(d => d.classList.remove('expanded'));
+        document.querySelectorAll('.collapse-btn i').forEach(i => i.className = 'bi bi-chevron-down');
+        drawLines();
+    }
+
+    function selectCI(el, ci) {
+        document.querySelectorAll('.ci-item').forEach(i => i.classList.remove('active'));
+        el.classList.add('active');
+        
+        document.getElementById('m-ci-name').innerText = ci.name;
+        document.getElementById('m-ci-loc').innerText = ci.loc;
+        document.getElementById('m-ci-os').innerText = ci.os;
+        document.getElementById('m-ci-env').innerText = ci.env;
+        document.getElementById('m-ci-owner').innerText = ci.owner;
+        
+        // Auto expand CI details
+        const content = document.getElementById('ci-details');
+        if(!content.classList.contains('expanded')) {
+            content.classList.add('expanded');
+            document.querySelector('#node-ci .collapse-btn i').className = 'bi bi-chevron-up';
+        }
+
+        document.getElementById('log-output').innerHTML = `<div class="fw-bold mb-1">${ci.name}</div><pre>${ci.log}</pre>`;
+        drawLines();
+    }
+
+    function toggleBlock(id, btn) {
+        const content = document.getElementById(id);
+        const icon = btn.querySelector('i');
+        content.classList.toggle('expanded');
+        icon.className = content.classList.contains('expanded') ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+        
+        let count = 0;
+        let itv = setInterval(() => { drawLines(); if(count++ > 15) clearInterval(itv); }, 30);
+    }
+
+    function drawLines() {
+        const cont = document.getElementById('main-canvas').getBoundingClientRect();
+        const box = (id) => {
+            const r = document.getElementById(id).getBoundingClientRect();
+            return { cx: r.left - cont.left + (r.width / 2), cy: r.top - cont.top + (r.height / 2), l: r.left - cont.left, r: r.right - cont.left };
+        };
+        const i = box('node-inc'); const h = box('node-chg'); const c = box('node-ci'); const e = box('node-error');
+
+        document.getElementById('line-inc-chg').setAttribute('d', `M ${i.r} ${i.cy} L ${h.l} ${h.cy}`);
+        document.getElementById('line-chg-ci').setAttribute('d', `M ${h.r} ${h.cy} L ${c.l} ${c.cy}`);
+        document.getElementById('line-direct').setAttribute('d', `M ${i.r} ${i.cy} C ${i.r+50} ${i.cy}, ${c.l-50} ${c.cy}, ${c.l} ${c.cy}`);
+        document.getElementById('line-ci-err').setAttribute('d', `M ${c.r} ${c.cy} L ${e.l} ${e.cy}`);
+    }
+
+    window.onload = () => { initTable(); setTimeout(drawLines, 200); };
+    window.onresize = drawLines;
+</script>
+</body>
+</html>

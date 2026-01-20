@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compact Forensic RCA</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.98);
+            --blue: #007aff;
+            --green: #24b244;
+            --connector: #444446;
+        }
+
+        body { background-color: var(--apple-bg); font-family: -apple-system, sans-serif; padding: 20px; }
+        .dashboard-container { max-width: 1100px; margin: auto; position: relative; }
+
+        /* Search Breadcrumb */
+        .search-context-bar {
+            background: #fff; border-radius: 10px; padding: 8px 15px;
+            display: inline-flex; align-items: center; gap: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-bottom: 25px;
+            border: 1px solid rgba(0,0,0,0.05);
+        }
+        .context-pill { background: var(--blue); color: white; padding: 1px 10px; border-radius: 15px; font-size: 0.8rem; font-weight: 600; }
+
+        /* Flow SVG */
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { fill: none; stroke: var(--connector); stroke-width: 2; stroke-dasharray: 5; transition: 0.4s; }
+        .line-hidden { opacity: 0; }
+
+        /* Compact Cards */
+        .apple-card {
+            background: var(--glass); border-radius: 18px; border: 1px solid #fff;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.04); z-index: 2;
+            position: relative; margin-bottom: 35px; width: 100%; max-width: 280px; margin-left: auto; margin-right: auto;
+        }
+        .collapse-btn { position: absolute; top: 10px; right: 10px; border: none; background: rgba(0,0,0,0.04); border-radius: 50%; width: 22px; height: 22px; font-size: 0.65rem; }
+        .details-content { max-height: 0; opacity: 0; transition: all 0.4s ease; overflow: hidden; }
+        .details-content.expanded { max-height: 400px; opacity: 1; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.08); }
+
+        /* Logic UI */
+        .ci-item { padding: 6px 10px; border-radius: 8px; cursor: pointer; background: rgba(0,0,0,0.02); margin-bottom: 5px; font-size: 0.8rem; }
+        .ci-item.active { background: white; border: 1px solid var(--blue); }
+        .remediation-box { background: rgba(36, 178, 68, 0.05); border: 1px dashed var(--green); border-radius: 12px; padding: 10px; }
+        .btn-execute { background: var(--green); color: white; border: none; width: 100%; padding: 7px; border-radius: 10px; font-weight: 600; font-size: 0.8rem; margin-top: 8px; }
+        
+        pre { font-size: 0.72rem; background: #fff5f5; color: #c00; padding: 10px; border-radius: 8px; border: 1px solid #ffebeb; margin-bottom: 0; }
+        .label { font-size: 0.6rem; font-weight: 700; color: #86868b; text-transform: uppercase; margin-top: 6px; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container" id="main-canvas">
+    <svg id="flow-canvas">
+        <path id="line-1" class="connector" /> 
+        <path id="line-2" class="connector" />
+        <path id="line-bypass" class="connector line-hidden" />
+        <path id="line-3" class="connector" />
+        <path id="line-4" class="connector" />
+    </svg>
+
+    <header class="d-flex justify-content-between align-items-center mb-1">
+        <div>
+            <h4 class="fw-bold mb-1">Forensic Analysis</h4>
+            <div class="search-context-bar">
+                <span class="small text-muted">Context:</span>
+                <span id="display-search-term" class="context-pill">Select App</span>
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <input type="text" id="searchInput" class="form-control form-control-sm" style="border-radius:8px; width:180px" placeholder="App ID...">
+            <button class="btn btn-sm btn-primary" style="border-radius:8px" onclick="performSearch()">Analyze</button>
+        </div>
+    </header>
+
+    <div class="row g-3 justify-content-center">
+        <div class="col-md-4">
+            <div id="node-inc" class="apple-card p-3 text-center">
+                <button class="collapse-btn" onclick="toggle('inc-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label">Incident</div>
+                <div class="fw-bold text-primary" id="d-inc">---</div>
+                <div id="inc-details" class="details-content">
+                    <div class="label">Assignee</div><div class="small" id="m-assign">-</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div id="node-chg" class="apple-card p-3 text-center">
+                <button class="collapse-btn" onclick="toggle('chg-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label">Change</div>
+                <div class="fw-bold" id="d-chg">---</div>
+                <div id="chg-details" class="details-content">
+                    <div class="label">Risk</div><div class="small" id="m-risk">-</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div id="node-ci" class="apple-card p-3">
+                <button class="collapse-btn" onclick="toggle('ci-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label mb-2">Affected CIs</div>
+                <div id="ci-list"></div>
+                <div id="ci-details" class="details-content">
+                    <div class="label">Location</div><div class="small" id="m-loc">-</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 justify-content-center mt-1">
+        <div class="col-md-5">
+            <div id="node-log" class="apple-card p-3 border-start border-danger border-4" style="max-width: 400px;">
+                <button class="collapse-btn" onclick="toggle('log-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label text-danger">Evidence</div>
+                <div id="log-summary" class="small fw-bold mt-1">Select CI...</div>
+                <div id="log-details" class="details-content">
+                    <pre id="m-log"></pre>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div id="node-fix" class="apple-card p-3 border-start border-success border-4" style="max-width: 400px;">
+                <button class="collapse-btn" onclick="toggle('fix-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label text-success">Remediation</div>
+                <div class="remediation-box mt-2">
+                    <div id="m-fix" class="text-secondary" style="font-size: 0.75rem;">Awaiting CI...</div>
+                </div>
+                <div id="fix-details" class="details-content">
+                    <div class="label">History</div><div id="m-past" class="small text-muted" style="font-size:0.7rem">---</div>
+                    <button id="exec-btn" class="btn-execute" onclick="execute()">Execute Fix</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="apple-card overflow-hidden mt-3" style="max-width: 100%;">
+        <table class="table table-sm mb-0 table-hover" style="font-size: 0.8rem;">
+            <thead class="table-light"><tr><th>App</th><th>Incident</th><th>Description</th></tr></thead>
+            <tbody id="masterTable"></tbody>
+        </table>
+    </div>
+</div>
+
+
+
+<script>
+    const dataRepo = [
+        {
+            app: 'APP-102', id: 'INC-882', desc: 'Disk I/O Latency', chg: 'CHG-001',
+            assign: 'Robert F.', risk: 'Low',
+            cis: [{ 
+                name: 'NAS-VOL-01', loc: 'DC-Zone-A',
+                log: 'IOPS Limit Reached: 5000/5000. Queue depth > 64.',
+                fix: 'Increase IOPS burst limit or move to SSD tier.',
+                past: 'Similar to INC-441: Fixed by volume migration.',
+                action: 'Burst IOPS +20%'
+            }]
+        },
+        {
+            app: 'APP-404', id: 'INC-901', desc: '404 Errors Spike', chg: null,
+            assign: 'Jane C.', risk: 'N/A',
+            cis: [{ 
+                name: 'NGINX-LB-PROD', loc: 'Cloud-West',
+                log: '404 Not Found: missing /api/v2/auth mapping.',
+                fix: 'Rollback route configuration or push missing manifest.',
+                past: 'Config sync issue resolved in Nov.',
+                action: 'Sync Route Config'
+            }]
+        }
+    ];
+
+    function performSearch() {
+        const val = document.getElementById('searchInput').value;
+        if(val) document.getElementById('display-search-term').innerText = val;
+    }
+
+    function init() {
+        const body = document.getElementById('masterTable');
+        dataRepo.forEach((inc, idx) => {
+            const tr = document.createElement('tr');
+            if(idx === 0) tr.className = 'table-selected';
+            tr.innerHTML = `<td><code>${inc.app}</code></td><td><b>${inc.id}</b></td><td>${inc.desc}</td>`;
+            tr.onclick = () => loadInc(tr, inc);
+            body.appendChild(tr);
+        });
+        loadInc(null, dataRepo[0]);
+    }
+
+    function loadInc(row, inc) {
+        if(row) {
+            document.querySelectorAll('tr').forEach(r => r.classList.remove('table-selected'));
+            row.classList.add('table-selected');
+        }
+        document.getElementById('display-search-term').innerText = inc.app;
+        document.getElementById('d-inc').innerText = inc.id;
+        document.getElementById('m-assign').innerText = inc.assign;
+        
+        const chgNode = document.getElementById('node-chg');
+        if(!inc.chg) {
+            chgNode.style.opacity = '0.3'; document.getElementById('d-chg').innerText = "N/A";
+            document.getElementById('line-bypass').classList.remove('line-hidden');
+            document.getElementById('line-1').classList.add('line-hidden');
+            document.getElementById('line-2').classList.add('line-hidden');
+        } else {
+            chgNode.style.opacity = '1'; document.getElementById('d-chg').innerText = inc.chg;
+            document.getElementById('m-risk').innerText = inc.risk;
+            document.getElementById('line-bypass').classList.add('line-hidden');
+            document.getElementById('line-1').classList.remove('line-hidden');
+            document.getElementById('line-2').classList.remove('line-hidden');
+        }
+
+        const list = document.getElementById('ci-list');
+        list.innerHTML = '';
+        inc.cis.forEach(ci => {
+            const d = document.createElement('div');
+            d.className = 'ci-item';
+            d.innerText = ci.name;
+            d.onclick = (e) => { e.stopPropagation(); selectCI(d, ci); };
+            list.appendChild(d);
+        });
+        draw();
+    }
+
+    function selectCI(el, ci) {
+        document.querySelectorAll('.ci-item').forEach(i => i.classList.remove('active'));
+        el.classList.add('active');
+        document.getElementById('m-loc').innerText = ci.loc;
+        document.getElementById('log-summary').innerText = ci.name;
+        document.getElementById('m-log').innerText = ci.log;
+        document.getElementById('m-fix').innerText = ci.fix;
+        document.getElementById('m-past').innerText = ci.past;
+        document.getElementById('exec-btn').innerText = "Run: " + ci.action;
+        document.getElementById('log-details').classList.add('expanded');
+        document.getElementById('fix-details').classList.add('expanded');
+        draw();
+    }
+
+    function execute() {
+        const b = document.getElementById('exec-btn');
+        b.innerText = "Processing..."; b.style.background = "#000";
+        setTimeout(() => { b.innerText = "Task Finished"; b.style.background = "#24b244"; }, 1200);
+    }
+
+    function toggle(id, btn) {
+        document.getElementById(id).classList.toggle('expanded');
+        const icon = btn.querySelector('i');
+        icon.className = icon.className.includes('down') ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+        let c = 0; let itv = setInterval(() => { draw(); if(c++ > 15) clearInterval(itv); }, 30);
+    }
+
+    function draw() {
+        const cont = document.getElementById('main-canvas').getBoundingClientRect();
+        const box = (id) => {
+            const r = document.getElementById(id).getBoundingClientRect();
+            return { x: r.left - cont.left, y: r.top - cont.top, w: r.width, h: r.height, cx: r.left - cont.left + (r.width / 2), cy: r.top - cont.top + (r.height / 2) };
+        };
+        const i = box('node-inc'); const h = box('node-chg'); const c = box('node-ci'); const l = box('node-log'); const f = box('node-fix');
+
+        document.getElementById('line-1').setAttribute('d', `M ${i.x + i.w} ${i.cy} L ${h.x} ${h.cy}`);
+        document.getElementById('line-2').setAttribute('d', `M ${h.x + h.w} ${h.cy} L ${c.x} ${c.cy}`);
+        document.getElementById('line-bypass').setAttribute('d', `M ${i.x + i.w} ${i.cy} C ${i.x + i.w + 40} ${i.cy}, ${c.x - 40} ${c.cy}, ${c.x} ${c.cy}`);
+        document.getElementById('line-3').setAttribute('d', `M ${c.cx} ${c.y + c.h} C ${c.cx} ${c.y + c.h + 20}, ${l.cx} ${l.y - 20}, ${l.cx} ${l.y}`);
+        document.getElementById('line-4').setAttribute('d', `M ${l.x + l.w} ${l.cy} L ${f.x} ${f.cy}`);
+    }
+
+    window.onload = () => { init(); setTimeout(draw, 300); };
+    window.onresize = draw;
+</script>
+</body>
+</html>

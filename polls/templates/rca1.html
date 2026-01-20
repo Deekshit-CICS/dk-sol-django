@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Row Forensic RCA</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.95);
+            --blue: #007aff;
+            --green: #24b244;
+            --connector: #444446;
+        }
+
+        body { background-color: var(--apple-bg); font-family: -apple-system, sans-serif; padding: 30px; }
+        .dashboard-container { max-width: 1200px; margin: auto; position: relative; }
+
+        /* Flow SVG Layer */
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { fill: none; stroke: var(--connector); stroke-width: 2.5; stroke-dasharray: 6; transition: 0.4s; }
+        .line-hidden { opacity: 0; }
+
+        /* Card Styles */
+        .apple-card {
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            border-radius: 22px;
+            border: 1px solid #fff;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
+            z-index: 2;
+            position: relative;
+            margin-bottom: 40px;
+        }
+
+        .collapse-btn { position: absolute; top: 12px; right: 12px; border: none; background: rgba(0,0,0,0.05); border-radius: 50%; width: 26px; height: 26px; }
+        .details-content { max-height: 0; opacity: 0; transition: all 0.4s ease; overflow: hidden; }
+        .details-content.expanded { max-height: 500px; opacity: 1; margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(0,0,0,0.08); }
+
+        /* CI List UI */
+        .ci-item { padding: 10px; border-radius: 12px; cursor: pointer; background: rgba(0,0,0,0.03); margin-bottom: 8px; font-size: 0.9rem; }
+        .ci-item.active { background: white; border: 1px solid var(--blue); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+        /* Fix Box */
+        .remediation-box { background: rgba(36, 178, 68, 0.06); border: 1px dashed var(--green); border-radius: 15px; padding: 15px; }
+        .btn-execute { background: var(--green); color: white; border: none; width: 100%; padding: 10px; border-radius: 12px; font-weight: 600; margin-top: 15px; }
+
+        pre { font-size: 0.8rem; background: #fff5f5; color: #c00; padding: 15px; border-radius: 12px; border: 1px solid #ffebeb; }
+        .label { font-size: 0.65rem; font-weight: 700; color: #86868b; text-transform: uppercase; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container" id="main-canvas">
+    <svg id="flow-canvas">
+        <path id="line-1" class="connector" /> <path id="line-2" class="connector" /> <path id="line-bypass" class="connector line-hidden" /> <path id="line-3" class="connector" /> <path id="line-4" class="connector" /> </svg>
+
+    <header class="d-flex justify-content-between align-items-center mb-5">
+        <h2 class="fw-bold">Forensic Workflow</h2>
+        <div class="d-flex gap-2">
+            <input type="text" class="form-control" style="border-radius:12px; width:250px" placeholder="App ID (e.g. APP-90)">
+            <button class="btn btn-primary" style="border-radius:12px">Search</button>
+        </div>
+    </header>
+
+    <div class="row g-4 mb-4">
+        <div class="col-md-4">
+            <div id="node-inc" class="apple-card p-4 text-center">
+                <button class="collapse-btn" onclick="toggle('inc-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label">Incident</div>
+                <h4 class="fw-bold text-primary" id="d-inc">---</h4>
+                <div id="inc-details" class="details-content">
+                    <div class="label">Assignee</div><div id="m-assign">-</div>
+                    <div class="label">Priority</div><div id="m-prio">P2 - High</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div id="node-chg" class="apple-card p-4 text-center">
+                <button class="collapse-btn" onclick="toggle('chg-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label">Change</div>
+                <h4 class="fw-bold" id="d-chg">---</h4>
+                <div id="chg-details" class="details-content">
+                    <div class="label">Risk</div><div id="m-risk">-</div>
+                    <div class="label">Status</div><div>Implemented</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div id="node-ci" class="apple-card p-4">
+                <button class="collapse-btn" onclick="toggle('ci-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label mb-2">Affected CIs</div>
+                <div id="ci-list"></div>
+                <div id="ci-details" class="details-content">
+                    <div class="row">
+                        <div class="col-6"><div class="label">OS</div><div id="m-os">-</div></div>
+                        <div class="col-6"><div class="label">Location</div><div id="m-loc">-</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 justify-content-center">
+        <div class="col-md-5">
+            <div id="node-log" class="apple-card p-4 border-start border-danger border-5">
+                <button class="collapse-btn" onclick="toggle('log-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label text-danger">Forensic Evidence</div>
+                <div id="log-summary" class="fw-bold mt-1">Select a CI above...</div>
+                <div id="log-details" class="details-content">
+                    <pre id="m-log"></pre>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div id="node-fix" class="apple-card p-4 border-start border-success border-5">
+                <button class="collapse-btn" onclick="toggle('fix-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label text-success">Remediation Engine</div>
+                <div class="remediation-box mt-2">
+                    <div class="fw-bold small">Suggested Fix:</div>
+                    <div id="m-fix" class="text-secondary small">Awaiting selection...</div>
+                </div>
+                <div id="fix-details" class="details-content">
+                    <div class="label">Past Resolutions</div>
+                    <div id="m-past" class="small text-muted italic">---</div>
+                    <button id="exec-btn" class="btn-execute" onclick="execute()">Execute Remediation</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="apple-card overflow-hidden mt-2">
+        <table class="table mb-0 table-hover">
+            <thead class="table-light small"><tr><th>Incident</th><th>Description</th><th>Change</th></tr></thead>
+            <tbody id="masterTable"></tbody>
+        </table>
+    </div>
+</div>
+
+
+
+<script>
+    const db = [
+        {
+            id: 'INC-4002', desc: 'Web Cluster Latency', chg: 'CHG-902',
+            assign: 'Robert Fox', risk: 'Moderate',
+            cis: [{ 
+                name: 'WEB-SRV-ALPHA', os: 'Ubuntu 22.04', loc: 'US-West-1',
+                log: 'Crit: Connection backlog full (1024). Incoming requests dropped.',
+                fix: 'Increase TCP backlog limit and restart Nginx service.',
+                past: 'Similar to INC-3882: Resolved by kernel tuning.',
+                action: 'Run Kernel Tune Script'
+            }]
+        },
+        {
+            id: 'INC-4005', desc: 'DB Deadlock', chg: null,
+            assign: 'Jane Cooper', risk: 'N/A',
+            cis: [{ 
+                name: 'POSTGRES-PROD-01', os: 'Debian 11', loc: 'US-East-2',
+                log: 'ERROR: deadlock detected. Process 442 waiting for ShareLock.',
+                fix: 'Kill long-running idle transactions and optimize index.',
+                past: 'Resolved in Oct by killing PID 5521.',
+                action: 'Kill Idle Transactions'
+            }]
+        }
+    ];
+
+    function init() {
+        const body = document.getElementById('masterTable');
+        db.forEach((inc, idx) => {
+            const tr = document.createElement('tr');
+            if(idx === 0) tr.className = 'table-selected';
+            tr.innerHTML = `<td><b>${inc.id}</b></td><td>${inc.desc}</td><td>${inc.chg || 'None'}</td>`;
+            tr.onclick = () => loadInc(tr, inc);
+            body.appendChild(tr);
+        });
+        loadInc(null, db[0]);
+    }
+
+    function loadInc(row, inc) {
+        if(row) {
+            document.querySelectorAll('tr').forEach(r => r.classList.remove('table-selected'));
+            row.classList.add('table-selected');
+        }
+        document.getElementById('d-inc').innerText = inc.id;
+        document.getElementById('m-assign').innerText = inc.assign;
+        
+        const chgNode = document.getElementById('node-chg');
+        if(!inc.chg) {
+            chgNode.style.opacity = '0.3'; document.getElementById('d-chg').innerText = "N/A";
+            document.getElementById('line-bypass').classList.remove('line-hidden');
+            document.getElementById('line-1').classList.add('line-hidden');
+            document.getElementById('line-2').classList.add('line-hidden');
+        } else {
+            chgNode.style.opacity = '1'; document.getElementById('d-chg').innerText = inc.chg;
+            document.getElementById('m-risk').innerText = inc.risk;
+            document.getElementById('line-bypass').classList.add('line-hidden');
+            document.getElementById('line-1').classList.remove('line-hidden');
+            document.getElementById('line-2').classList.remove('line-hidden');
+        }
+
+        const list = document.getElementById('ci-list');
+        list.innerHTML = '';
+        inc.cis.forEach(ci => {
+            const d = document.createElement('div');
+            d.className = 'ci-item';
+            d.innerText = ci.name;
+            d.onclick = (e) => { e.stopPropagation(); selectCI(d, ci); };
+            list.appendChild(d);
+        });
+        draw();
+    }
+
+    function selectCI(el, ci) {
+        document.querySelectorAll('.ci-item').forEach(i => i.classList.remove('active'));
+        el.classList.add('active');
+        document.getElementById('m-os').innerText = ci.os;
+        document.getElementById('m-loc').innerText = ci.loc;
+        document.getElementById('log-summary').innerText = ci.name + " Failure";
+        document.getElementById('m-log').innerText = ci.log;
+        document.getElementById('m-fix').innerText = ci.fix;
+        document.getElementById('m-past').innerText = ci.past;
+        document.getElementById('exec-btn').innerText = "Execute: " + ci.action;
+        
+        document.getElementById('log-details').classList.add('expanded');
+        document.getElementById('fix-details').classList.add('expanded');
+        draw();
+    }
+
+    function execute() {
+        const b = document.getElementById('exec-btn');
+        b.innerText = "Triggering Automation...";
+        b.style.background = "#000";
+        setTimeout(() => { b.innerText = "Execution Successful"; b.style.background = "#24b244"; }, 1500);
+    }
+
+    function toggle(id, btn) {
+        document.getElementById(id).classList.toggle('expanded');
+        const icon = btn.querySelector('i');
+        icon.className = icon.className.includes('down') ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+        let c = 0; let itv = setInterval(() => { draw(); if(c++ > 15) clearInterval(itv); }, 30);
+    }
+
+    function draw() {
+        const cont = document.getElementById('main-canvas').getBoundingClientRect();
+        const box = (id) => {
+            const r = document.getElementById(id).getBoundingClientRect();
+            return { x: r.left - cont.left, y: r.top - cont.top, w: r.width, h: r.height, cx: r.left - cont.left + (r.width / 2), cy: r.top - cont.top + (r.height / 2) };
+        };
+        const i = box('node-inc'); const h = box('node-chg'); const c = box('node-ci'); const l = box('node-log'); const f = box('node-fix');
+
+        // Row 1
+        document.getElementById('line-1').setAttribute('d', `M ${i.x + i.w} ${i.cy} L ${h.x} ${h.cy}`);
+        document.getElementById('line-2').setAttribute('d', `M ${h.x + h.w} ${h.cy} L ${c.x} ${c.cy}`);
+        document.getElementById('line-bypass').setAttribute('d', `M ${i.x + i.w} ${i.cy} C ${i.x + i.w + 50} ${i.cy}, ${c.x - 50} ${c.cy}, ${c.x} ${c.cy}`);
+        
+        // Vertical Break (CI to Log) - Curved S-Path
+        document.getElementById('line-3').setAttribute('d', `M ${c.x + (c.w/2)} ${c.y + c.h} C ${c.x + (c.w/2)} ${c.y + c.h + 30}, ${l.x + (l.w/2)} ${l.y - 30}, ${l.x + (l.w/2)} ${l.y}`);
+        
+        // Row 2
+        document.getElementById('line-4').setAttribute('d', `M ${l.x + l.w} ${l.cy} L ${f.x} ${f.cy}`);
+    }
+
+    window.onload = () => { init(); setTimeout(draw, 300); };
+    window.onresize = draw;
+</script>
+</body>
+</html>
