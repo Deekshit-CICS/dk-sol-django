@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Sentinel | Forensic Spine</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --bg: #f5f5f7;
+            --accent: #0071e3;
+            --text: #1d1d1f;
+            --text-sec: #86868b;
+            --card: rgba(255, 255, 255, 0.8);
+            --connector: #424245; /* Darker, professional lines */
+        }
+
+        body { 
+            background-color: var(--bg); 
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro", sans-serif;
+            padding-bottom: 100px;
+        }
+
+        .spine-container { max-width: 850px; margin: 0 auto; position: relative; }
+
+        /* SVG Logic - Clean Bezier Curves */
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { fill: none; stroke: var(--connector); stroke-width: 1.5; opacity: 0.2; transition: 0.5s ease; }
+
+        /* Centered Header & Search */
+        .header-section { text-align: center; margin: 40px 0 60px; z-index: 10; position: relative; }
+        .search-box {
+            max-width: 450px; margin: 20px auto; position: relative;
+        }
+        .search-input {
+            width: 100%; border-radius: 12px; border: 1px solid rgba(0,0,0,0.1);
+            padding: 12px 15px 12px 45px; background: #fff; font-size: 0.95rem;
+        }
+
+        /* Tiered Center Alignment */
+        .node-row { display: flex; justify-content: center; gap: 30px; margin-bottom: 80px; position: relative; z-index: 2; }
+        
+        .n-card {
+            background: var(--card); backdrop-filter: blur(20px);
+            border-radius: 16px; border: 1px solid #fff;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.03);
+            padding: 20px; width: 300px; transition: 0.3s;
+        }
+        .node-disabled { opacity: 0.15; filter: grayscale(1); pointer-events: none; }
+
+        /* Compact UI Elements */
+        .lbl { font-size: 11px; font-weight: 700; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+        .val { font-size: 1.1rem; font-weight: 700; margin-bottom: 2px; }
+        .sub { font-size: 13px; color: var(--text-sec); }
+
+        .ci-pill {
+            padding: 10px 14px; background: rgba(0,0,0,0.03); border-radius: 10px;
+            margin-bottom: 8px; cursor: pointer; font-size: 14px; display: flex;
+            justify-content: space-between; align-items: center; border: 1.5px solid transparent;
+        }
+        .ci-pill.active { background: #fff; border-color: var(--accent); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .ci-pill.err { border-left: 4px solid #ff3b30; }
+
+        /* Forensic Panels */
+        .forensic-panel { width: 100%; background: #fff; border-radius: 16px; padding: 25px; border: 1px solid rgba(0,0,0,0.05); }
+        pre { font-size: 12px; background: #1c1c1e; color: #ff6961; padding: 15px; border-radius: 10px; margin: 0; }
+        
+        .remedy-box { background: rgba(40, 205, 65, 0.05); padding: 15px; border-radius: 12px; border: 1px solid rgba(40, 205, 65, 0.1); }
+        .btn-apple { background: var(--accent); color: white; border: none; padding: 12px; border-radius: 10px; font-weight: 600; width: 100%; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="spine-container">
+    <svg id="flow-canvas">
+        <path id="p-inc" class="connector" />
+        <path id="p-chg" class="connector" />
+        <path id="p-ci" class="connector" />
+    </svg>
+
+    <div class="header-section">
+        <h1 class="h3 fw-bold">Nexus Sentinel</h1>
+        <p class="text-muted small">Forensic Triage Engine</p>
+        <div class="search-box">
+            <i class="bi bi-search position-absolute" style="left:18px; top:12px; color:var(--text-sec)"></i>
+            <input type="text" id="sQuery" class="search-input" placeholder="Search APP-ID, INC-xxx, or CHG-xxx..." onkeyup="handleKey(event)">
+        </div>
+    </div>
+
+    <div class="node-row">
+        <div id="card-inc" class="n-card">
+            <div class="lbl">Primary Incident</div>
+            <div class="val text-primary" id="v-inc-id">---</div>
+            <div class="sub" id="v-inc-desc">No selection</div>
+            <div class="mt-3 pt-3 border-top d-flex justify-content-between">
+                <span class="sub" id="v-inc-prio">-</span>
+                <span class="sub fw-bold" id="v-inc-app">-</span>
+            </div>
+        </div>
+        <div id="card-chg" class="n-card">
+            <div class="lbl">Related Change</div>
+            <div class="val" id="v-chg-id">---</div>
+            <div class="sub" id="v-chg-status">Status: ---</div>
+            <div class="mt-3 pt-3 border-top">
+                <div class="lbl" style="font-size: 9px;">Deployment Window</div>
+                <div class="sub fw-bold" id="v-chg-time">---</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="node-row">
+        <div id="card-ci" class="n-card" style="width: 450px;">
+            <div class="lbl mb-3">Discovery Path: Impacted CIs</div>
+            <div id="ci-list">
+                <div class="text-center py-3 text-muted small">Enter search to fetch asset data</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 position-relative" style="z-index: 2;">
+        <div class="col-md-6">
+            <div class="forensic-panel h-100">
+                <div class="lbl mb-2">Error Telemetry</div>
+                <pre id="v-log">Awaiting CI selection...</pre>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="forensic-panel h-100">
+                <div class="lbl mb-2">AI Resolution</div>
+                <div class="remedy-box">
+                    <div class="lbl text-success">Recommended Action</div>
+                    <div class="val" id="v-fix" style="font-size: 0.85rem;">Pending identification...</div>
+                </div>
+                <button class="btn-apple" onclick="alert('Action Sent')">Apply Remediation</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const db = [
+        {
+            app: 'AUTH-PROD', inc: 'INC-882', chg: 'CHG-101', status: 'Completed',
+            desc: 'User Login Timeout', prio: 'P1 - Critical', time: '14:00 - 15:00 UTC',
+            cis: [
+                { name: 'SRV-AUTH-01', err: true, log: '[14:12] ERR: Connection Refused\n[14:13] CRIT: Port 443 Closed', fix: 'Re-enable Firewall Rule 88' },
+                { name: 'DB-REPL-02', err: false, log: '[14:12] INFO: Latency 2ms', fix: 'System Healthy' }
+            ]
+        },
+        {
+            app: 'PAY-GATEWAY', inc: 'INC-441', chg: null, status: 'N/A',
+            desc: 'SSL Handshake Error', prio: 'P2 - High', time: 'N/A',
+            cis: [
+                { name: 'GW-PROXY-01', err: true, log: '[16:05] ERR: Expired Certificate', fix: 'Renew SSL Cert via Vault' }
+            ]
+        }
+    ];
+
+    function handleKey(e) {
+        const q = e.target.value.toUpperCase();
+        const results = db.filter(d => d.app.includes(q) || d.inc.includes(q) || (d.chg && d.chg.includes(q)));
+        
+        if (e.key === 'Enter' && results.length) {
+            const match = results[0];
+            
+            // Logic Scenarios
+            document.getElementById('card-inc').classList.toggle('node-disabled', q.startsWith('CHG') && !match.inc);
+            document.getElementById('card-chg').classList.toggle('node-disabled', q.startsWith('INC') && !match.chg);
+
+            load(match);
+        }
+    }
+
+    function load(d) {
+        document.getElementById('v-inc-id').innerText = d.inc;
+        document.getElementById('v-inc-desc').innerText = d.desc;
+        document.getElementById('v-inc-prio').innerText = d.prio;
+        document.getElementById('v-inc-app').innerText = d.app;
+        document.getElementById('v-chg-id').innerText = d.chg || 'None';
+        document.getElementById('v-chg-status').innerText = 'Status: ' + d.status;
+        document.getElementById('v-chg-time').innerText = d.time;
+
+        const list = document.getElementById('ci-list');
+        list.innerHTML = '';
+        d.cis.forEach(ci => {
+            const div = document.createElement('div');
+            div.className = `ci-pill ${ci.err ? 'err' : ''}`;
+            div.innerHTML = `<span><b>${ci.name}</b></span> <i class="bi bi-chevron-right"></i>`;
+            div.onclick = () => {
+                document.querySelectorAll('.ci-pill').forEach(p => p.classList.remove('active'));
+                div.classList.add('active');
+                document.getElementById('v-log').innerText = ci.log;
+                document.getElementById('v-fix').innerText = ci.fix;
+                draw();
+            };
+            list.appendChild(div);
+        });
+        setTimeout(draw, 100);
+    }
+
+    function draw() {
+        const getB = (id) => {
+            const r = document.getElementById(id).getBoundingClientRect();
+            const c = document.querySelector('.spine-container').getBoundingClientRect();
+            return { x: r.left - c.left + (r.width/2), y: r.top - c.top + (r.height/2), t: r.top - c.top, b: r.top - c.top + r.height };
+        };
+
+        const i = getB('card-inc'), h = getB('card-chg'), ci = getB('card-ci');
+        const incV = !document.getElementById('card-inc').classList.contains('node-disabled');
+        const chgV = !document.getElementById('card-chg').classList.contains('node-disabled');
+
+        // Clean curves flowing to center CI card
+        const curve = (x1, y1, x2, y2) => `M ${x1} ${y1} C ${x1} ${y1 + 40}, ${x2} ${y2 - 40}, ${x2} ${y2}`;
+        
+        document.getElementById('p-inc').setAttribute('d', incV ? curve(i.x, i.b, ci.x - 30, ci.t) : '');
+        document.getElementById('p-chg').setAttribute('d', chgV ? curve(h.x, h.b, ci.x + 30, ci.t) : '');
+        document.getElementById('p-ci').setAttribute('d', curve(ci.x, ci.b, ci.x, ci.b + 40));
+    }
+
+    window.onload = () => load(db[0]);
+    window.onresize = draw;
+</script>
+</body>
+</html>

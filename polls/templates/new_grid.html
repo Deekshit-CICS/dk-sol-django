@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forensic RCA | Smart Routing</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.9);
+            --blue: #0071e3;
+            --green: #28cd41;
+            --text-main: #1d1d1f;
+            --text-sec: #6e6e73;
+            --connector-color: #3a3a3c;
+            --border: rgba(0,0,0,0.08);
+        }
+
+        body { 
+            background-color: var(--apple-bg); 
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+            padding: 30px;
+        }
+
+        .dashboard-container { max-width: 1200px; margin: auto; position: relative; }
+
+        .tier-header {
+            font-size: 0.75rem; font-weight: 700; color: var(--text-sec);
+            text-transform: uppercase; letter-spacing: 0.1em;
+            margin: 40px 0 20px 0; display: flex; align-items: center; gap: 15px;
+        }
+        .tier-header::after { content: ""; height: 1px; background: var(--border); flex-grow: 1; }
+
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { 
+            fill: none; stroke: var(--connector-color); stroke-width: 1.5; 
+            stroke-dasharray: 5, 5; opacity: 0.4; transition: 0.5s ease; 
+        }
+
+        .apple-card {
+            background: var(--glass); backdrop-filter: blur(20px) saturate(180%);
+            border-radius: 20px; border: 1px solid #fff;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
+            z-index: 2; position: relative; transition: opacity 0.4s ease;
+        }
+
+        .node-disabled { opacity: 0.3; filter: grayscale(1); }
+
+        .collapse-btn { 
+            position: absolute; top: 15px; right: 15px; border: none; 
+            background: rgba(0,0,0,0.04); border-radius: 50%; width: 28px; height: 28px; 
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+        }
+        
+        .details-content { max-height: 0; opacity: 0; transition: all 0.5s ease; overflow: hidden; }
+        .details-content.expanded { max-height: 500px; opacity: 1; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border); }
+
+        .label { font-size: 0.65rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; margin-bottom: 2px; }
+        .val { font-size: 0.9rem; color: var(--text-main); font-weight: 500; margin-bottom: 10px; }
+
+        .ci-item { padding: 12px; border-radius: 12px; cursor: pointer; background: rgba(0,0,0,0.02); margin-bottom: 8px; display: flex; justify-content: space-between; border: 1.5px solid transparent; }
+        .ci-item.active { background: white; border-color: var(--blue); box-shadow: 0 4px 12px rgba(0, 0, 115, 0.05); }
+
+        pre { font-size: 0.75rem; background: #1c1c1e; color: #ff6961; padding: 15px; border-radius: 14px; margin: 0; }
+        .btn-execute { background: var(--blue); color: white; border: none; width: 100%; padding: 12px; border-radius: 12px; font-weight: 600; margin-top: 15px; }
+
+        .table-container { margin-top: 40px; border-radius: 20px; overflow: hidden; background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+        .table-selected { background-color: rgba(0, 113, 227, 0.08) !important; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container" id="main-canvas">
+    <svg id="flow-canvas">
+        <path id="line-inc-to-ci" class="connector" /> 
+        <path id="line-chg-to-ci" class="connector" />
+        <path id="line-discovery-l" class="connector" />
+        <path id="line-discovery-r" class="connector" />
+    </svg>
+
+    <header class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="fw-bold h3 mb-1">Forensic RCA</h1>
+        <div class="d-flex gap-2">
+            <input type="text" id="masterSearch" class="form-control" style="width:300px; border-radius:12px;" placeholder="Search App, Inc, or Chg..." onkeyup="handleSearch()">
+        </div>
+    </header>
+
+    <div class="tier-header">Layer 01: Triage</div>
+    <div class="row g-4 justify-content-center">
+        <div class="col-md-5">
+            <div id="node-inc" class="apple-card p-4">
+                <button class="collapse-btn" onclick="toggle('inc-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label text-primary">Incident Record</div>
+                <h4 class="fw-bold mb-1" id="d-inc">---</h4>
+                <div class="small text-muted mb-3" id="d-desc">Select record below</div>
+                <div id="inc-details" class="details-content">
+                    <div class="row">
+                        <div class="col-6"><div class="label">Priority</div><div class="val" id="m-prio">-</div></div>
+                        <div class="col-6"><div class="label">Group</div><div class="val" id="m-group">-</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div id="node-chg" class="apple-card p-4">
+                <button class="collapse-btn" onclick="toggle('chg-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label">Linked Change</div>
+                <h4 class="fw-bold mb-1" id="d-chg">---</h4>
+                <div class="small text-muted mb-3" id="chg-status-text">External Correlation</div>
+                <div id="chg-details" class="details-content">
+                    <div class="label">Risk Level</div><div class="val" id="m-risk">-</div>
+                    <div class="label">Audit Log</div><div class="val">No recent alterations</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tier-header">Layer 02: Discovery</div>
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div id="node-ci" class="apple-card p-4">
+                <button class="collapse-btn" onclick="toggle('ci-details', this)"><i class="bi bi-chevron-down"></i></button>
+                <div class="label mb-3">CI Discovery</div>
+                <div id="ci-list"></div>
+                <div id="ci-details" class="details-content">
+                    <div class="row">
+                        <div class="col-6"><div class="label">OS</div><div class="val" id="m-os">-</div></div>
+                        <div class="col-6"><div class="label">Loc</div><div class="val" id="m-loc">-</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tier-header">Layer 03: Remediate</div>
+    <div class="row g-4 justify-content-center">
+        <div class="col-md-5">
+            <div id="node-log" class="apple-card p-4 border-top border-danger border-4">
+                <div class="label text-danger mb-2">Logs</div>
+                <pre id="m-log">Awaiting CI...</pre>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div id="node-fix" class="apple-card p-4 border-top border-success border-4">
+                <div class="label text-success mb-2">AI Fix</div>
+                <div id="m-fix" class="val small text-muted">Generate recommendation...</div>
+                <button id="exec-btn" class="btn-execute" onclick="execute()">Apply Fix</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-container">
+        <table class="table table-hover mb-0">
+            <thead class="table-light small text-uppercase">
+                <tr><th>App ID</th><th>Incident</th><th>Change</th><th>Priority</th></tr>
+            </thead>
+            <tbody id="masterTable" style="cursor: pointer;"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const dataRepo = [
+        {
+            app: 'SHOP-PAY-01', id: 'INC-8821', desc: 'DB Query Timeout', chg: 'CHG-5501',
+            group: 'DBA-Team', prio: 'P1', risk: 'High',
+            cis: [{ name: 'SQL-PROD-01', os: 'Win2022', loc: 'US-East', log: 'ERR: Locked Process 99', fix: 'Kill blocking PID 99.', action: 'Kill PID' }]
+        },
+        {
+            app: 'AUTH-SERVICE', id: 'INC-4402', desc: 'Sudden Memory Leak', chg: null, // NO CHANGE CASE
+            group: 'DevOps', prio: 'P2', risk: 'N/A',
+            cis: [{ name: 'AUTH-POD-X', os: 'Linux', loc: 'Global', log: 'CRIT: OOM Error', fix: 'Scale horizontal replicas.', action: 'Scale Replicas' }]
+        }
+    ];
+
+    function handleSearch() {
+        const q = document.getElementById('masterSearch').value.toLowerCase();
+        const filtered = dataRepo.filter(i => i.app.toLowerCase().includes(q) || i.id.toLowerCase().includes(q) || (i.chg && i.chg.toLowerCase().includes(q)));
+        renderTable(filtered);
+    }
+
+    function renderTable(list) {
+        const body = document.getElementById('masterTable');
+        body.innerHTML = '';
+        list.forEach((inc, idx) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td><b>${inc.app}</b></td><td>${inc.id}</td><td>${inc.chg || '<span class="text-muted">N/A</span>'}</td><td>${inc.prio}</td>`;
+            tr.onclick = () => loadInc(tr, inc);
+            body.appendChild(tr);
+        });
+        if(list.length) loadInc(null, list[0]);
+    }
+
+    function loadInc(row, inc) {
+        document.querySelectorAll('tr').forEach(r => r.classList.remove('table-selected'));
+        if(row) row.classList.add('table-selected');
+
+        document.getElementById('d-inc').innerText = inc.id;
+        document.getElementById('d-desc').innerText = inc.desc;
+        document.getElementById('m-prio').innerText = inc.prio;
+        document.getElementById('m-group').innerText = inc.group;
+        
+        const chgCard = document.getElementById('node-chg');
+        if(!inc.chg) {
+            chgCard.classList.add('node-disabled');
+            document.getElementById('d-chg').innerText = "N/A";
+            document.getElementById('chg-status-text').innerText = "No Correlation Found";
+        } else {
+            chgCard.classList.remove('node-disabled');
+            document.getElementById('d-chg').innerText = inc.chg;
+            document.getElementById('chg-status-text').innerText = "Recent Deployment";
+        }
+
+        const list = document.getElementById('ci-list');
+        list.innerHTML = '';
+        inc.cis.forEach(ci => {
+            const d = document.createElement('div');
+            d.className = 'ci-item';
+            d.innerHTML = `<span><b>${ci.name}</b></span> <i class="bi bi-chevron-right small text-muted"></i>`;
+            d.onclick = () => {
+                document.querySelectorAll('.ci-item').forEach(i => i.classList.remove('active'));
+                d.classList.add('active');
+                document.getElementById('m-os').innerText = ci.os;
+                document.getElementById('m-loc').innerText = ci.loc;
+                document.getElementById('m-log').innerText = ci.log;
+                document.getElementById('m-fix').innerText = ci.fix;
+                document.getElementById('exec-btn').innerText = "Run: " + ci.action;
+            };
+            list.appendChild(d);
+        });
+        setTimeout(draw, 100);
+    }
+
+    function toggle(id, btn) {
+        document.getElementById(id).classList.toggle('expanded');
+        setTimeout(draw, 300);
+    }
+
+    function draw() {
+        const cont = document.getElementById('main-canvas').getBoundingClientRect();
+        const box = (id) => {
+            const r = document.getElementById(id).getBoundingClientRect();
+            return { cx: r.left - cont.left + (r.width / 2), y: r.top - cont.top, h: r.height };
+        };
+        const inc = box('node-inc'), chg = box('node-chg'), ci = box('node-ci'), log = box('node-log'), fix = box('node-fix');
+
+        // Dynamic Routing
+        const isChgDisabled = document.getElementById('node-chg').classList.contains('node-disabled');
+        
+        if(isChgDisabled) {
+            // Path directly from Incident to CI center
+            document.getElementById('line-inc-to-ci').setAttribute('d', `M ${inc.cx} ${inc.y + inc.h} C ${inc.cx} ${ci.y - 40}, ${ci.cx} ${ci.y - 40}, ${ci.cx} ${ci.y}`);
+            document.getElementById('line-chg-to-ci').setAttribute('d', ''); // Hide second line
+        } else {
+            // Standard dual paths
+            document.getElementById('line-inc-to-ci').setAttribute('d', `M ${inc.cx} ${inc.y + inc.h} C ${inc.cx} ${ci.y - 20}, ${ci.cx - 50} ${ci.y - 20}, ${ci.cx - 50} ${ci.y}`);
+            document.getElementById('line-chg-to-ci').setAttribute('d', `M ${chg.cx} ${chg.y + chg.h} C ${chg.cx} ${ci.y - 20}, ${ci.cx + 50} ${ci.y - 20}, ${ci.cx + 50} ${ci.y}`);
+        }
+
+        document.getElementById('line-discovery-l').setAttribute('d', `M ${ci.cx} ${ci.y + ci.h} C ${ci.cx} ${log.y - 30}, ${log.cx} ${log.y - 30}, ${log.cx} ${log.y}`);
+        document.getElementById('line-discovery-r').setAttribute('d', `M ${ci.cx} ${ci.y + ci.h} C ${ci.cx} ${fix.y - 30}, ${fix.cx} ${fix.y - 30}, ${fix.cx} ${fix.y}`);
+    }
+
+    function execute() {
+        alert("Remediation triggered successfully.");
+    }
+
+    window.onload = () => renderTable(dataRepo);
+    window.onresize = draw;
+</script>
+</body>
+</html>

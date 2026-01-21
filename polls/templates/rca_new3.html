@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Sentinel | Complete Forensic RCA</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.95);
+            --blue: #0071e3;
+            --green: #28cd41;
+            --text-main: #1d1d1f;
+            --text-sec: #6e6e73;
+            --connector-color: #1d1d1f; /* Darker Lines as requested */
+            --border: rgba(0,0,0,0.08);
+        }
+
+        body { 
+            background-color: var(--apple-bg); 
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; 
+            padding: 30px;
+            overflow-x: hidden;
+        }
+
+        .dashboard-container { max-width: 1400px; margin: auto; position: relative; }
+
+        /* SVG Logic - Dark Connectors */
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { 
+            fill: none; 
+            stroke: var(--connector-color); 
+            stroke-width: 1.5; 
+            stroke-dasharray: 4, 3;
+            opacity: 0.7; /* Increased visibility */
+            transition: all 0.5s ease;
+        }
+        .line-hidden { opacity: 0; }
+
+        /* Header Layout */
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 60px; }
+        .search-group { display: flex; gap: 10px; }
+        .search-input { width: 320px; border-radius: 10px; border: 1px solid var(--border); padding: 10px 15px; background: white; }
+        .btn-search { background: var(--blue); color: white; border: none; padding: 0 25px; border-radius: 10px; font-weight: 500; }
+
+        /* Card System */
+        .apple-card {
+            background: var(--glass);
+            backdrop-filter: blur(20px) saturate(180%);
+            border-radius: 20px;
+            border: 1px solid #fff;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
+            padding: 24px;
+            position: relative;
+            z-index: 2;
+            margin-bottom: 40px;
+        }
+
+        /* Action Buttons on Cards */
+        .card-controls { position: absolute; top: 15px; right: 15px; display: flex; gap: 8px; }
+        .btn-mini { 
+            border: none; background: rgba(0,0,0,0.05); border-radius: 50%; 
+            width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 12px;
+        }
+
+        /* Expandable Sections */
+        .details-content { 
+            max-height: 0; opacity: 0; overflow: hidden; 
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); 
+        }
+        .details-content.expanded { max-height: 500px; opacity: 1; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border); }
+
+        /* Typography */
+        .label { font-size: 0.7rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+        .val { font-size: 1.1rem; font-weight: 700; margin-bottom: 2px; }
+        .sub-val { font-size: 0.8rem; color: var(--text-sec); }
+
+        /* Lists and Status */
+        .ci-pill {
+            padding: 12px 15px; border-radius: 12px; background: rgba(0,0,0,0.03);
+            margin-bottom: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+        }
+        .ci-pill.active { background: white; border: 1.5px solid var(--blue); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+        pre { font-family: "SF Mono", monospace; font-size: 0.8rem; background: #1c1c1e; color: #ff6961; padding: 20px; border-radius: 15px; margin: 0; }
+        .btn-execute { background: var(--blue); color: white; border: none; width: 100%; padding: 12px; border-radius: 12px; font-weight: 600; margin-top: 15px; }
+
+        .status-pulse {
+            position: absolute; top: 20px; left: 20px; width: 8px; height: 8px; border-radius: 50%;
+            background: var(--green); box-shadow: 0 0 0 rgba(40, 205, 65, 0.4); animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(40, 205, 65, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(40, 205, 65, 0); } 100% { box-shadow: 0 0 0 0 rgba(40, 205, 65, 0); } }
+
+        .table-wrap { background: white; border-radius: 20px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.05); margin-top: 40px; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container" id="main-frame">
+    <svg id="flow-canvas">
+        <path id="line-1" class="connector" /> 
+        <path id="line-2" class="connector" />
+        <path id="line-bypass" class="connector line-hidden" />
+        <path id="line-3" class="connector" />
+        <path id="line-4" class="connector" />
+    </svg>
+
+    <header>
+        <div>
+            <h1 class="fw-bold h2 mb-1">Nexus Sentinel</h1>
+            <p class="text-muted small mb-0">Complete Forensic RCA Engine</p>
+        </div>
+        <div class="search-group">
+            <input type="text" id="searchInput" class="search-input" placeholder="Search App, Incident, or Change..." onkeyup="if(event.key==='Enter') performSearch()">
+            <button class="btn-search" onclick="performSearch()">Search</button>
+        </div>
+    </header>
+
+    <div class="row g-4 justify-content-center mb-5">
+        <div class="col-md-4">
+            <div id="node-inc" class="apple-card">
+                <div class="card-controls">
+                    <button class="btn-mini" onclick="toggle('inc-details')"><i class="bi bi-plus"></i></button>
+                    <button class="btn-mini"><i class="bi bi-plus"></i></button>
+                </div>
+                <div class="label text-primary">Primary Incident</div>
+                <div class="val" id="d-inc">---</div>
+                <div class="sub-val" id="d-desc">Ready for analysis</div>
+                <div id="inc-details" class="details-content">
+                    <div class="label">Priority</div><div class="val small" id="m-prio">-</div>
+                    <div class="label">Assignee</div><div class="val small" id="m-assign">-</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div id="node-chg" class="apple-card">
+                <div class="card-controls">
+                    <button class="btn-mini" onclick="toggle('chg-details')"><i class="bi bi-plus"></i></button>
+                    <button class="btn-mini"><i class="bi bi-plus"></i></button>
+                </div>
+                <div class="label">Linked Change</div>
+                <div class="val" id="d-chg">---</div>
+                <div class="sub-val" id="d-status">Status: ---</div>
+                <div id="chg-details" class="details-content">
+                    <div class="label">Risk</div><div class="val small" id="m-risk">-</div>
+                    <div class="label">Implementation</div><div class="val small" id="m-time">-</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row justify-content-center mb-5">
+        <div class="col-md-5">
+            <div id="node-ci" class="apple-card">
+                <div class="card-controls">
+                    <button class="btn-mini" onclick="toggle('ci-details')"><i class="bi bi-plus"></i></button>
+                    <button class="btn-mini"><i class="bi bi-plus"></i></button>
+                </div>
+                <div class="label mb-3">Discovery Findings: Impacted Assets</div>
+                <div id="ci-list"></div>
+                <div id="ci-details" class="details-content">
+                    <div class="row">
+                        <div class="col-6"><div class="label">OS</div><div class="val small" id="m-os">-</div></div>
+                        <div class="col-6"><div class="label">Env</div><div class="val small" id="m-env">-</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 justify-content-center">
+        <div class="col-md-5">
+            <div id="node-log" class="apple-card border-start border-danger border-5">
+                <div class="label text-danger">Forensic Evidence</div>
+                <h5 class="fw-bold mt-2" id="log-summary">CI Log Streams</h5>
+                <pre id="m-log">Select an asset to parse logs...</pre>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div id="node-fix" class="apple-card border-start border-success border-5">
+                <div class="status-pulse"></div>
+                <div class="label text-success ps-3">AI Remediation Engine</div>
+                <div class="mt-3 p-3 rounded-4" style="background: rgba(40, 205, 65, 0.08); border: 1px solid rgba(40, 205, 65, 0.1);">
+                    <div class="label">Recommended Action</div>
+                    <div class="val" style="font-size: 0.9rem;" id="m-fix">Awaiting asset context...</div>
+                </div>
+                <button class="btn-execute" id="exec-btn" onclick="execute()">Execute Remediation</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr><th>App ID</th><th>Incident #</th><th>Linked Change</th><th>Health Status</th></tr>
+            </thead>
+            <tbody id="masterTable" style="cursor: pointer;"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const dataRepo = [
+        {
+            app: 'CORE-BANK-01', id: 'INC-8821', chg: 'CHG-445', status: 'Deployed',
+            desc: 'Transaction Latency Spike', assign: 'Sarah L.', prio: 'P1 - Critical', risk: 'High', time: '22:00 - 23:00 EST',
+            cis: [
+                { name: 'SRV-API-01', os: 'RHEL 9.2', env: 'Production', log: 'ERROR: Thread pool exhausted\nWARN: GC overhead limit exceeded', fix: 'Scale horizontal replicas and flush cache.', action: 'Scale Replicas' },
+                { name: 'DB-SQL-PROD', os: 'Win22', env: 'Production', log: 'INFO: Connection count normal', fix: 'No action required.', action: 'Check Sync' }
+            ]
+        },
+        {
+            app: 'AUTH-PORTAL', id: 'INC-9904', chg: null, status: 'N/A',
+            desc: 'OIDC Handshake Timeout', assign: 'Dave M.', prio: 'P2 - High', risk: 'N/A', time: 'N/A',
+            cis: [
+                { name: 'KUBE-INGRESS', os: 'Linux-K8s', env: 'Staging', log: '504 Gateway Timeout\nUpstream connection reset', fix: 'Update ingress controller timeout to 60s.', action: 'Patch Ingress' }
+            ]
+        }
+    ];
+
+    function renderTable(list) {
+        const body = document.getElementById('masterTable');
+        body.innerHTML = '';
+        list.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td><b>${item.app}</b></td><td>${item.id}</td><td>${item.chg || '-'}</td><td><span class="badge bg-success">Healthy</span></td>`;
+            tr.onclick = () => loadInc(item);
+            body.appendChild(tr);
+        });
+    }
+
+    function performSearch() {
+        const q = document.getElementById('searchInput').value.toUpperCase();
+        const res = dataRepo.filter(i => i.app.includes(q) || i.id.includes(q) || (i.chg && i.chg.includes(q)));
+        renderTable(res);
+        if(res.length) loadInc(res[0]);
+    }
+
+    function loadInc(inc) {
+        document.getElementById('d-inc').innerText = inc.id;
+        document.getElementById('d-desc').innerText = inc.desc;
+        document.getElementById('m-assign').innerText = inc.assign;
+        document.getElementById('m-prio').innerText = inc.prio;
+        
+        const chgNode = document.getElementById('node-chg');
+        if(!inc.chg) {
+            chgNode.style.opacity = '0.3';
+            document.getElementById('d-chg').innerText = "None Found";
+            document.getElementById('line-bypass').classList.remove('line-hidden');
+            document.getElementById('line-1').classList.add('line-hidden');
+            document.getElementById('line-2').classList.add('line-hidden');
+        } else {
+            chgNode.style.opacity = '1';
+            document.getElementById('d-chg').innerText = inc.chg;
+            document.getElementById('d-status').innerText = "Status: " + inc.status;
+            document.getElementById('m-risk').innerText = inc.risk;
+            document.getElementById('m-time').innerText = inc.time;
+            document.getElementById('line-bypass').classList.add('line-hidden');
+            document.getElementById('line-1').classList.remove('line-hidden');
+            document.getElementById('line-2').classList.remove('line-hidden');
+        }
+
+        const list = document.getElementById('ci-list');
+        list.innerHTML = '';
+        inc.cis.forEach(ci => {
+            const d = document.createElement('div');
+            d.className = 'ci-pill';
+            d.innerHTML = `<span><i class="bi bi-cpu me-2"></i><b>${ci.name}</b></span> <i class="bi bi-chevron-right small"></i>`;
+            d.onclick = () => selectCI(d, ci);
+            list.appendChild(d);
+        });
+        setTimeout(draw, 100);
+    }
+
+    function selectCI(el, ci) {
+        document.querySelectorAll('.ci-pill').forEach(p => p.classList.remove('active'));
+        el.classList.add('active');
+        document.getElementById('m-os').innerText = ci.os;
+        document.getElementById('m-env').innerText = ci.env;
+        document.getElementById('m-log').innerText = ci.log;
+        document.getElementById('m-fix').innerText = ci.fix;
+        document.getElementById('log-summary').innerText = "Logs: " + ci.name;
+        document.getElementById('exec-btn').innerText = "Execute: " + ci.action;
+        draw();
+    }
+
+    function toggle(id) {
+        const el = document.getElementById(id);
+        el.classList.toggle('expanded');
+        // Redraw lines during animation frames
+        let count = 0;
+        let itv = setInterval(() => { draw(); if(count++ > 20) clearInterval(itv); }, 20);
+    }
+
+    function draw() {
+        const frame = document.getElementById('main-frame').getBoundingClientRect();
+        const getBox = (id) => {
+            const r = document.getElementById(id).getBoundingClientRect();
+            return { 
+                cx: r.left - frame.left + (r.width / 2), 
+                cy: r.top - frame.top + (r.height / 2), 
+                top: r.top - frame.top, 
+                bottom: r.top - frame.top + r.height 
+            };
+        };
+
+        const inc = getBox('node-inc'), chg = getBox('node-chg'), ci = getBox('node-ci'), log = getBox('node-log'), fix = getBox('node-fix');
+        const curve = (x1, y1, x2, y2) => `M ${x1} ${y1} C ${x1} ${y1 + 40}, ${x2} ${y2 - 40}, ${x2} ${y2}`;
+
+        // Tier 1 to Tier 2
+        document.getElementById('line-1').setAttribute('d', curve(inc.cx, inc.bottom, ci.cx - 20, ci.top));
+        document.getElementById('line-2').setAttribute('d', curve(chg.cx, chg.bottom, ci.cx + 20, ci.top));
+        document.getElementById('line-bypass').setAttribute('d', curve(inc.cx, inc.bottom, ci.cx, ci.top));
+
+        // Tier 2 to Tier 3 (Missing connections restored)
+        document.getElementById('line-3').setAttribute('d', curve(ci.cx, ci.bottom, log.cx, log.top));
+        document.getElementById('line-4').setAttribute('d', curve(ci.cx, ci.bottom, fix.cx, fix.top));
+    }
+
+    function execute() {
+        const b = document.getElementById('exec-btn');
+        const oldText = b.innerText;
+        b.innerText = "Processing..."; b.classList.replace('btn-primary', 'btn-dark');
+        setTimeout(() => { 
+            b.innerText = "Remediation Successful"; 
+            b.style.background = "#28cd41"; 
+            setTimeout(() => { 
+                b.innerText = oldText; 
+                b.style.background = ""; 
+                b.classList.replace('btn-dark', 'btn-primary');
+            }, 2000);
+        }, 1500);
+    }
+
+    window.onload = () => { renderTable(dataRepo); loadInc(dataRepo[0]); };
+    window.onresize = draw;
+</script>
+</body>
+</html>
