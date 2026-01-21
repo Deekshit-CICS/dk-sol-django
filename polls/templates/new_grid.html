@@ -27,7 +27,6 @@
 
         .dashboard-container { max-width: 1200px; margin: auto; position: relative; }
 
-        /* Tier Headers */
         .tier-header {
             font-size: 0.75rem; font-weight: 700; color: var(--text-sec);
             text-transform: uppercase; letter-spacing: 0.1em;
@@ -35,19 +34,18 @@
         }
         .tier-header::after { content: ""; height: 1px; background: var(--border); flex-grow: 1; }
 
-        /* SVG Connectors */
         #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
         .connector { 
             fill: none; stroke: var(--connector-color); stroke-width: 1.5; 
             stroke-dasharray: 5, 5; opacity: 0.4; transition: 0.5s ease; 
         }
 
-        /* Apple Style Cards */
         .apple-card {
             background: var(--glass); backdrop-filter: blur(20px) saturate(180%);
             border-radius: 20px; border: 1px solid #fff;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
             z-index: 2; position: relative; transition: opacity 0.4s ease;
+            height: 100%;
         }
         .node-disabled { opacity: 0.3; filter: grayscale(1); }
 
@@ -59,12 +57,11 @@
             padding-left: 40px; border-radius: 12px; border: 1px solid var(--border); 
             height: 45px; width: 100%; transition: 0.3s;
         }
-        .search-input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 4px rgba(0,113,227,0.1); }
 
-        /* Remediation Dot Animation */
+        /* Remediation Pulse Animation */
         .remediation-box { 
             background: rgba(40, 205, 65, 0.06); border: 1px solid rgba(40, 205, 65, 0.1); 
-            border-radius: 14px; padding: 16px; position: relative; overflow: hidden;
+            border-radius: 14px; padding: 16px; position: relative;
         }
         .pulse-dot {
             display: inline-block; width: 8px; height: 8px; background-color: var(--green);
@@ -86,7 +83,7 @@
         .ci-item { padding: 12px; border-radius: 12px; cursor: pointer; background: rgba(0,0,0,0.02); margin-bottom: 8px; display: flex; justify-content: space-between; border: 1.5px solid transparent; }
         .ci-item.active { background: white; border-color: var(--blue); box-shadow: 0 4px 12px rgba(0, 0, 115, 0.05); }
 
-        pre { font-size: 0.75rem; background: #1c1c1e; color: #ff6961; padding: 15px; border-radius: 14px; margin: 0; }
+        pre { font-size: 0.75rem; background: #1c1c1e; color: #ff6961; padding: 15px; border-radius: 14px; margin: 0; height: 180px; overflow-y: auto; }
         .btn-execute { background: var(--blue); color: white; border: none; width: 100%; padding: 12px; border-radius: 12px; font-weight: 600; margin-top: 15px; }
 
         .table-container { margin-top: 40px; border-radius: 20px; overflow: hidden; background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
@@ -99,8 +96,7 @@
     <svg id="flow-canvas">
         <path id="line-inc-to-ci" class="connector" /> 
         <path id="line-chg-to-ci" class="connector" />
-        <path id="line-discovery-l" class="connector" />
-        <path id="line-discovery-r" class="connector" />
+        <path id="line-discovery-to-fix" class="connector" />
     </svg>
 
     <div class="header-section">
@@ -112,21 +108,19 @@
     </div>
 
     <div class="tier-header">Layer 01: Triage</div>
-    <div class="row g-4 justify-content-center">
-        <div class="col-md-5">
+    <div class="row g-4">
+        <div class="col-md-6">
             <div id="node-inc" class="apple-card p-4">
                 <div class="label text-primary">Incident Record</div>
                 <h4 class="fw-bold mb-1" id="d-inc">---</h4>
                 <div class="small text-muted" id="d-desc">Select record</div>
-                <div class="mt-3">
-                    <div class="row">
-                        <div class="col-6"><div class="label">Priority</div><div class="val" id="m-prio">-</div></div>
-                        <div class="col-6"><div class="label">Group</div><div class="val" id="m-group">-</div></div>
-                    </div>
+                <div class="mt-3 row">
+                    <div class="col-6"><div class="label">Priority</div><div class="val" id="m-prio">-</div></div>
+                    <div class="col-6"><div class="label">Group</div><div class="val" id="m-group">-</div></div>
                 </div>
             </div>
         </div>
-        <div class="col-md-5">
+        <div class="col-md-6">
             <div id="node-chg" class="apple-card p-4">
                 <div class="label">Linked Change</div>
                 <h4 class="fw-bold mb-1" id="d-chg">---</h4>
@@ -138,35 +132,35 @@
         </div>
     </div>
 
-    <div class="tier-header">Layer 02: Discovery</div>
-    <div class="row justify-content-center">
-        <div class="col-md-8">
+    <div class="tier-header">Layer 02: Discovery & Evidence</div>
+    <div class="row g-4" id="discovery-layer">
+        <div class="col-md-5">
             <div id="node-ci" class="apple-card p-4">
-                <div class="label mb-3">CI Discovery Engine</div>
+                <div class="label mb-3">Asset Inventory</div>
                 <div id="ci-list"></div>
+            </div>
+        </div>
+        <div class="col-md-7">
+            <div id="node-log" class="apple-card p-4 border-start border-danger border-4">
+                <div class="label text-danger mb-2">Technical Logs / Evidence</div>
+                <pre id="m-log">Awaiting CI selection...</pre>
             </div>
         </div>
     </div>
 
     <div class="tier-header">Layer 03: Remediate</div>
-    <div class="row g-4 justify-content-center">
-        <div class="col-md-5">
-            <div id="node-log" class="apple-card p-4 border-top border-danger border-4">
-                <div class="label text-danger mb-2">Forensic Logs</div>
-                <pre id="m-log">Awaiting CI selection...</pre>
-            </div>
-        </div>
-        <div class="col-md-5">
-            <div id="node-fix" class="apple-card p-4 border-top border-success border-4">
-                <div class="label text-success mb-2">AI Agent Recommendation</div>
-                <div class="remediation-box">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div id="node-fix" class="apple-card p-4 border-top border-success border-4 text-center">
+                <div class="label text-success mb-2">AI Remediation Plan</div>
+                <div class="remediation-box text-start">
                     <div class="d-flex align-items-center mb-1">
                         <span class="pulse-dot"></span>
-                        <span class="label mb-0" style="color: var(--green);">Live Analysis</span>
+                        <span class="label mb-0" style="color: var(--green);">Engine Ready</span>
                     </div>
                     <div id="m-fix" class="val small text-muted mb-0">Select an asset to generate fix...</div>
                 </div>
-                <button id="exec-btn" class="btn-execute" onclick="execute()">Apply Fix</button>
+                <button id="exec-btn" class="btn-execute" onclick="execute()">Execute Remediation</button>
             </div>
         </div>
     </div>
@@ -186,21 +180,19 @@
         {
             app: 'PAY-GW-01', id: 'INC-8821', desc: 'DB Query Timeout', chg: 'CHG-5501',
             group: 'DBA-Team', prio: 'P1', risk: 'High',
-            cis: [{ name: 'SQL-PROD-01', log: 'ERR: Locked Process 99', fix: 'Kill blocking PID 99 and re-index metadata table.', action: 'Kill PID' }]
+            cis: [{ name: 'SQL-PROD-01', log: 'ERR: Locked Process 99\nWARN: I/O Wait > 500ms', fix: 'Kill blocking PID 99 and re-index metadata table.', action: 'Kill PID' }]
         },
         {
             app: 'AUTH-SERVER', id: 'INC-4402', desc: 'Sudden OOM Crash', chg: null,
             group: 'DevOps', prio: 'P2', risk: 'N/A',
-            cis: [{ name: 'AUTH-POD-X', log: 'CRIT: OOM Error at 0x4f32', fix: 'Scale horizontal replicas and increase memory limit to 2Gi.', action: 'Scale Replicas' }]
+            cis: [{ name: 'AUTH-POD-X', log: 'CRIT: OOM Error at 0x4f32\nFATAL: Memory leak in worker.js', fix: 'Scale horizontal replicas and increase memory limit to 2Gi.', action: 'Scale Replicas' }]
         }
     ];
 
     function handleSearch() {
         const q = document.getElementById('masterSearch').value.toLowerCase();
         const filtered = dataRepo.filter(i => 
-            i.app.toLowerCase().includes(q) || 
-            i.id.toLowerCase().includes(q) || 
-            (i.chg && i.chg.toLowerCase().includes(q))
+            i.app.toLowerCase().includes(q) || i.id.toLowerCase().includes(q) || (i.chg && i.chg.toLowerCase().includes(q))
         );
         renderTable(filtered);
     }
@@ -208,7 +200,7 @@
     function renderTable(list) {
         const body = document.getElementById('masterTable');
         body.innerHTML = '';
-        list.forEach((inc, idx) => {
+        list.forEach((inc) => {
             const tr = document.createElement('tr');
             tr.innerHTML = `<td><b>${inc.app}</b></td><td>${inc.id}</td><td>${inc.chg || '<span class="text-muted">N/A</span>'}</td><td>${inc.prio}</td>`;
             tr.onclick = () => loadInc(tr, inc);
@@ -261,25 +253,26 @@
             const r = document.getElementById(id).getBoundingClientRect();
             return { cx: r.left - cont.left + (r.width / 2), y: r.top - cont.top, h: r.height };
         };
-        const inc = box('node-inc'), chg = box('node-chg'), ci = box('node-ci'), log = box('node-log'), fix = box('node-fix');
+        const inc = box('node-inc'), chg = box('node-chg'), ci_layer = box('discovery-layer'), fix = box('node-fix');
 
         const isChgDisabled = document.getElementById('node-chg').classList.contains('node-disabled');
         
+        // Lines to Discovery Layer
         if(isChgDisabled) {
-            document.getElementById('line-inc-to-ci').setAttribute('d', `M ${inc.cx} ${inc.y + inc.h} C ${inc.cx} ${ci.y - 40}, ${ci.cx} ${ci.y - 40}, ${ci.cx} ${ci.y}`);
+            document.getElementById('line-inc-to-ci').setAttribute('d', `M ${inc.cx} ${inc.y + inc.h} C ${inc.cx} ${ci_layer.y - 40}, ${ci_layer.cx} ${ci_layer.y - 40}, ${ci_layer.cx} ${ci_layer.y}`);
             document.getElementById('line-chg-to-ci').setAttribute('d', '');
         } else {
-            document.getElementById('line-inc-to-ci').setAttribute('d', `M ${inc.cx} ${inc.y + inc.h} C ${inc.cx} ${ci.y - 20}, ${ci.cx - 50} ${ci.y - 20}, ${ci.cx - 50} ${ci.y}`);
-            document.getElementById('line-chg-to-ci').setAttribute('d', `M ${chg.cx} ${chg.y + chg.h} C ${chg.cx} ${ci.y - 20}, ${ci.cx + 50} ${ci.y - 20}, ${ci.cx + 50} ${ci.y}`);
+            document.getElementById('line-inc-to-ci').setAttribute('d', `M ${inc.cx} ${inc.y + inc.h} C ${inc.cx} ${ci_layer.y - 20}, ${ci_layer.cx - 100} ${ci_layer.y - 20}, ${ci_layer.cx - 100} ${ci_layer.y}`);
+            document.getElementById('line-chg-to-ci').setAttribute('d', `M ${chg.cx} ${chg.y + chg.h} C ${chg.cx} ${ci_layer.y - 20}, ${ci_layer.cx + 100} ${ci_layer.y - 20}, ${ci_layer.cx + 100} ${ci_layer.y}`);
         }
 
-        document.getElementById('line-discovery-l').setAttribute('d', `M ${ci.cx} ${ci.y + ci.h} C ${ci.cx} ${log.y - 30}, ${log.cx} ${log.y - 30}, ${log.cx} ${log.y}`);
-        document.getElementById('line-discovery-r').setAttribute('d', `M ${ci.cx} ${ci.y + ci.h} C ${ci.cx} ${fix.y - 30}, ${fix.cx} ${fix.y - 30}, ${fix.cx} ${fix.y}`);
+        // Discovery to Remediation
+        document.getElementById('line-discovery-to-fix').setAttribute('d', `M ${ci_layer.cx} ${ci_layer.y + ci_layer.h} C ${ci_layer.cx} ${fix.y - 40}, ${fix.cx} ${fix.y - 40}, ${fix.cx} ${fix.y}`);
     }
 
     function execute() {
         const btn = document.getElementById('exec-btn');
-        btn.innerText = "Applying Fix...";
+        btn.innerText = "Processing...";
         setTimeout(() => { btn.innerText = "Mitigation Successful"; btn.style.backgroundColor = "var(--green)"; }, 1500);
     }
 
