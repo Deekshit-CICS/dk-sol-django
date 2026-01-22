@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOC Toolkit | AI Integrated Architecture</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --apple-black: #050505;
+            --glass-card: rgba(28, 28, 30, 0.85);
+            --accent-blue: #0071e3;
+            --flow-color: #0071e3;
+            --ad-gold: #ff9f0a;
+            --ai-purple: #af52de;
+        }
+
+        body {
+            background-color: var(--apple-black);
+            color: #ffffff;
+            font-family: -apple-system, sans-serif;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+        }
+
+        .glass-module {
+            background: var(--glass-card);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 12px;
+            position: relative;
+            z-index: 10;
+            text-align: center;
+        }
+
+        /* AI Chatbot Component */
+        .ai-bot-module {
+            border: 1px solid var(--ai-purple);
+            background: rgba(175, 82, 222, 0.1);
+            color: var(--ai-purple);
+            width: 160px;
+            position: absolute;
+            right: -180px;
+            top: 20%;
+            font-size: 0.8rem;
+            box-shadow: 0 0 20px rgba(175, 82, 222, 0.2);
+        }
+
+        /* UI & AD Layers */
+        .ui-layer { border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.08); width: 280px; }
+        .ad-layer { border: 1px solid var(--ad-gold); background: rgba(255, 159, 10, 0.05); width: 220px; color: var(--ad-gold); font-size: 0.8rem; }
+
+        /* Core Engine */
+        .core-hub {
+            border: 1px solid var(--accent-blue);
+            box-shadow: 0 0 50px rgba(0, 113, 227, 0.15);
+            padding: 20px !important;
+            width: 450px;
+        }
+
+        .internal-tool {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            font-size: 0.7rem;
+            padding: 8px;
+            color: #a1a1a6;
+        }
+
+        /* CYLINDRICAL DATABASE STRUCTURE */
+        .database-cylinder {
+            width: 140px;
+            height: 120px;
+            position: relative;
+            background: linear-gradient(90deg, #2c2c2e 0%, #3a3a3c 50%, #2c2c2e 100%);
+            border-left: 1px solid rgba(255,255,255,0.1);
+            border-right: 1px solid rgba(255,255,255,0.1);
+            margin: 0 auto;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .db-top {
+            position: absolute;
+            top: -15px;
+            left: -1px;
+            width: 101.5%;
+            height: 30px;
+            background: #48484a;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 50%;
+        }
+
+        .db-bottom {
+            position: absolute;
+            bottom: -15px;
+            left: -1px;
+            width: 101.5%;
+            height: 30px;
+            background: #2c2c2e;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+        }
+
+        .db-label {
+            position: relative;
+            z-index: 11;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #ffffff;
+            text-align: center;
+            line-height: 1.2;
+        }
+
+        /* SVG Flow */
+        #connector-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+        .pulse-path { fill: none; stroke: var(--flow-color); stroke-width: 1.5; stroke-dasharray: 6, 12; opacity: 0.5; animation: flowMove 10s linear infinite; }
+        .ai-path { stroke: var(--ai-purple); opacity: 0.6; }
+        .ad-path { stroke: var(--ad-gold); opacity: 0.6; }
+
+        @keyframes flowMove { from { stroke-dashoffset: 300; } to { stroke-dashoffset: 0; } }
+        .section-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.2em; color: #86868b; margin-bottom: 0.8rem; font-weight: 700; }
+    </style>
+</head>
+<body>
+
+    <svg id="connector-svg"></svg>
+
+    <div class="container-fluid px-5">
+        <div class="row align-items-center justify-content-between">
+            
+            <div class="col-lg-2">
+                <p class="section-label text-center">Data Ingestion</p>
+                <div class="d-grid gap-4">
+                    <div class="glass-module source" id="snow"><h6>ServiceNow</h6></div>
+                    <div class="glass-module source" id="ess-elastic"><h6>ESS & Elastic</h6></div>
+                    <div class="glass-module source" id="foglight"><h6>Foglight</h6></div>
+                    <div class="glass-module source" id="eaf"><h6>EAF</h6></div>
+                </div>
+            </div>
+
+            <div class="col-lg-6 d-flex flex-column align-items-center position-relative">
+                
+                <p class="section-label">User Interface</p>
+                <div class="glass-module ui-layer" id="ui-block">GOC TOOLKIT WEB PORTAL</div>
+
+                <div class="my-2"></div>
+
+                <p class="section-label">Identity Provider</p>
+                <div class="glass-module ad-layer" id="ad-block">ACTIVE DIRECTORY</div>
+
+                <div class="my-2"></div>
+
+                <p class="section-label">Logic Engine</p>
+                <div class="glass-module core-hub" id="core">
+                    <img src="https://static.djangoproject.com/img/logos/django-logo-negative.png" style="height: 18px;" class="mb-3">
+                    <div class="row g-2 justify-content-center">
+                        <div class="col-6"><div class="internal-tool">Automation Hub</div></div>
+                        <div class="col-6"><div class="internal-tool">RCA Intelligence</div></div>
+                        <div class="col-6"><div class="internal-tool">Patching Dash</div></div>
+                        <div class="col-6"><div class="internal-tool">Governance</div></div>
+                    </div>
+
+                    <div class="glass-module ai-bot-module" id="ai-bot">
+                        <i data-lucide="bot" style="width:16px; margin-bottom:4px;"></i><br>
+                        AI CHAT BOT<br>
+                        <small style="font-size:0.6rem; opacity:0.8;">Ops Insights</small>
+                    </div>
+                </div>
+
+                <div class="my-4"></div>
+
+                <div class="database-cylinder" id="mssql">
+                    <div class="db-top"></div>
+                    <div class="db-label">MS SQL SERVER</div>
+                    <div class="db-bottom"></div>
+                </div>
+            </div>
+
+            <div class="col-lg-2">
+                <p class="section-label text-center">Target Towers</p>
+                <div class="d-grid gap-5">
+                    <div class="glass-module tower" id="uxwin"><h6>Unix & Win</h6></div>
+                    <div class="glass-module tower" id="mid"><h6>Middleware</h6></div>
+                    <div class="glass-module tower" id="storage"><h6>Storage</h6></div>
+                    <div class="glass-module tower" id="beam"><h6>BEAM</h6></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        lucide.createIcons();
+
+        function drawConnections() {
+            const svg = document.getElementById('connector-svg');
+            const core = document.getElementById('core').getBoundingClientRect();
+            const ui = document.getElementById('ui-block').getBoundingClientRect();
+            const ad = document.getElementById('ad-block').getBoundingClientRect();
+            const mssql = document.getElementById('mssql').getBoundingClientRect();
+            const ai = document.getElementById('ai-bot').getBoundingClientRect();
+            const sources = document.querySelectorAll('.source');
+            const towers = document.querySelectorAll('.tower');
+            
+            svg.innerHTML = ''; 
+
+            // Vertical: UI -> AD -> Core -> DB
+            svg.appendChild(createPath(ui.left + ui.width/2, ui.bottom, ad.left + ad.width/2, ad.top, 'pulse-path ad-path'));
+            svg.appendChild(createPath(ad.left + ad.width/2, ad.bottom, core.left + core.width/2, core.top, 'pulse-path ad-path'));
+            svg.appendChild(createPath(core.left + core.width/2, core.bottom, mssql.left + mssql.width/2, mssql.top, 'pulse-path'));
+
+            // Core to AI Bot (Loop)
+            svg.appendChild(createPath(core.right - 20, core.top + 40, ai.left, ai.top + ai.height/2, 'pulse-path ai-path'));
+
+            // Horizontal
+            sources.forEach(el => {
+                const r = el.getBoundingClientRect();
+                svg.appendChild(createPath(r.right, r.top + r.height/2, core.left, core.top + core.height/2, 'pulse-path'));
+            });
+
+            towers.forEach(el => {
+                const r = el.getBoundingClientRect();
+                svg.appendChild(createPath(core.right, core.top + core.height/2, r.left, r.top + r.height/2, 'pulse-path'));
+            });
+        }
+
+        function createPath(x1, y1, x2, y2, className) {
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            const d = `M ${x1} ${y1} C ${x1 + (x2-x1)/2} ${y1}, ${x1 + (x2-x1)/2} ${y2}, ${x2} ${y2}`;
+            path.setAttribute("d", d);
+            path.setAttribute("class", className);
+            return path;
+        }
+
+        window.onload = drawConnections;
+        window.onresize = drawConnections;
+    </script>
+</body>
+</html>
