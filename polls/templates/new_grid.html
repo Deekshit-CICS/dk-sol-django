@@ -18,74 +18,42 @@
             --border: rgba(0,0,0,0.08);
         }
 
-        body { 
-            background-color: var(--apple-bg); 
-            color: var(--text-main);
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
-            padding: 30px;
-        }
+        body { background-color: var(--apple-bg); color: var(--text-main); font-family: -apple-system, sans-serif; padding: 30px; }
+        .dashboard-container { max-width: 1250px; margin: auto; position: relative; }
 
-        .dashboard-container { max-width: 1200px; margin: auto; position: relative; }
+        /* Connectors */
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { fill: none; stroke: var(--connector-color); stroke-width: 1.5; stroke-dasharray: 5, 5; opacity: 0.3; transition: 0.4s ease; }
 
-        .tier-header {
-            font-size: 0.75rem; font-weight: 700; color: var(--text-sec);
-            text-transform: uppercase; letter-spacing: 0.1em;
-            margin: 40px 0 20px 0; display: flex; align-items: center; gap: 15px;
-        }
+        /* Tier Headers */
+        .tier-header { font-size: 0.7rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.1em; margin: 40px 0 20px 0; display: flex; align-items: center; gap: 15px; }
         .tier-header::after { content: ""; height: 1px; background: var(--border); flex-grow: 1; }
 
-        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-        .connector { 
-            fill: none; stroke: var(--connector-color); stroke-width: 1.5; 
-            stroke-dasharray: 5, 5; opacity: 0.4; transition: 0.5s ease; 
-        }
-
-        .apple-card {
-            background: var(--glass); backdrop-filter: blur(20px) saturate(180%);
-            border-radius: 20px; border: 1px solid #fff;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
-            z-index: 2; position: relative; transition: opacity 0.4s ease;
-            height: 100%;
-        }
+        /* Card System */
+        .apple-card { background: var(--glass); backdrop-filter: blur(20px); border-radius: 20px; border: 1px solid #fff; box-shadow: 0 8px 32px rgba(0,0,0,0.04); z-index: 2; position: relative; transition: opacity 0.4s; }
         .node-disabled { opacity: 0.3; filter: grayscale(1); }
 
-        /* Search Under Title */
-        .header-section { margin-bottom: 2rem; }
-        .search-container { position: relative; max-width: 400px; margin-top: 15px; }
-        .search-container i { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: var(--text-sec); }
-        .search-input { 
-            padding-left: 40px; border-radius: 12px; border: 1px solid var(--border); 
-            height: 45px; width: 100%; transition: 0.3s;
-        }
+        /* Expander Logic */
+        .collapse-btn { position: absolute; top: 15px; right: 15px; border: none; background: rgba(0,0,0,0.05); border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.3s; }
+        .collapse-btn:hover { background: rgba(0,0,0,0.1); }
+        .details-content { max-height: 0; opacity: 0; overflow: hidden; transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+        .details-content.expanded { max-height: 400px; opacity: 1; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border); }
 
-        /* Remediation Pulse Animation */
-        .remediation-box { 
-            background: rgba(40, 205, 65, 0.06); border: 1px solid rgba(40, 205, 65, 0.1); 
-            border-radius: 14px; padding: 16px; position: relative;
-        }
-        .pulse-dot {
-            display: inline-block; width: 8px; height: 8px; background-color: var(--green);
-            border-radius: 50%; margin-right: 8px; position: relative;
-        }
-        .pulse-dot::after {
-            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background-color: var(--green); border-radius: 50%;
-            animation: pulse-ring 1.5s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite;
-        }
-        @keyframes pulse-ring {
-            0% { transform: scale(0.8); opacity: 0.5; }
-            100% { transform: scale(2.5); opacity: 0; }
-        }
+        /* UI Elements */
+        .search-container { position: relative; max-width: 450px; margin-top: 15px; }
+        .search-input { padding-left: 40px; border-radius: 12px; border: 1px solid var(--border); height: 45px; width: 100%; }
+        .label { font-size: 0.62rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; margin-bottom: 2px; }
+        .val { font-size: 0.88rem; font-weight: 500; margin-bottom: 10px; }
+        .ci-item { padding: 10px 14px; border-radius: 12px; cursor: pointer; background: rgba(0,0,0,0.02); margin-bottom: 8px; display: flex; justify-content: space-between; border: 1.5px solid transparent; font-size: 0.85rem; }
+        .ci-item.active { background: white; border-color: var(--blue); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
 
-        .label { font-size: 0.65rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; margin-bottom: 2px; }
-        .val { font-size: 0.9rem; color: var(--text-main); font-weight: 500; margin-bottom: 10px; }
+        /* Animations */
+        .pulse-dot { display: inline-block; width: 8px; height: 8px; background: var(--green); border-radius: 50%; margin-right: 8px; position: relative; }
+        .pulse-dot::after { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--green); border-radius: 50%; animation: pulse-ring 1.5s infinite; }
+        @keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 0.5; } 100% { transform: scale(2.5); opacity: 0; } }
 
-        .ci-item { padding: 12px; border-radius: 12px; cursor: pointer; background: rgba(0,0,0,0.02); margin-bottom: 8px; display: flex; justify-content: space-between; border: 1.5px solid transparent; }
-        .ci-item.active { background: white; border-color: var(--blue); box-shadow: 0 4px 12px rgba(0, 0, 115, 0.05); }
-
-        pre { font-size: 0.75rem; background: #1c1c1e; color: #ff6961; padding: 15px; border-radius: 14px; margin: 0; height: 180px; overflow-y: auto; }
+        pre { font-size: 0.72rem; background: #1c1c1e; color: #ff6961; padding: 15px; border-radius: 14px; margin: 0; max-height: 250px; overflow-y: auto; }
         .btn-execute { background: var(--blue); color: white; border: none; width: 100%; padding: 12px; border-radius: 12px; font-weight: 600; margin-top: 15px; }
-
         .table-container { margin-top: 40px; border-radius: 20px; overflow: hidden; background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
         .table-selected { background-color: rgba(0, 113, 227, 0.08) !important; }
     </style>
@@ -102,8 +70,8 @@
     <div class="header-section">
         <h1 class="fw-bold h2 mb-1" style="letter-spacing: -0.04em;">Forensic RCA</h1>
         <div class="search-container">
-            <i class="bi bi-search"></i>
-            <input type="text" id="masterSearch" class="search-input" placeholder="Search APP ID, Incident, or Change..." onkeyup="handleSearch()">
+            <i class="bi bi-search" style="position: absolute; left: 15px; top: 12px; color: var(--text-sec);"></i>
+            <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch()">
         </div>
     </div>
 
@@ -111,22 +79,34 @@
     <div class="row g-4">
         <div class="col-md-6">
             <div id="node-inc" class="apple-card p-4">
+                <button class="collapse-btn" onclick="toggleExp('inc-details')"><i class="bi bi-arrows-expand"></i></button>
                 <div class="label text-primary">Incident Record</div>
                 <h4 class="fw-bold mb-1" id="d-inc">---</h4>
-                <div class="small text-muted" id="d-desc">Select record</div>
-                <div class="mt-3 row">
-                    <div class="col-6"><div class="label">Priority</div><div class="val" id="m-prio">-</div></div>
-                    <div class="col-6"><div class="label">Group</div><div class="val" id="m-group">-</div></div>
+                <div class="small text-muted" id="d-desc">Select a record below...</div>
+                <div id="inc-details" class="details-content">
+                    <div class="row">
+                        <div class="col-6">
+                            <div class="label">Priority</div><div class="val" id="m-prio">-</div>
+                            <div class="label">State</div><div class="val" id="m-state">-</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="label">Assignment Group</div><div class="val" id="m-group">-</div>
+                            <div class="label">Service Impact</div><div class="val" id="m-impact">-</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
         <div class="col-md-6">
             <div id="node-chg" class="apple-card p-4">
+                <button class="collapse-btn" onclick="toggleExp('chg-details')"><i class="bi bi-arrows-expand"></i></button>
                 <div class="label">Linked Change</div>
                 <h4 class="fw-bold mb-1" id="d-chg">---</h4>
                 <div class="small text-muted" id="chg-status-text">Correlation Status</div>
-                <div class="mt-3">
-                    <div class="label">Risk Level</div><div class="val" id="m-risk">-</div>
+                <div id="chg-details" class="details-content">
+                    <div class="label">Risk Assessment</div><div class="val" id="m-risk">-</div>
+                    <div class="label">Implementation Window</div><div class="val" id="m-window">-</div>
+                    <div class="label">CAB Approval</div><div class="val" id="m-cab">-</div>
                 </div>
             </div>
         </div>
@@ -136,14 +116,29 @@
     <div class="row g-4" id="discovery-layer">
         <div class="col-md-5">
             <div id="node-ci" class="apple-card p-4">
+                <button class="collapse-btn" onclick="toggleExp('ci-details-ext')"><i class="bi bi-arrows-expand"></i></button>
                 <div class="label mb-3">Asset Inventory</div>
                 <div id="ci-list"></div>
+                <div id="ci-details-ext" class="details-content">
+                    <div class="row">
+                        <div class="col-6">
+                            <div class="label">Criticality</div><div class="val" id="m-crit">-</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="label">Last Patch</div><div class="val" id="m-patch">-</div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="col-md-7">
             <div id="node-log" class="apple-card p-4 border-start border-danger border-4">
-                <div class="label text-danger mb-2">Technical Logs / Evidence</div>
-                <pre id="m-log">Awaiting CI selection...</pre>
+                <button class="collapse-btn" onclick="toggleExp('log-details-ext')"><i class="bi bi-arrows-expand"></i></button>
+                <div class="label text-danger mb-2">Technical Evidence</div>
+                <div id="log-summary" class="small fw-bold mb-2">No CI Selected</div>
+                <div id="log-details-ext" class="details-content expanded">
+                    <pre id="m-log">Awaiting discovery data...</pre>
+                </div>
             </div>
         </div>
     </div>
@@ -151,16 +146,20 @@
     <div class="tier-header">Layer 03: Remediate</div>
     <div class="row justify-content-center">
         <div class="col-md-8">
-            <div id="node-fix" class="apple-card p-4 border-top border-success border-4 text-center">
+            <div id="node-fix" class="apple-card p-4 border-top border-success border-4">
+                <button class="collapse-btn" onclick="toggleExp('fix-details')"><i class="bi bi-arrows-expand"></i></button>
                 <div class="label text-success mb-2">AI Remediation Plan</div>
-                <div class="remediation-box text-start">
+                <div style="background: rgba(40,205,65,0.06); border-radius:14px; padding:15px;">
                     <div class="d-flex align-items-center mb-1">
                         <span class="pulse-dot"></span>
-                        <span class="label mb-0" style="color: var(--green);">Engine Ready</span>
+                        <span class="label mb-0" style="color:var(--green)">Engine Status: Ready</span>
                     </div>
-                    <div id="m-fix" class="val small text-muted mb-0">Select an asset to generate fix...</div>
+                    <div id="m-fix" class="val small text-muted mb-0">Select asset for recommendation...</div>
                 </div>
-                <button id="exec-btn" class="btn-execute" onclick="execute()">Execute Remediation</button>
+                <div id="fix-details" class="details-content">
+                    <div class="label">Confidence Score</div><div class="val">94%</div>
+                    <button id="exec-btn" class="btn-execute" onclick="execute()">Execute Remediation</button>
+                </div>
             </div>
         </div>
     </div>
@@ -179,21 +178,21 @@
     const dataRepo = [
         {
             app: 'PAY-GW-01', id: 'INC-8821', desc: 'DB Query Timeout', chg: 'CHG-5501',
-            group: 'DBA-Team', prio: 'P1', risk: 'High',
-            cis: [{ name: 'SQL-PROD-01', log: 'ERR: Locked Process 99\nWARN: I/O Wait > 500ms', fix: 'Kill blocking PID 99 and re-index metadata table.', action: 'Kill PID' }]
+            group: 'DBA-Tier-1', prio: 'P1', state: 'Work in Progress', impact: 'High Availability',
+            risk: 'High', window: '20-Jan 02:00 UTC', cab: 'Approved (CAB-04)',
+            cis: [{ name: 'SQL-PROD-01', crit: 'Tier 0', patch: '15-Jan-2026', log: 'ERR: Locked Process 99\nWARN: I/O Wait > 500ms', fix: 'Kill blocking PID 99 and re-index metadata.', action: 'Kill PID' }]
         },
         {
             app: 'AUTH-SERVER', id: 'INC-4402', desc: 'Sudden OOM Crash', chg: null,
-            group: 'DevOps', prio: 'P2', risk: 'N/A',
-            cis: [{ name: 'AUTH-POD-X', log: 'CRIT: OOM Error at 0x4f32\nFATAL: Memory leak in worker.js', fix: 'Scale horizontal replicas and increase memory limit to 2Gi.', action: 'Scale Replicas' }]
+            group: 'Platform-SRE', prio: 'P2', state: 'New', impact: 'Internal Auth',
+            risk: 'N/A', window: 'N/A', cab: 'N/A',
+            cis: [{ name: 'AUTH-POD-X', crit: 'Tier 1', patch: '01-Jan-2026', log: 'CRIT: OOM Error at 0x4f32\nFATAL: Memory leak in worker.js', fix: 'Scale horizontal replicas and increase memory to 2Gi.', action: 'Scale Replicas' }]
         }
     ];
 
     function handleSearch() {
         const q = document.getElementById('masterSearch').value.toLowerCase();
-        const filtered = dataRepo.filter(i => 
-            i.app.toLowerCase().includes(q) || i.id.toLowerCase().includes(q) || (i.chg && i.chg.toLowerCase().includes(q))
-        );
+        const filtered = dataRepo.filter(i => i.app.toLowerCase().includes(q) || i.id.toLowerCase().includes(q) || (i.chg && i.chg.toLowerCase().includes(q)));
         renderTable(filtered);
     }
 
@@ -217,17 +216,17 @@
         document.getElementById('d-desc').innerText = inc.desc;
         document.getElementById('m-prio').innerText = inc.prio;
         document.getElementById('m-group').innerText = inc.group;
+        document.getElementById('m-state').innerText = inc.state;
+        document.getElementById('m-impact').innerText = inc.impact;
         
         const chgCard = document.getElementById('node-chg');
-        if(!inc.chg) {
-            chgCard.classList.add('node-disabled');
-            document.getElementById('d-chg').innerText = "N/A";
-            document.getElementById('chg-status-text').innerText = "No Correlation Found";
-        } else {
-            chgCard.classList.remove('node-disabled');
-            document.getElementById('d-chg').innerText = inc.chg;
-            document.getElementById('chg-status-text').innerText = "Recent Deployment";
-        }
+        document.getElementById('d-chg').innerText = inc.chg || "N/A";
+        document.getElementById('m-risk').innerText = inc.risk;
+        document.getElementById('m-window').innerText = inc.window;
+        document.getElementById('m-cab').innerText = inc.cab;
+
+        if(!inc.chg) chgCard.classList.add('node-disabled');
+        else chgCard.classList.remove('node-disabled');
 
         const list = document.getElementById('ci-list');
         list.innerHTML = '';
@@ -240,11 +239,24 @@
                 d.classList.add('active');
                 document.getElementById('m-log').innerText = ci.log;
                 document.getElementById('m-fix').innerText = ci.fix;
-                document.getElementById('exec-btn').innerText = "Run: " + ci.action;
+                document.getElementById('m-crit').innerText = ci.crit;
+                document.getElementById('m-patch').innerText = ci.patch;
+                document.getElementById('log-summary').innerText = "Logs for " + ci.name;
+                document.getElementById('exec-btn').innerText = "Execute: " + ci.action;
             };
             list.appendChild(d);
         });
         setTimeout(draw, 100);
+    }
+
+    function toggleExp(id) {
+        document.getElementById(id).classList.toggle('expanded');
+        // Redraw multiple times during animation to keep lines attached
+        let timer = 0;
+        const anim = setInterval(() => {
+            draw();
+            if(timer++ > 25) clearInterval(anim);
+        }, 20);
     }
 
     function draw() {
@@ -255,24 +267,19 @@
         };
         const inc = box('node-inc'), chg = box('node-chg'), ci_layer = box('discovery-layer'), fix = box('node-fix');
 
-        const isChgDisabled = document.getElementById('node-chg').classList.contains('node-disabled');
-        
-        // Lines to Discovery Layer
-        if(isChgDisabled) {
+        if(document.getElementById('node-chg').classList.contains('node-disabled')) {
             document.getElementById('line-inc-to-ci').setAttribute('d', `M ${inc.cx} ${inc.y + inc.h} C ${inc.cx} ${ci_layer.y - 40}, ${ci_layer.cx} ${ci_layer.y - 40}, ${ci_layer.cx} ${ci_layer.y}`);
             document.getElementById('line-chg-to-ci').setAttribute('d', '');
         } else {
             document.getElementById('line-inc-to-ci').setAttribute('d', `M ${inc.cx} ${inc.y + inc.h} C ${inc.cx} ${ci_layer.y - 20}, ${ci_layer.cx - 100} ${ci_layer.y - 20}, ${ci_layer.cx - 100} ${ci_layer.y}`);
             document.getElementById('line-chg-to-ci').setAttribute('d', `M ${chg.cx} ${chg.y + chg.h} C ${chg.cx} ${ci_layer.y - 20}, ${ci_layer.cx + 100} ${ci_layer.y - 20}, ${ci_layer.cx + 100} ${ci_layer.y}`);
         }
-
-        // Discovery to Remediation
         document.getElementById('line-discovery-to-fix').setAttribute('d', `M ${ci_layer.cx} ${ci_layer.y + ci_layer.h} C ${ci_layer.cx} ${fix.y - 40}, ${fix.cx} ${fix.y - 40}, ${fix.cx} ${fix.y}`);
     }
 
     function execute() {
         const btn = document.getElementById('exec-btn');
-        btn.innerText = "Processing...";
+        btn.innerText = "Applying Fix...";
         setTimeout(() => { btn.innerText = "Mitigation Successful"; btn.style.backgroundColor = "var(--green)"; }, 1500);
     }
 
