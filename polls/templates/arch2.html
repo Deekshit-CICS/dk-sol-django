@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOC Pro | Apple Minimalist</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --apple-bg: #ffffff;
+            --apple-secondary: #f5f5f7;
+            --apple-text: #1d1d1f;
+            --apple-blue: #0071e3;
+            --apple-border: #e5e5e7;
+            --ai-purple: #af52de;
+        }
+
+        body {
+            background-color: var(--apple-bg);
+            color: var(--apple-text);
+            font-family: -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+            letter-spacing: -0.01em;
+            overflow: hidden;
+        }
+
+        #connectionCanvas {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Minimalist Pill Nodes */
+        .node-pill {
+            background: var(--apple-secondary);
+            border-radius: 10px;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 500;
+            display: inline-block;
+            border: 1px solid transparent;
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Glassmorphism Core */
+        .glass-core {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: saturate(180%) blur(20px);
+            border: 1px solid var(--apple-blue);
+            border-radius: 24px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.03);
+            max-width: 450px;
+            margin: 0 auto;
+        }
+
+        .module-item {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #86868b;
+            font-weight: 600;
+            padding: 10px;
+            border-bottom: 1px solid #f0f0f2;
+        }
+
+        .label-header {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #86868b;
+            margin-bottom: 20px;
+        }
+
+        .ai-indicator {
+            color: var(--ai-purple);
+            border: 1px solid rgba(175, 82, 222, 0.2);
+            background: rgba(175, 82, 222, 0.05);
+        }
+
+        .db-minimal {
+            border: 1.5px solid var(--apple-border);
+            width: 60px; height: 40px;
+            border-radius: 50% / 20%;
+            margin: 0 auto;
+            font-size: 10px;
+            font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="connectionCanvas"></canvas>
+
+<div class="container py-5">
+    <div class="row justify-content-center mb-5 text-center">
+        <div class="col-md-3"><div class="node-pill fw-bold" id="ui-node">GOC Dashboard</div></div>
+        <div class="col-md-3"><div class="node-pill ai-indicator fw-bold" id="ai-node">AI Chatbot</div></div>
+    </div>
+
+    <div class="row align-items-center">
+        <div class="col-md-2">
+            <div class="label-header">Intelligence</div>
+            <div class="node-pill mb-4 w-100" id="llm-node" style="border: 1px dashed var(--apple-blue);">Org LLM</div>
+            <div class="label-header">Sources</div>
+            <div class="d-grid gap-2">
+                <div class="node-pill" id="src-1">ServiceNow</div>
+                <div class="node-pill" id="src-2">Elastic</div>
+                <div class="node-pill" id="src-3">Foglight</div>
+                <div class="node-pill" id="src-4">SolarWinds</div>
+            </div>
+        </div>
+
+        <div class="col-md-8 text-center position-relative">
+            <div class="node-pill mb-4" id="ad-node" style="background: none; border: 1px solid #e5e5e7; color: #b58300;">Identity Access</div>
+            
+            <div class="glass-core" id="core-node">
+                <h5 class="fw-bold mb-4" style="color: var(--apple-blue)">Django Core Orchestrator</h5>
+                <div class="row g-0">
+                    <div class="col-6 module-item">Server Patching</div>
+                    <div class="col-6 module-item">Auto-Remediation</div>
+                    <div class="col-6 module-item">RCA Analytics</div>
+                    <div class="col-6 module-item">Compliance</div>
+                </div>
+            </div>
+            
+            <div class="mt-5">
+                <div class="db-minimal" id="db-node">SQL</div>
+            </div>
+        </div>
+
+        <div class="col-md-2">
+            <div class="label-header">Infrastructure</div>
+            <div class="d-grid gap-2">
+                <div class="node-pill" id="tgt-1">Windows</div>
+                <div class="node-pill" id="tgt-2">Linux</div>
+                <div class="node-pill" id="tgt-3">Middleware</div>
+                <div class="node-pill" id="tgt-4">Storage</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('connectionCanvas');
+    const ctx = canvas.getContext('2d');
+    let offset = 0;
+
+    function animate() {
+        offset += 0.3; if (offset > 20) offset = 0;
+        draw();
+        requestAnimationFrame(animate);
+    }
+
+    function draw() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        ctx.setLineDash([2, 8]); // Very elegant small dots
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#d2d2d7';
+
+        const core = document.getElementById('core-node').getBoundingClientRect();
+        const midY = core.top + core.height / 2;
+
+        // LEFT BUS (Vertical Spine)
+        const leftIds = ['llm-node', 'src-1', 'src-2', 'src-3', 'src-4'];
+        drawBus(leftIds, core.left - 30, core.left, midY, true);
+
+        // RIGHT BUS (Vertical Spine)
+        const rightIds = ['tgt-1', 'tgt-2', 'tgt-3', 'tgt-4'];
+        drawBus(rightIds, core.right + 30, core.right, midY, false);
+
+        // CORE VERTICALS
+        ctx.lineDashOffset = -offset;
+        const ui = document.getElementById('ui-node').getBoundingClientRect();
+        const ad = document.getElementById('ad-node').getBoundingClientRect();
+        const db = document.getElementById('db-node').getBoundingClientRect();
+        
+        line(ui.left + ui.width/2, ui.bottom + 5, ad.left + ad.width/2, ad.top - 5);
+        line(ad.left + ad.width/2, ad.bottom + 5, core.left + core.width/2, core.top - 5);
+        line(core.left + core.width/2, core.bottom + 5, db.left + db.width/2, db.top - 5);
+
+        // AI FLOW (PURPLE)
+        ctx.strokeStyle = '#af52de';
+        const ai = document.getElementById('ai-node').getBoundingClientRect();
+        const llm = document.getElementById('llm-node').getBoundingClientRect();
+        line(ai.left + ai.width/2, ai.bottom + 5, llm.left + llm.width/2, llm.top - 5);
+    }
+
+    function drawBus(ids, spineX, coreEdgeX, targetY, isLeft) {
+        ctx.lineDashOffset = offset;
+        let minY = 9999, maxY = 0;
+        ids.forEach(id => {
+            const r = document.getElementById(id).getBoundingClientRect();
+            const y = r.top + r.height / 2;
+            const x = isLeft ? r.right + 5 : r.left - 5;
+            line(x, y, spineX, y);
+            if (y < minY) minY = y; if (y > maxY) maxY = y;
+        });
+        line(spineX, minY, spineX, maxY);
+        line(spineX, targetY, coreEdgeX, targetY);
+    }
+
+    function line(x1, y1, x2, y2) {
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+
+    window.addEventListener('load', animate);
+    window.addEventListener('resize', draw);
+</script>
+</body>
+</html>
