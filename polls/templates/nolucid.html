@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GOC Toolkit | Stats to Jenkins Integration</title>
+    <title>GOC Toolkit | RCA + LLM Integration</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         :root {
@@ -15,7 +15,7 @@
             --ios-teal: #64D2FF;
             --ios-red: #FF453A;
             --ios-gray: #8E8E93;
-            --wire-visible: rgba(255, 255, 255, 0.2);
+            --wire-visible: rgba(255, 255, 255, 0.1);
         }
 
         body {
@@ -27,77 +27,69 @@
             overflow-x: hidden; margin: 0;
         }
 
-        body.ai-assistant-active .left-sidebar-block { display: none !important; }
+        /* --- Mode Highlights --- */
+        body[class*="-active"] #box-dash, body[class*="-mode"] #box-dash,
+        body[class*="-active"] .db-disk, body[class*="-mode"] .db-disk { opacity: 1; }
+
+        /* RCA MODE Specifics: KB, ES, SNOW, and LLM highlight teal */
+        body.rca-mode #kb-box, body.rca-mode #elastic-box, body.rca-mode #snow-box, body.rca-mode #llm-box { 
+            border-color: var(--ios-teal) !important; box-shadow: 0 0 15px var(--ios-teal); opacity: 1; 
+        }
+        body.rca-mode #box-dash, body.rca-mode .db-disk { border-color: var(--ios-teal) !important; box-shadow: 0 0 15px var(--ios-teal); color: var(--ios-teal); }
+
+        /* Other Modes (Standard logic) */
+        body.ai-assistant-active #llm-box, body.ai-assistant-active #snow-box, body.ai-assistant-active #elastic-box, body.ai-assistant-active #kb-box { border-color: var(--ios-teal) !important; box-shadow: 0 0 15px var(--ios-teal); opacity: 1; }
+        body.handover-mode #snow-box { border-color: var(--ios-orange) !important; box-shadow: 0 0 15px var(--ios-orange); opacity: 1; }
+        body.gov-mode #elastic-box, body.gov-mode #snow-box { border-color: var(--ios-orange) !important; box-shadow: 0 0 15px var(--ios-orange); opacity: 1; }
+        body.stats-mode #jenkins-box { border-color: var(--ios-blue) !important; box-shadow: 0 0 15px var(--ios-blue); opacity: 1; }
 
         .glass-card {
             background: var(--ios-card-bg);
             backdrop-filter: blur(30px);
             border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 14px;
-            padding: 10px;
-            text-align: center;
-            font-size: 0.72rem;
-            font-weight: 500;
-            transition: all 0.4s cubic-bezier(0.15, 0, 0.15, 1);
-            z-index: 10;
+            border-radius: 14px; padding: 12px; text-align: center;
+            font-size: 0.75rem; font-weight: 500;
+            transition: all 0.4s ease; z-index: 10;
         }
 
-        #box-ad {
-            border: 3px solid var(--ios-orange) !important;
-            box-shadow: 0 0 25px rgba(255, 159, 10, 0.6);
-            background: rgba(255, 159, 10, 0.15);
-            color: #FFF !important;
-            font-weight: 800; width: 220px; margin-bottom: 40px;
-        }
+        #box-dash { opacity: 0.6; color: var(--ios-blue); border-color: var(--ios-blue); }
+        .target-node { margin-bottom: 25px !important; width: 100%; opacity: 0.5; transition: 0.4s; }
 
-        /* Highlights */
-        body.stats-mode #jenkins-box {
-            border-color: var(--ios-blue) !important;
-            box-shadow: 0 0 20px rgba(10, 132, 255, 0.8);
-            transform: scale(1.05);
-        }
-
-        body.gov-mode #elastic-box, body.gov-mode #snow-box {
-            border-color: var(--ios-orange) !important;
-            box-shadow: 0 0 20px rgba(255, 159, 10, 0.8);
+        .db-disk {
+            width: 80px; height: 18px;
+            background: linear-gradient(180deg, #48484A 0%, #1C1C1E 100%);
+            border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+            margin-bottom: -11px; transition: 0.4s ease; opacity: 0.4;
         }
 
         .service-boundary {
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 40px; padding: 50px;
+            border-radius: 40px; padding: 60px;
             background: radial-gradient(circle at top, rgba(10, 132, 255, 0.04) 0%, transparent 75%);
-            min-width: 620px; position: relative;
+            min-width: 650px; position: relative;
         }
 
-        .core-hub { border: 1.5px solid var(--ios-blue); padding: 24px !important; width: 100%; }
+        .core-hub { border: 1.5px solid var(--ios-blue); padding: 28px !important; width: 100%; }
         
         .btn-ios { 
-            background: rgba(255,255,255,0.06); 
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 9px; padding: 12px 5px; cursor: pointer; transition: 0.2s;
-            font-size: 0.7rem; color: var(--ios-gray);
+            background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px; padding: 14px 5px; cursor: pointer; transition: 0.2s;
+            font-size: 0.72rem; color: var(--ios-gray);
             height: 100%; display: flex; align-items: center; justify-content: center;
         }
         .btn-ios:hover { background: rgba(255,255,255,0.15); color: #fff; }
-        .btn-ios.active { background: var(--ios-blue); color: #fff; border-color: #fff; box-shadow: 0 0 20px rgba(10, 132, 255, 0.4); }
+        .btn-ios.active { background: var(--ios-blue) !important; color: #fff !important; box-shadow: 0 0 15px var(--ios-blue); }
 
         .exec-flow {
-            display: flex; flex-direction: column; align-items: center; gap: 40px;
-            width: 100%; max-height: 0; opacity: 0; overflow: visible;
-            transition: all 0.5s ease;
+            display: flex; flex-direction: column; align-items: center; gap: 45px;
+            width: 100%; max-height: 0; opacity: 0; overflow: visible; transition: all 0.5s ease;
         }
-        .exec-flow.visible { max-height: 400px; opacity: 1; margin-top: 40px; }
-
-        .db-disk {
-            width: 85px; height: 18px;
-            background: linear-gradient(180deg, #48484A 0%, #1C1C1E 100%);
-            border-radius: 50%; border: 1px solid rgba(255,255,255,0.25); margin-bottom: -11px;
-        }
+        .exec-flow.visible { max-height: 400px; opacity: 1; margin-top: 45px; }
 
         #canvas-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
-        .path-line { fill: none; stroke-width: 1.8; stroke-dasharray: 6, 12; animation: dash 30s linear infinite; }
+        .path-line { fill: none; stroke-width: 2.2; stroke-dasharray: 8, 14; animation: dash 25s linear infinite; }
         @keyframes dash { from { stroke-dashoffset: 600; } to { stroke-dashoffset: 0; } }
-        .label-apple { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 2px; color: var(--ios-gray); font-weight: 700; margin-bottom: 12px; }
+        .label-apple { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 2px; color: var(--ios-gray); font-weight: 700; margin-bottom: 15px; }
     </style>
 </head>
 <body id="master-body">
@@ -108,22 +100,20 @@
         <div class="row align-items-center justify-content-between">
             
             <div class="col-lg-2 left-sidebar-block">
-                <p class="label-apple text-center">Control Center</p>
-                <div class="d-grid gap-4">
-                    <div class="glass-card" id="box-dash" style="border-color: var(--ios-blue); color: var(--ios-blue);">GOC Dashboard</div>
-                </div>
+                <p class="label-apple text-center">Interface</p>
+                <div class="glass-card" id="box-dash">GOC Dashboard</div>
             </div>
 
             <div class="col-lg-6 d-flex flex-column align-items-center">
-                <div class="glass-card" id="box-ad">Active Directory SSO</div>
+                <div class="glass-card mb-4" style="border: 2px solid var(--ios-orange); color: #FFF; width: 220px; font-weight: 800;">SSO: AUTHENTICATED</div>
                 
-                <div class="service-boundary" id="boundary">
+                <div class="service-boundary">
                     <p class="label-apple text-center">Management Layer</p>
                     <div class="glass-card core-hub" id="core-engine">
-                        <div style="color:var(--ios-blue); font-weight: 700; font-size: 1.1rem; margin-bottom: 20px;">Django Core Controller</div>
+                        <div style="color:var(--ios-blue); font-weight: 700; font-size: 1.15rem; margin-bottom: 24px;">Django Core Controller</div>
                         <div class="row g-3">
-                            <div class="col-4"><div class="btn-ios mode-btn" id="btn-ai-assistant">AI Assistant</div></div>
-                            <div class="col-4"><div class="btn-ios btn-shift" style="color: var(--ios-orange);">Shift Handover</div></div>
+                            <div class="col-4"><div class="btn-ios mode-btn" id="btn-ai">AI Assistant</div></div>
+                            <div class="col-4"><div class="btn-ios mode-btn" id="btn-shift" style="color: var(--ios-orange);">Shift Handover</div></div>
                             <div class="col-4"><div class="btn-ios mode-btn" id="btn-rem" style="color: var(--ios-green)">Auto-Remediate</div></div>
                             <div class="col-4"><div class="btn-ios mode-btn" id="btn-rca" style="color: var(--ios-teal)">RCA Analysis</div></div>
                             <div class="col-4"><div class="btn-ios mode-btn" id="btn-gov" style="color: var(--ios-orange)">Governance</div></div>
@@ -143,18 +133,18 @@
 
             <div class="col-lg-2">
                 <p class="label-apple text-center">Data Ingestion</p>
-                <div class="d-grid gap-2 mb-4">
-                    <div class="glass-card target-node" id="elastic-box">Elasticsearch (ESS)</div>
-                    <div class="glass-card target-node" id="snow-box">ServiceNow (SNOW)</div>
-                    <div class="glass-card target-node" id="jenkins-box">Jenkins (EAF)</div>
-                    <div class="glass-card target-node" id="kb-box">Knowledge Base (Confluence)</div>
-                </div>
-                <p class="label-apple text-center">Intelligence</p>
-                <div class="glass-card target-node mb-5" id="llm-box" style="color: var(--ios-teal);">Org LLM Engine</div>
-                <p class="label-apple text-center">Persistence</p>
-                <div id="db-cluster" class="d-flex flex-column align-items-center">
+                <div class="glass-card target-node" id="elastic-box">Elasticsearch (ESS)</div>
+                <div class="glass-card target-node" id="snow-box">ServiceNow (SNOW)</div>
+                <div class="glass-card target-node" id="jenkins-box">Jenkins (EAF)</div>
+                <div class="glass-card target-node" id="kb-box">Knowledge Base</div>
+                
+                <p class="label-apple text-center mt-4">Intelligence</p>
+                <div class="glass-card target-node mb-4" id="llm-box" style="color: var(--ios-teal);">Org LLM Engine</div>
+                
+                <p class="label-apple text-center mt-3">Persistence</p>
+                <div id="db-cluster" class="d-flex flex-column align-items-center pb-3">
                     <div class="db-disk"></div><div class="db-disk"></div><div class="db-disk"></div>
-                    <span style="font-size: 0.6rem; font-weight: 800; margin-top: 18px; color: var(--ios-gray);">MSSQL CLUSTER</span>
+                    <span style="font-size: 0.6rem; font-weight: 800; margin-top: 20px; color: var(--ios-gray);">MSSQL CLUSTER</span>
                 </div>
             </div>
         </div>
@@ -164,78 +154,83 @@
         const body = document.getElementById('master-body');
         const btns = document.querySelectorAll('.mode-btn');
         const execFlow = document.getElementById('exec-flow');
-        let drawInt;
 
-        function resetAll() {
-            body.classList.remove('ai-assistant-active', 'gov-mode', 'rca-mode', 'stats-mode');
+        function clearModes() {
+            body.className = '';
             execFlow.classList.remove('visible');
             btns.forEach(b => b.classList.remove('active'));
         }
 
-        function refresh() {
-            clearInterval(drawInt);
-            drawInt = setInterval(draw, 10);
-            setTimeout(() => clearInterval(drawInt), 600);
-        }
-
-        document.getElementById('btn-ai-assistant').onclick = function() { resetAll(); body.classList.add('ai-assistant-active'); this.classList.add('active'); refresh(); };
-        document.getElementById('btn-rem').onclick = function() { resetAll(); execFlow.classList.add('visible'); this.classList.add('active'); refresh(); };
-        document.getElementById('btn-rca').onclick = function() { resetAll(); body.classList.add('rca-mode'); execFlow.classList.add('visible'); this.classList.add('active'); refresh(); };
-        document.getElementById('btn-gov').onclick = function() { resetAll(); body.classList.add('gov-mode'); this.classList.add('active'); refresh(); };
-        document.getElementById('btn-stats').onclick = function() { 
-            resetAll(); body.classList.add('stats-mode'); this.classList.add('active'); refresh(); 
+        const triggerDraw = () => { 
+            let count = 0;
+            const interval = setInterval(() => { draw(); if(count++ > 15) clearInterval(interval); }, 40);
         };
+
+        document.getElementById('btn-ai').onclick = function() { clearModes(); body.classList.add('ai-assistant-active'); this.classList.add('active'); triggerDraw(); };
+        document.getElementById('btn-shift').onclick = function() { clearModes(); body.classList.add('handover-mode'); this.classList.add('active'); triggerDraw(); };
+        document.getElementById('btn-rem').onclick = function() { clearModes(); body.classList.add('rem-mode'); execFlow.classList.add('visible'); this.classList.add('active'); triggerDraw(); };
+        document.getElementById('btn-rca').onclick = function() { clearModes(); body.classList.add('rca-mode'); execFlow.classList.add('visible'); this.classList.add('active'); triggerDraw(); };
+        document.getElementById('btn-gov').onclick = function() { clearModes(); body.classList.add('gov-mode'); this.classList.add('active'); triggerDraw(); };
+        document.getElementById('btn-stats').onclick = function() { clearModes(); body.classList.add('stats-mode'); this.classList.add('active'); triggerDraw(); };
 
         function draw() {
             const svg = document.getElementById('canvas-svg');
             const core = document.getElementById('core-engine').getBoundingClientRect();
             const db = document.getElementById('db-cluster').getBoundingClientRect();
-            const ad = document.getElementById('box-ad').getBoundingClientRect();
-            const bound = document.getElementById('boundary').getBoundingClientRect();
+            const dash = document.getElementById('box-dash').getBoundingClientRect();
             svg.innerHTML = '';
 
-            const connect = (x1, y1, x2, y2, color, width = 1.8) => {
+            const connect = (x1, y1, x2, y2, color) => {
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
                 const cp = (x1 + x2) / 2;
                 path.setAttribute("d", `M ${x1} ${y1} C ${cp} ${y1}, ${cp} ${y2}, ${x2} ${y2}`);
                 path.setAttribute("class", "path-line");
                 path.style.stroke = color;
-                path.style.strokeWidth = width;
-                return path;
+                svg.appendChild(path);
             };
 
-            svg.appendChild(connect(ad.left + ad.width/2, ad.bottom, ad.left + ad.width/2, bound.top, 'var(--ios-orange)', 2.5));
-            svg.appendChild(connect(core.right, core.bottom - 20, db.left, db.top + 10, 'rgba(10, 132, 255, 0.45)'));
+            // Calculate Mode Color
+            let activeColor = 'var(--wire-visible)';
+            if(body.classList.contains('ai-assistant-active')) activeColor = 'var(--ios-teal)';
+            if(body.classList.contains('handover-mode')) activeColor = 'var(--ios-orange)';
+            if(body.classList.contains('rca-mode')) activeColor = 'var(--ios-teal)';
+            if(body.classList.contains('stats-mode')) activeColor = 'var(--ios-blue)';
+            if(body.classList.contains('rem-mode')) activeColor = 'var(--ios-green)';
+            if(body.classList.contains('gov-mode')) activeColor = 'var(--ios-orange)';
 
-            if (!body.classList.contains('ai-assistant-active')) {
-                const dash = document.getElementById('box-dash').getBoundingClientRect();
-                svg.appendChild(connect(dash.right, dash.top+dash.height/2, core.left, core.top+core.height/2, 'rgba(10, 132, 255, 0.4)'));
-            }
+            // Dashboard & DB wires
+            connect(dash.right, dash.top + dash.height/2, core.left, core.top + core.height/2, activeColor);
+            connect(core.right, core.bottom - 10, db.left, db.top + 10, activeColor);
 
+            // Right side bus logic
             ['elastic-box', 'snow-box', 'jenkins-box', 'kb-box', 'llm-box'].forEach(id => {
                 const r = document.getElementById(id).getBoundingClientRect();
                 let color = 'var(--wire-visible)';
-                
-                if(body.classList.contains('ai-assistant-active') && (id==='snow-box'||id==='elastic-box'||id==='llm-box'||id==='kb-box')) color = 'var(--ios-teal)';
+                if(body.classList.contains('ai-assistant-active') && id!=='jenkins-box') color = 'var(--ios-teal)';
                 if(body.classList.contains('gov-mode') && (id==='elastic-box'||id==='snow-box')) color = 'var(--ios-orange)';
-                if(body.classList.contains('stats-mode') && id==='jenkins-box') color = 'var(--ios-blue)'; // Stats to Jenkins Bus
+                if(body.classList.contains('stats-mode') && id==='jenkins-box') color = 'var(--ios-blue)';
+                if(body.classList.contains('handover-mode') && id==='snow-box') color = 'var(--ios-orange)';
                 
-                svg.appendChild(connect(r.left, r.top+r.height/2, core.right, core.top+core.height/2, color));
+                // RCA Specific Bus: Now includes LLM-box
+                if(body.classList.contains('rca-mode') && (id==='kb-box'||id==='elastic-box'||id==='snow-box'||id==='llm-box')) color = 'var(--ios-teal)';
+                
+                connect(r.left, r.top + r.height/2, core.right, core.top + core.height/2, color);
             });
 
+            // Downward execution logic
             if(execFlow.classList.contains('visible')) {
                 const eaf = document.getElementById('eaf-node').getBoundingClientRect();
                 const scr = document.getElementById('script-node').getBoundingClientRect();
                 const srv = document.getElementById('server-node').getBoundingClientRect();
                 let color = body.classList.contains('rca-mode') ? 'var(--ios-teal)' : 'var(--ios-green)';
-                svg.appendChild(connect(core.left + core.width/2, core.bottom, eaf.left + eaf.width/2, eaf.top, color));
-                svg.appendChild(connect(core.left + core.width/2, core.bottom, scr.left + scr.width/2, scr.top, color));
-                svg.appendChild(connect(eaf.left + eaf.width/2, eaf.bottom, srv.left + srv.width/2, srv.top, 'var(--ios-red)'));
-                svg.appendChild(connect(scr.left + scr.width/2, scr.bottom, srv.left + srv.width/2, srv.top, 'var(--ios-red)'));
+                connect(core.left + core.width/2, core.bottom, eaf.left + eaf.width/2, eaf.top, color);
+                connect(core.left + core.width/2, core.bottom, scr.left + scr.width/2, scr.top, color);
+                connect(eaf.left + eaf.width/2, eaf.bottom, srv.left + srv.width/2, srv.top, 'var(--ios-red)');
+                connect(scr.left + scr.width/2, scr.bottom, srv.left + srv.width/2, srv.top, 'var(--ios-red)');
             }
         }
         window.onresize = draw;
-        setTimeout(draw, 100);
+        window.onload = draw;
     </script>
 </body>
 </html>
