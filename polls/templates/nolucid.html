@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GOC Toolkit | Knowledge Base Integration</title>
+    <title>GOC Toolkit | AI Assistant Mode</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         :root {
@@ -29,6 +29,11 @@
             overflow-x: hidden; margin: 0;
         }
 
+        /* Logic to hide the entire left sidebar when AI Assistant is active */
+        body.ai-assistant-active .left-sidebar-block {
+            display: none !important;
+        }
+
         .glass-card {
             background: var(--ios-card-bg);
             backdrop-filter: blur(30px);
@@ -42,16 +47,25 @@
             z-index: 10;
         }
 
-        /* RCA Highlights: LLM, SNOW, ESS, and Confluence */
-        body.rca-mode .target-node:not(#llm-box):not(#snow-box):not(#elastic-box):not(#kb-box) { opacity: 0.15; filter: grayscale(1); }
-        body.rca-mode #llm-box, body.rca-mode #snow-box, body.rca-mode #elastic-box, body.rca-mode #kb-box { 
+        /* Highlights for requested nodes */
+        body.ai-assistant-active #llm-box, 
+        body.ai-assistant-active #snow-box, 
+        body.ai-assistant-active #kb-box,
+        body.ai-assistant-active #elastic-box { 
             border-color: var(--ios-teal); 
-            box-shadow: 0 0 18px rgba(100, 210, 255, 0.45); 
+            box-shadow: 0 0 18px rgba(100, 210, 255, 0.7); 
+            transform: scale(1.05);
+            opacity: 1 !important;
+            filter: grayscale(0) !important;
         }
 
-        /* Mode Filters */
+        /* Dim others in AI Mode */
+        body.ai-assistant-active .target-node:not(#llm-box):not(#snow-box):not(#kb-box):not(#elastic-box) { 
+            opacity: 0.15; 
+        }
+
         body.gov-mode .target-node:not(#splunk-box):not(#snow-box) { opacity: 0.15; filter: grayscale(1); }
-        body.patch-mode .target-node:not(#snow-box):not(#elastic-box) { opacity: 0.15; filter: grayscale(1); }
+        body.rca-mode .target-node:not(#llm-box):not(#snow-box):not(#elastic-box):not(#kb-box) { opacity: 0.15; filter: grayscale(1); }
 
         .service-boundary {
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -100,12 +114,11 @@
     <div class="container-fluid px-5">
         <div class="row align-items-center justify-content-between">
             
-            <div class="col-lg-2">
+            <div class="col-lg-2 left-sidebar-block">
                 <p class="label-apple text-center">Control Center</p>
                 <div class="d-grid gap-4">
                     <div class="glass-card" id="box-dash" style="border-color: var(--ios-blue); color: var(--ios-blue);">GOC Dashboard</div>
-                    <div class="glass-card" id="box-ai" style="border-color: var(--ios-indigo); color: var(--ios-indigo);">AI Assistant</div>
-                </div>
+                    </div>
             </div>
 
             <div class="col-lg-6 d-flex flex-column align-items-center">
@@ -116,7 +129,7 @@
                     <div class="glass-card core-hub" id="core-engine">
                         <div style="color:var(--ios-blue); font-weight: 700; font-size: 1.1rem; margin-bottom: 15px;">Django Core Controller</div>
                         <div class="row g-2">
-                            <div class="col-6"><div class="btn-ios mode-btn" id="btn-patch">Patching Mode</div></div>
+                            <div class="col-6"><div class="btn-ios mode-btn" id="btn-ai-assistant">AI Assistant</div></div>
                             <div class="col-6"><div class="btn-ios mode-btn" id="btn-rem" style="color: var(--ios-green)">Auto-Remediate</div></div>
                             <div class="col-6"><div class="btn-ios mode-btn" id="btn-rca" style="color: var(--ios-teal)">RCA Analysis</div></div>
                             <div class="col-6"><div class="btn-ios mode-btn" id="btn-gov" style="color: var(--ios-orange)">Governance Mode</div></div>
@@ -141,10 +154,8 @@
                     <div class="glass-card target-node" id="splunk-box">Splunk Cloud</div>
                     <div class="glass-card target-node" id="kb-box">Knowledge Base (Confluence)</div>
                 </div>
-                
                 <p class="label-apple text-center">Intelligence</p>
                 <div class="glass-card target-node mb-5" id="llm-box" style="color: var(--ios-teal);">Org LLM Engine</div>
-
                 <p class="label-apple text-center">Persistence</p>
                 <div id="db-cluster" class="d-flex flex-column align-items-center">
                     <div class="db-disk"></div><div class="db-disk"></div><div class="db-disk"></div>
@@ -161,7 +172,7 @@
         let drawInt;
 
         function resetAll() {
-            body.classList.remove('patch-mode', 'gov-mode', 'rca-mode');
+            body.classList.remove('ai-assistant-active', 'gov-mode', 'rca-mode');
             execFlow.classList.remove('visible');
             btns.forEach(b => b.classList.remove('active'));
         }
@@ -172,9 +183,15 @@
             setTimeout(() => clearInterval(drawInt), 600);
         }
 
-        document.getElementById('btn-patch').onclick = function() { resetAll(); body.classList.add('patch-mode'); this.classList.add('active'); refresh(); };
+        document.getElementById('btn-ai-assistant').onclick = function() { 
+            resetAll(); 
+            body.classList.add('ai-assistant-active'); 
+            this.classList.add('active'); 
+            refresh(); 
+        };
+
         document.getElementById('btn-rem').onclick = function() { resetAll(); execFlow.classList.add('visible'); this.classList.add('active'); refresh(); };
-        document.getElementById('btn-rca').onclick = function() { resetAll(); body.classList.add('rca-mode'); this.classList.add('active'); refresh(); };
+        document.getElementById('btn-rca').onclick = function() { resetAll(); body.classList.add('rca-mode'); execFlow.classList.add('visible'); this.classList.add('active'); refresh(); };
         document.getElementById('btn-gov').onclick = function() { resetAll(); body.classList.add('gov-mode'); this.classList.add('active'); refresh(); };
 
         function draw() {
@@ -197,18 +214,19 @@
             svg.appendChild(connect(ad.left + ad.width/2, ad.bottom, ad.left + ad.width/2, bound.top, 'var(--ios-orange)'));
             svg.appendChild(connect(core.right, core.bottom - 20, db.left, db.top + 10, 'rgba(10, 132, 255, 0.45)'));
 
-            ['box-dash', 'box-ai'].forEach(id => {
-                const r = document.getElementById(id).getBoundingClientRect();
-                let color = id === 'box-dash' ? 'rgba(10, 132, 255, 0.4)' : 'rgba(94, 92, 230, 0.4)';
-                svg.appendChild(connect(r.right, r.top+r.height/2, core.left, core.top+core.height/2, color));
-            });
+            // Only draw control center lines if sidebar is visible
+            if (!body.classList.contains('ai-assistant-active')) {
+                const dash = document.getElementById('box-dash').getBoundingClientRect();
+                svg.appendChild(connect(dash.right, dash.top+dash.height/2, core.left, core.top+core.height/2, 'rgba(10, 132, 255, 0.4)'));
+            }
 
             ['elastic-box', 'snow-box', 'splunk-box', 'kb-box', 'llm-box'].forEach(id => {
                 const r = document.getElementById(id).getBoundingClientRect();
                 let color = 'var(--wire-visible)';
-                if(id === 'llm-box') color = 'rgba(255, 255, 255, 0.05)';
-
-                if(body.classList.contains('patch-mode') && (id==='snow-box'||id==='elastic-box')) color = 'var(--ios-cyan)';
+                
+                // Highlight requested nodes in AI Assistant mode
+                if(body.classList.contains('ai-assistant-active') && (id==='snow-box'||id==='elastic-box'||id==='llm-box'||id==='kb-box')) color = 'var(--ios-teal)';
+                
                 if(body.classList.contains('gov-mode') && (id==='splunk-box'||id==='snow-box')) color = 'var(--ios-orange)';
                 if(body.classList.contains('rca-mode') && (id==='llm-box'||id==='snow-box'||id==='elastic-box'||id==='kb-box')) color = 'var(--ios-teal)';
                 
@@ -217,11 +235,16 @@
 
             if(execFlow.classList.contains('visible')) {
                 const start = document.getElementById('btn-rem').getBoundingClientRect();
+                const startRca = document.getElementById('btn-rca').getBoundingClientRect();
                 const eaf = document.getElementById('eaf-node').getBoundingClientRect();
                 const scr = document.getElementById('script-node').getBoundingClientRect();
                 const srv = document.getElementById('server-node').getBoundingClientRect();
-                svg.appendChild(connect(start.left + start.width/2, start.bottom, eaf.left + eaf.width/2, eaf.top, 'var(--ios-green)'));
-                svg.appendChild(connect(start.left + start.width/2, start.bottom, scr.left + scr.width/2, scr.top, 'var(--ios-green)'));
+                
+                let activeBtn = body.classList.contains('rca-mode') ? startRca : start;
+                let color = body.classList.contains('rca-mode') ? 'var(--ios-teal)' : 'var(--ios-green)';
+
+                svg.appendChild(connect(activeBtn.left + activeBtn.width/2, activeBtn.bottom, eaf.left + eaf.width/2, eaf.top, color));
+                svg.appendChild(connect(activeBtn.left + activeBtn.width/2, activeBtn.bottom, scr.left + scr.width/2, scr.top, color));
                 svg.appendChild(connect(eaf.left + eaf.width/2, eaf.bottom, srv.left + srv.width/2, srv.top, 'var(--ios-red)'));
                 svg.appendChild(connect(scr.left + scr.width/2, scr.bottom, srv.left + srv.width/2, srv.top, 'var(--ios-red)'));
             }
