@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GOC Toolkit | Final Optimized Layout</title>
+    <title>GOC Toolkit | Knowledge Base Integration</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         :root {
             --ios-black: #000000;
-            --ios-card-bg: rgba(28, 28, 30, 0.85);
+            --ios-card-bg: rgba(28, 28, 30, 0.9);
             --ios-blue: #0A84FF;
             --ios-green: #30D158;
             --ios-indigo: #5E5CE6;
@@ -17,6 +17,7 @@
             --ios-red: #FF453A;
             --ios-cyan: #70D7FF;
             --ios-gray: #8E8E93;
+            --wire-visible: rgba(255, 255, 255, 0.2);
         }
 
         body {
@@ -31,32 +32,32 @@
         .glass-card {
             background: var(--ios-card-bg);
             backdrop-filter: blur(30px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 14px;
-            padding: 12px;
+            padding: 10px;
             text-align: center;
-            font-size: 0.75rem;
+            font-size: 0.72rem;
             font-weight: 500;
             transition: all 0.4s cubic-bezier(0.15, 0, 0.15, 1);
             z-index: 10;
         }
 
-        /* RCA Highlights: Only ESS, SNOW, and LLM glow */
-        body.rca-mode .target-node:not(#llm-box):not(#snow-box):not(#elastic-box) { opacity: 0.1; filter: grayscale(1); }
-        body.rca-mode #llm-box, body.rca-mode #snow-box, body.rca-mode #elastic-box { 
+        /* RCA Highlights: LLM, SNOW, ESS, and Confluence */
+        body.rca-mode .target-node:not(#llm-box):not(#snow-box):not(#elastic-box):not(#kb-box) { opacity: 0.15; filter: grayscale(1); }
+        body.rca-mode #llm-box, body.rca-mode #snow-box, body.rca-mode #elastic-box, body.rca-mode #kb-box { 
             border-color: var(--ios-teal); 
-            box-shadow: 0 0 15px rgba(100, 210, 255, 0.4); 
+            box-shadow: 0 0 18px rgba(100, 210, 255, 0.45); 
         }
 
         /* Mode Filters */
-        body.gov-mode .target-node:not(#splunk-box):not(#snow-box) { opacity: 0.1; filter: grayscale(1); }
-        body.patch-mode .target-node:not(#snow-box):not(#elastic-box) { opacity: 0.1; filter: grayscale(1); }
+        body.gov-mode .target-node:not(#splunk-box):not(#snow-box) { opacity: 0.15; filter: grayscale(1); }
+        body.patch-mode .target-node:not(#snow-box):not(#elastic-box) { opacity: 0.15; filter: grayscale(1); }
 
         .service-boundary {
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 36px;
+            border-radius: 40px;
             padding: 50px;
-            background: radial-gradient(circle at top, rgba(10, 132, 255, 0.03) 0%, transparent 70%);
+            background: radial-gradient(circle at top, rgba(10, 132, 255, 0.04) 0%, transparent 75%);
             min-width: 600px;
             position: relative;
         }
@@ -64,12 +65,13 @@
         .core-hub { border: 1.5px solid var(--ios-blue); padding: 24px !important; }
         
         .btn-ios { 
-            background: rgba(255,255,255,0.05); 
+            background: rgba(255,255,255,0.06); 
             border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px; padding: 10px; cursor: pointer; transition: 0.2s;
+            border-radius: 9px; padding: 10px; cursor: pointer; transition: 0.2s;
             font-size: 0.7rem; color: var(--ios-gray);
         }
-        .btn-ios.active { background: var(--ios-blue); color: #fff; border-color: #fff; box-shadow: 0 0 15px rgba(10, 132, 255, 0.4); }
+        .btn-ios:hover { background: rgba(255,255,255,0.15); color: #fff; }
+        .btn-ios.active { background: var(--ios-blue); color: #fff; border-color: #fff; box-shadow: 0 0 20px rgba(10, 132, 255, 0.4); }
 
         .exec-flow {
             display: flex; flex-direction: column; align-items: center; gap: 40px;
@@ -80,14 +82,14 @@
 
         .db-disk {
             width: 85px; height: 18px;
-            background: linear-gradient(180deg, #3A3A3C 0%, #1C1C1E 100%);
-            border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+            background: linear-gradient(180deg, #48484A 0%, #1C1C1E 100%);
+            border-radius: 50%; border: 1px solid rgba(255,255,255,0.25);
             margin-bottom: -11px;
         }
 
         #canvas-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
-        .path-line { fill: none; stroke-width: 1.5; stroke-dasharray: 6, 10; animation: dash 25s linear infinite; transition: stroke 0.4s; }
-        @keyframes dash { from { stroke-dashoffset: 500; } to { stroke-dashoffset: 0; } }
+        .path-line { fill: none; stroke-width: 1.8; stroke-dasharray: 6, 12; animation: dash 30s linear infinite; transition: stroke 0.4s, opacity 0.4s; }
+        @keyframes dash { from { stroke-dashoffset: 600; } to { stroke-dashoffset: 0; } }
         .label-apple { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 2px; color: var(--ios-gray); font-weight: 700; margin-bottom: 12px; }
     </style>
 </head>
@@ -99,7 +101,7 @@
         <div class="row align-items-center justify-content-between">
             
             <div class="col-lg-2">
-                <p class="label-apple text-center">User Access</p>
+                <p class="label-apple text-center">Control Center</p>
                 <div class="d-grid gap-4">
                     <div class="glass-card" id="box-dash" style="border-color: var(--ios-blue); color: var(--ios-blue);">GOC Dashboard</div>
                     <div class="glass-card" id="box-ai" style="border-color: var(--ios-indigo); color: var(--ios-indigo);">AI Assistant</div>
@@ -107,10 +109,10 @@
             </div>
 
             <div class="col-lg-6 d-flex flex-column align-items-center">
-                <div class="glass-card" id="box-ad" style="border: 1px solid var(--ios-orange); color: var(--ios-orange); width: 220px; margin-bottom: 40px;">Active Directory SSO</div>
+                <div class="glass-card" id="box-ad" style="border: 1.5px solid var(--ios-orange); color: var(--ios-orange); width: 220px; margin-bottom: 40px;">Active Directory SSO</div>
                 
                 <div class="service-boundary" id="boundary">
-                    <p class="label-apple text-center">Orchestration</p>
+                    <p class="label-apple text-center">Management Layer</p>
                     <div class="glass-card core-hub" id="core-engine">
                         <div style="color:var(--ios-blue); font-weight: 700; font-size: 1.1rem; margin-bottom: 15px;">Django Core Controller</div>
                         <div class="row g-2">
@@ -126,17 +128,18 @@
                             <div class="glass-card" id="eaf-node" style="border-color: var(--ios-green);">EAF Flow</div>
                             <div class="glass-card" id="script-node" style="border-color: var(--ios-green);">Python Automation</div>
                         </div>
-                        <div class="glass-card" id="server-node" style="width:280px; border-color: var(--ios-red); color: var(--ios-red);">Production Target</div>
+                        <div class="glass-card" id="server-node" style="width:280px; border-color: var(--ios-red); color: var(--ios-red);">Production Host</div>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-2">
-                <p class="label-apple text-center">Ingestion</p>
+                <p class="label-apple text-center">Data Ingestion</p>
                 <div class="d-grid gap-2 mb-4">
                     <div class="glass-card target-node" id="elastic-box">Elasticsearch (ESS)</div>
                     <div class="glass-card target-node" id="snow-box">ServiceNow (SNOW)</div>
                     <div class="glass-card target-node" id="splunk-box">Splunk Cloud</div>
+                    <div class="glass-card target-node" id="kb-box">Knowledge Base (Confluence)</div>
                 </div>
                 
                 <p class="label-apple text-center">Intelligence</p>
@@ -187,35 +190,31 @@
                 const cp = (x1 + x2) / 2;
                 path.setAttribute("d", `M ${x1} ${y1} C ${cp} ${y1}, ${cp} ${y2}, ${x2} ${y2}`);
                 path.setAttribute("class", "path-line");
-                path.style.stroke = color || "rgba(255,255,255,0.06)";
+                path.style.stroke = color;
                 return path;
             };
 
-            // AD Centered Bridge
             svg.appendChild(connect(ad.left + ad.width/2, ad.bottom, ad.left + ad.width/2, bound.top, 'var(--ios-orange)'));
+            svg.appendChild(connect(core.right, core.bottom - 20, db.left, db.top + 10, 'rgba(10, 132, 255, 0.45)'));
 
-            // DB Persistence Path (Bottom-Right)
-            svg.appendChild(connect(core.right, core.bottom - 20, db.left, db.top + 10, 'rgba(10, 132, 255, 0.4)'));
-
-            // Access Paths
             ['box-dash', 'box-ai'].forEach(id => {
                 const r = document.getElementById(id).getBoundingClientRect();
-                let color = id === 'box-dash' ? 'rgba(10, 132, 255, 0.3)' : 'rgba(94, 92, 230, 0.3)';
+                let color = id === 'box-dash' ? 'rgba(10, 132, 255, 0.4)' : 'rgba(94, 92, 230, 0.4)';
                 svg.appendChild(connect(r.right, r.top+r.height/2, core.left, core.top+core.height/2, color));
             });
 
-            // Data & Intelligence Paths
-            ['elastic-box', 'snow-box', 'splunk-box', 'llm-box'].forEach(id => {
+            ['elastic-box', 'snow-box', 'splunk-box', 'kb-box', 'llm-box'].forEach(id => {
                 const r = document.getElementById(id).getBoundingClientRect();
-                let color = '';
+                let color = 'var(--wire-visible)';
+                if(id === 'llm-box') color = 'rgba(255, 255, 255, 0.05)';
+
                 if(body.classList.contains('patch-mode') && (id==='snow-box'||id==='elastic-box')) color = 'var(--ios-cyan)';
                 if(body.classList.contains('gov-mode') && (id==='splunk-box'||id==='snow-box')) color = 'var(--ios-orange)';
-                if(body.classList.contains('rca-mode') && (id==='llm-box'||id==='snow-box'||id==='elastic-box')) color = 'var(--ios-teal)';
+                if(body.classList.contains('rca-mode') && (id==='llm-box'||id==='snow-box'||id==='elastic-box'||id==='kb-box')) color = 'var(--ios-teal)';
                 
                 svg.appendChild(connect(r.left, r.top+r.height/2, core.right, core.top+core.height/2, color));
             });
 
-            // Execution Flow
             if(execFlow.classList.contains('visible')) {
                 const start = document.getElementById('btn-rem').getBoundingClientRect();
                 const eaf = document.getElementById('eaf-node').getBoundingClientRect();
