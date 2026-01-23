@@ -3,182 +3,232 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GOC Toolkit | AI Orchestration Architecture</title>
+    <title>GOC Toolkit | Final Optimized Layout</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         :root {
-            --apple-black: #050505;
-            --glass-card: rgba(28, 28, 30, 0.9);
-            --accent-blue: #0071e3;
-            --ai-purple: #af52de;
-            --ad-gold: #ff9f0a;
-            --llm-teal: #64d2ff;
+            --ios-black: #000000;
+            --ios-card-bg: rgba(28, 28, 30, 0.85);
+            --ios-blue: #0A84FF;
+            --ios-green: #30D158;
+            --ios-indigo: #5E5CE6;
+            --ios-orange: #FF9F0A;
+            --ios-teal: #64D2FF;
+            --ios-red: #FF453A;
+            --ios-cyan: #70D7FF;
+            --ios-gray: #8E8E93;
         }
 
         body {
-            background-color: var(--apple-black);
-            color: #ffffff;
+            background-color: var(--ios-black);
+            color: #FFFFFF;
             font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
             min-height: 100vh;
-            margin: 0;
-            overflow: hidden;
-            display: flex;
-            align-items: center;
+            display: flex; align-items: center;
+            overflow-x: hidden; margin: 0;
         }
 
-        .glass-module {
-            background: var(--glass-card);
-            backdrop-filter: blur(20px);
+        .glass-card {
+            background: var(--ios-card-bg);
+            backdrop-filter: blur(30px);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 14px;
-            padding: 10px;
-            position: relative;
-            z-index: 10;
+            padding: 12px;
             text-align: center;
-            font-size: 0.85rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            transition: all 0.4s cubic-bezier(0.15, 0, 0.15, 1);
+            z-index: 10;
         }
 
-        /* Top Layer */
-        .ui-row { width: 100%; display: flex; justify-content: center; gap: 40px; margin-bottom: 30px; }
-        .ui-layer { border: 1px solid rgba(255, 255, 255, 0.4); width: 300px; font-weight: 600; }
-        .ai-bot { border: 1px solid var(--ai-purple); color: var(--ai-purple); width: 200px; font-weight: bold; }
+        /* RCA Highlights: Only ESS, SNOW, and LLM glow */
+        body.rca-mode .target-node:not(#llm-box):not(#snow-box):not(#elastic-box) { opacity: 0.1; filter: grayscale(1); }
+        body.rca-mode #llm-box, body.rca-mode #snow-box, body.rca-mode #elastic-box { 
+            border-color: var(--ios-teal); 
+            box-shadow: 0 0 15px rgba(100, 210, 255, 0.4); 
+        }
 
-        /* Left/Right Stack widths */
-        .col-stack { width: 180px; }
-        .llm-node { border: 1px dashed var(--llm-teal); color: var(--llm-teal); font-weight: bold; margin-bottom: 20px; }
+        /* Mode Filters */
+        body.gov-mode .target-node:not(#splunk-box):not(#snow-box) { opacity: 0.1; filter: grayscale(1); }
+        body.patch-mode .target-node:not(#snow-box):not(#elastic-box) { opacity: 0.1; filter: grayscale(1); }
 
-        /* Core Hub */
-        .ad-layer { border: 1px solid var(--ad-gold); color: var(--ad-gold); width: 220px; font-size: 0.75rem; font-weight: bold; }
-        .core-hub { border: 1px solid var(--accent-blue); width: 480px; padding: 25px !important; box-shadow: 0 0 50px rgba(0, 113, 227, 0.15); }
-
-        /* DB Cylinder */
-        .db-cylinder {
-            width: 130px; height: 80px;
-            background: linear-gradient(90deg, #2c2c2e 0%, #3a3a3c 50%, #2c2c2e 100%);
+        .service-boundary {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 36px;
+            padding: 50px;
+            background: radial-gradient(circle at top, rgba(10, 132, 255, 0.03) 0%, transparent 70%);
+            min-width: 600px;
             position: relative;
-            display: flex; align-items: center; justify-content: center;
         }
-        .db-cylinder::before { content: ""; position: absolute; top: -12px; width: 100%; height: 24px; background: #48484a; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); }
-        .db-cylinder::after { content: ""; position: absolute; bottom: -12px; width: 100%; height: 24px; background: #2c2c2e; border-radius: 50%; border: 1px solid rgba(255,255,255,0.1); }
 
-        #connector-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
-        .pulse-path { fill: none; stroke: rgba(255, 255, 255, 0.2); stroke-width: 1.2; stroke-dasharray: 4, 8; animation: flowMove 15s linear infinite; }
-        .ad-path { stroke: var(--ad-gold); opacity: 0.6; }
-        .ai-path { stroke: var(--ai-purple); opacity: 0.8; stroke-width: 1.8; }
+        .core-hub { border: 1.5px solid var(--ios-blue); padding: 24px !important; }
         
-        @keyframes flowMove { from { stroke-dashoffset: 240; } to { stroke-dashoffset: 0; } }
-        .section-label { font-size: 0.55rem; text-transform: uppercase; letter-spacing: 2.5px; color: #86868b; margin-bottom: 0.6rem; font-weight: 800; }
-        .internal-tool { background: rgba(255,255,255,0.03); border-radius: 6px; padding: 10px; font-size: 0.75rem; color: #a1a1a6; border: 1px solid rgba(255,255,255,0.08); }
+        .btn-ios { 
+            background: rgba(255,255,255,0.05); 
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; padding: 10px; cursor: pointer; transition: 0.2s;
+            font-size: 0.7rem; color: var(--ios-gray);
+        }
+        .btn-ios.active { background: var(--ios-blue); color: #fff; border-color: #fff; box-shadow: 0 0 15px rgba(10, 132, 255, 0.4); }
+
+        .exec-flow {
+            display: flex; flex-direction: column; align-items: center; gap: 40px;
+            width: 100%; max-height: 0; opacity: 0; overflow: visible;
+            transition: all 0.5s ease;
+        }
+        .exec-flow.visible { max-height: 400px; opacity: 1; margin-top: 40px; }
+
+        .db-disk {
+            width: 85px; height: 18px;
+            background: linear-gradient(180deg, #3A3A3C 0%, #1C1C1E 100%);
+            border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+            margin-bottom: -11px;
+        }
+
+        #canvas-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+        .path-line { fill: none; stroke-width: 1.5; stroke-dasharray: 6, 10; animation: dash 25s linear infinite; transition: stroke 0.4s; }
+        @keyframes dash { from { stroke-dashoffset: 500; } to { stroke-dashoffset: 0; } }
+        .label-apple { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 2px; color: var(--ios-gray); font-weight: 700; margin-bottom: 12px; }
     </style>
 </head>
-<body>
+<body id="master-body">
 
-    <svg id="connector-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    <svg id="canvas-svg" xmlns="http://www.w3.org/2000/svg"></svg>
 
     <div class="container-fluid px-5">
-        <div class="ui-row">
-            <div class="glass-module ui-layer" id="ui-block">GOC TOOLKIT PORTAL</div>
-            <div class="glass-module ai-bot" id="ai-bot">AI CHAT ASSISTANT</div>
-        </div>
-
         <div class="row align-items-center justify-content-between">
             
-            <div class="col-lg-2 col-stack">
-                <p class="section-label text-center">Intelligence</p>
-                <div class="glass-module llm-node" id="llm-block">ORG LLM (Secure)</div>
-                
-                <p class="section-label text-center">Data Sources</p>
-                <div class="d-grid gap-2">
-                    <div class="glass-module source" id="snow">ServiceNow</div>
-                    <div class="glass-module source" id="ess">Elastic Search</div>
-                    <div class="glass-module source" id="splunk">Splunk SIEM</div>
-                    <div class="glass-module source" id="foglight">Foglight APM</div>
-                    <div class="glass-module source" id="sw">SolarWinds</div>
+            <div class="col-lg-2">
+                <p class="label-apple text-center">User Access</p>
+                <div class="d-grid gap-4">
+                    <div class="glass-card" id="box-dash" style="border-color: var(--ios-blue); color: var(--ios-blue);">GOC Dashboard</div>
+                    <div class="glass-card" id="box-ai" style="border-color: var(--ios-indigo); color: var(--ios-indigo);">AI Assistant</div>
                 </div>
             </div>
 
-            <div class="col-lg-6 d-flex flex-column align-items-center position-relative">
-                <p class="section-label">Identity Context</p>
-                <div class="glass-module ad-layer" id="ad-block">ACTIVE DIRECTORY SSO</div>
+            <div class="col-lg-6 d-flex flex-column align-items-center">
+                <div class="glass-card" id="box-ad" style="border: 1px solid var(--ios-orange); color: var(--ios-orange); width: 220px; margin-bottom: 40px;">Active Directory SSO</div>
                 
-                <div class="my-3"></div>
-                
-                <p class="section-label">Orchestration Hub</p>
-                <div class="glass-module core-hub" id="core">
-                    <div style="color:var(--accent-blue); font-weight: 800; font-size: 1.1rem; margin-bottom: 15px; letter-spacing: 1px;">DJANGO ENGINE</div>
-                    <div class="row g-2">
-                        <div class="col-6"><div class="internal-tool">Server Patching</div></div>
-                        <div class="col-6"><div class="internal-tool">Auto-Remediation</div></div>
-                        <div class="col-6"><div class="internal-tool">RCA Analytics</div></div>
-                        <div class="col-6"><div class="internal-tool">Compliance</div></div>
+                <div class="service-boundary" id="boundary">
+                    <p class="label-apple text-center">Orchestration</p>
+                    <div class="glass-card core-hub" id="core-engine">
+                        <div style="color:var(--ios-blue); font-weight: 700; font-size: 1.1rem; margin-bottom: 15px;">Django Core Controller</div>
+                        <div class="row g-2">
+                            <div class="col-6"><div class="btn-ios mode-btn" id="btn-patch">Patching Mode</div></div>
+                            <div class="col-6"><div class="btn-ios mode-btn" id="btn-rem" style="color: var(--ios-green)">Auto-Remediate</div></div>
+                            <div class="col-6"><div class="btn-ios mode-btn" id="btn-rca" style="color: var(--ios-teal)">RCA Analysis</div></div>
+                            <div class="col-6"><div class="btn-ios mode-btn" id="btn-gov" style="color: var(--ios-orange)">Governance Mode</div></div>
+                        </div>
+                    </div>
+
+                    <div class="exec-flow" id="exec-flow">
+                        <div class="d-flex gap-5">
+                            <div class="glass-card" id="eaf-node" style="border-color: var(--ios-green);">EAF Flow</div>
+                            <div class="glass-card" id="script-node" style="border-color: var(--ios-green);">Python Automation</div>
+                        </div>
+                        <div class="glass-card" id="server-node" style="width:280px; border-color: var(--ios-red); color: var(--ios-red);">Production Target</div>
                     </div>
                 </div>
+            </div>
 
-                <div class="my-4"></div>
+            <div class="col-lg-2">
+                <p class="label-apple text-center">Ingestion</p>
+                <div class="d-grid gap-2 mb-4">
+                    <div class="glass-card target-node" id="elastic-box">Elasticsearch (ESS)</div>
+                    <div class="glass-card target-node" id="snow-box">ServiceNow (SNOW)</div>
+                    <div class="glass-card target-node" id="splunk-box">Splunk Cloud</div>
+                </div>
                 
-                <div class="db-cylinder" id="mssql">
-                    <div class="text-center small fw-bold" style="position:relative; z-index:20;">MS SQL SERVER</div>
+                <p class="label-apple text-center">Intelligence</p>
+                <div class="glass-card target-node mb-5" id="llm-box" style="color: var(--ios-teal);">Org LLM Engine</div>
+
+                <p class="label-apple text-center">Persistence</p>
+                <div id="db-cluster" class="d-flex flex-column align-items-center">
+                    <div class="db-disk"></div><div class="db-disk"></div><div class="db-disk"></div>
+                    <span style="font-size: 0.6rem; font-weight: 800; margin-top: 18px; color: var(--ios-gray);">MSSQL CLUSTER</span>
                 </div>
             </div>
-
-            <div class="col-lg-2 col-stack">
-                <p class="section-label text-center">Infrastructure</p>
-                <div class="d-grid gap-2">
-                    <div class="glass-module tower" id="ux">Unix / Linux</div>
-                    <div class="glass-module tower" id="win">Windows Srv</div>
-                    <div class="glass-module tower" id="mid">Middleware</div>
-                    <div class="glass-module tower" id="st">Storage / SAN</div>
-                    <div class="glass-module tower" id="bk">Backup Node</div>
-                    <div class="glass-module tower" id="virt">Virtualization</div>
-                </div>
-            </div>
-
         </div>
     </div>
 
     <script>
+        const body = document.getElementById('master-body');
+        const btns = document.querySelectorAll('.mode-btn');
+        const execFlow = document.getElementById('exec-flow');
+        let drawInt;
+
+        function resetAll() {
+            body.classList.remove('patch-mode', 'gov-mode', 'rca-mode');
+            execFlow.classList.remove('visible');
+            btns.forEach(b => b.classList.remove('active'));
+        }
+
+        function refresh() {
+            clearInterval(drawInt);
+            drawInt = setInterval(draw, 10);
+            setTimeout(() => clearInterval(drawInt), 600);
+        }
+
+        document.getElementById('btn-patch').onclick = function() { resetAll(); body.classList.add('patch-mode'); this.classList.add('active'); refresh(); };
+        document.getElementById('btn-rem').onclick = function() { resetAll(); execFlow.classList.add('visible'); this.classList.add('active'); refresh(); };
+        document.getElementById('btn-rca').onclick = function() { resetAll(); body.classList.add('rca-mode'); this.classList.add('active'); refresh(); };
+        document.getElementById('btn-gov').onclick = function() { resetAll(); body.classList.add('gov-mode'); this.classList.add('active'); refresh(); };
+
         function draw() {
-            const svg = document.getElementById('connector-svg');
-            const core = document.getElementById('core').getBoundingClientRect();
-            const ui = document.getElementById('ui-block').getBoundingClientRect();
-            const ad = document.getElementById('ad-block').getBoundingClientRect();
-            const ai = document.getElementById('ai-bot').getBoundingClientRect();
-            const mssql = document.getElementById('mssql').getBoundingClientRect();
-            
+            const svg = document.getElementById('canvas-svg');
+            const core = document.getElementById('core-engine').getBoundingClientRect();
+            const db = document.getElementById('db-cluster').getBoundingClientRect();
+            const ad = document.getElementById('box-ad').getBoundingClientRect();
+            const bound = document.getElementById('boundary').getBoundingClientRect();
             svg.innerHTML = '';
-            
-            const path = (x1, y1, x2, y2, cls) => {
-                const d = `M ${x1} ${y1} C ${(x1+x2)/2} ${y1}, ${(x1+x2)/2} ${y2}, ${x2} ${y2}`;
-                const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                p.setAttribute("d", d); 
-                p.setAttribute("class", "pulse-path " + cls);
-                return p;
+
+            const connect = (x1, y1, x2, y2, color) => {
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                const cp = (x1 + x2) / 2;
+                path.setAttribute("d", `M ${x1} ${y1} C ${cp} ${y1}, ${cp} ${y2}, ${x2} ${y2}`);
+                path.setAttribute("class", "path-line");
+                path.style.stroke = color || "rgba(255,255,255,0.06)";
+                return path;
             };
 
-            // Main UI to Core via AD
-            svg.appendChild(path(ui.left+ui.width/2, ui.bottom, ad.left+ad.width/2, ad.top, 'ad-path'));
-            svg.appendChild(path(ad.left+ad.width/2, ad.bottom, core.left+core.width/2, core.top, 'ad-path'));
-            
-            // AI Bot Direct to Core (The Natural Language interface)
-            // Draws from bottom of AI Bot to top-right corner of Django Core
-            svg.appendChild(path(ai.left+ai.width/2, ai.bottom, core.right-50, core.top, 'ai-path'));
+            // AD Centered Bridge
+            svg.appendChild(connect(ad.left + ad.width/2, ad.bottom, ad.left + ad.width/2, bound.top, 'var(--ios-orange)'));
 
-            // Core to DB
-            svg.appendChild(path(core.left+core.width/2, core.bottom, mssql.left+mssql.width/2, mssql.top, ''));
+            // DB Persistence Path (Bottom-Right)
+            svg.appendChild(connect(core.right, core.bottom - 20, db.left, db.top + 10, 'rgba(10, 132, 255, 0.4)'));
 
-            // All Left sources to Core
-            document.querySelectorAll('.source, .llm-node').forEach(s => {
-                const r = s.getBoundingClientRect();
-                svg.appendChild(path(r.right, r.top+r.height/2, core.left, core.top+core.height/2, ''));
+            // Access Paths
+            ['box-dash', 'box-ai'].forEach(id => {
+                const r = document.getElementById(id).getBoundingClientRect();
+                let color = id === 'box-dash' ? 'rgba(10, 132, 255, 0.3)' : 'rgba(94, 92, 230, 0.3)';
+                svg.appendChild(connect(r.right, r.top+r.height/2, core.left, core.top+core.height/2, color));
             });
 
-            // All Right towers to Core
-            document.querySelectorAll('.tower').forEach(t => {
-                const r = t.getBoundingClientRect();
-                svg.appendChild(path(core.right, core.top+core.height/2, r.left, r.top+r.height/2, ''));
+            // Data & Intelligence Paths
+            ['elastic-box', 'snow-box', 'splunk-box', 'llm-box'].forEach(id => {
+                const r = document.getElementById(id).getBoundingClientRect();
+                let color = '';
+                if(body.classList.contains('patch-mode') && (id==='snow-box'||id==='elastic-box')) color = 'var(--ios-cyan)';
+                if(body.classList.contains('gov-mode') && (id==='splunk-box'||id==='snow-box')) color = 'var(--ios-orange)';
+                if(body.classList.contains('rca-mode') && (id==='llm-box'||id==='snow-box'||id==='elastic-box')) color = 'var(--ios-teal)';
+                
+                svg.appendChild(connect(r.left, r.top+r.height/2, core.right, core.top+core.height/2, color));
             });
+
+            // Execution Flow
+            if(execFlow.classList.contains('visible')) {
+                const start = document.getElementById('btn-rem').getBoundingClientRect();
+                const eaf = document.getElementById('eaf-node').getBoundingClientRect();
+                const scr = document.getElementById('script-node').getBoundingClientRect();
+                const srv = document.getElementById('server-node').getBoundingClientRect();
+                svg.appendChild(connect(start.left + start.width/2, start.bottom, eaf.left + eaf.width/2, eaf.top, 'var(--ios-green)'));
+                svg.appendChild(connect(start.left + start.width/2, start.bottom, scr.left + scr.width/2, scr.top, 'var(--ios-green)'));
+                svg.appendChild(connect(eaf.left + eaf.width/2, eaf.bottom, srv.left + srv.width/2, srv.top, 'var(--ios-red)'));
+                svg.appendChild(connect(scr.left + scr.width/2, scr.bottom, srv.left + srv.width/2, srv.top, 'var(--ios-red)'));
+            }
         }
-        window.onload = draw; window.onresize = draw;
+        window.onresize = draw;
+        setTimeout(draw, 100);
     </script>
 </body>
 </html>
