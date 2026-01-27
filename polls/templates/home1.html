@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOC Toolkit | Operations Hub</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.8);
+            --blue: #007aff;
+            --text-main: #1d1d1f;
+            --text-sec: #86868b;
+        }
+
+        body {
+            background-color: var(--apple-bg);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(0, 122, 255, 0.03) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(88, 86, 214, 0.03) 0px, transparent 50%);
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: var(--text-main);
+            padding-bottom: 100px;
+        }
+
+        /* --- UI COMPONENTS --- */
+        .navbar {
+            background: var(--glass);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border-bottom: 1px solid var(--glass-border);
+            padding: 15px 0;
+            z-index: 1000;
+        }
+
+        .hero-section { padding: 60px 0 50px; text-align: center; }
+        .hero-section h1 { font-size: 3.2rem; font-weight: 700; letter-spacing: -1.5px; }
+
+        /* --- TOOL CARDS --- */
+        .tool-card {
+            background: var(--glass);
+            backdrop-filter: blur(30px) saturate(180%);
+            -webkit-backdrop-filter: blur(30px) saturate(180%);
+            border-radius: 24px;
+            border: 1px solid var(--glass-border);
+            padding: 30px;
+            height: 100%;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            text-decoration: none;
+            color: inherit;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.02);
+        }
+
+        .tool-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.08);
+            background: white;
+        }
+
+        .icon-box {
+            width: 52px;
+            height: 52px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            font-size: 22px;
+            color: white;
+        }
+
+        /* Apple Gradient Themes */
+        .bg-ai { background: linear-gradient(135deg, #5AC8FA, #007AFF); }
+        .bg-rca { background: linear-gradient(135deg, #FF9500, #FF5E3A); }
+        .bg-handover { background: linear-gradient(135deg, #AF52DE, #5856D6); }
+        .bg-patch { background: linear-gradient(135deg, #34C759, #00C7BE); }
+        .bg-automation { background: linear-gradient(135deg, #FF2D55, #FF375F); }
+        .bg-stats { background: linear-gradient(135deg, #8E8E93, #1C1C1E); }
+
+        .tower-badge {
+            background: rgba(0, 0, 0, 0.04);
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-sec);
+            margin-top: 15px;
+            align-self: flex-start;
+        }
+
+        /* --- FLOATING AI ASSISTANT --- */
+        .ai-fab {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #5AC8FA, #007AFF);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            box-shadow: 0 10px 25px rgba(0, 122, 255, 0.3);
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 2000;
+        }
+        .ai-fab:hover { transform: scale(1.1); }
+
+        .ai-chat-card {
+            position: fixed;
+            bottom: 100px;
+            right: 30px;
+            width: 350px;
+            height: 480px;
+            background: var(--glass);
+            backdrop-filter: blur(25px) saturate(180%);
+            -webkit-backdrop-filter: blur(25px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            z-index: 2000;
+            overflow: hidden;
+        }
+
+        .ai-chat-header {
+            background: var(--blue);
+            color: white;
+            padding: 15px 20px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .ai-chat-body {
+            flex-grow: 1;
+            padding: 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: rgba(255,255,255,0.4);
+        }
+
+        .message { padding: 10px 14px; border-radius: 15px; font-size: 0.9rem; max-width: 85%; }
+        .ai-msg { background: white; border: 1px solid rgba(0,0,0,0.05); align-self: flex-start; }
+        .user-msg { background: var(--blue); color: white; align-self: flex-end; }
+
+        .ai-chat-footer {
+            padding: 15px;
+            border-top: 1px solid rgba(0,0,0,0.05);
+            display: flex;
+            gap: 10px;
+            background: white;
+        }
+        .ai-chat-footer input {
+            flex-grow: 1;
+            border: none;
+            background: rgba(0,0,0,0.05);
+            padding: 8px 15px;
+            border-radius: 20px;
+            outline: none;
+        }
+        #send-btn { background: none; border: none; color: var(--blue); font-size: 20px; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar sticky-top">
+    <div class="container">
+        <a class="navbar-brand" href="{% url 'home' %}">
+            <i class="bi bi-cpu-fill me-2 text-primary"></i> GOC Toolkit
+        </a>
+        <div class="d-flex align-items-center">
+            <span class="me-3 d-none d-md-block text-secondary small">Global Operation Center</span>
+            <img src="https://ui-avatars.com/api/?name=Admin&background=007aff&color=fff" width="32" height="32" class="rounded-circle" alt="User">
+        </div>
+    </div>
+</nav>
+
+<div class="container hero-section">
+    <h1>Operational Excellence</h1>
+    <p>Unified toolkit for Unix, Windows, Middleware, and Storage.</p>
+</div>
+
+<div class="container">
+    <div class="row g-4">
+        <div class="col-md-6 col-lg-4">
+            <a href="{% url 'ai_assistant' %}" class="tool-card">
+                <div class="icon-box bg-ai"><i class="bi bi-robot"></i></div>
+                <h3>AI Assistant</h3>
+                <p>Intelligent support for rapid query resolution and tower guidance.</p>
+                <div class="tower-badge">GenAI Support</div>
+            </a>
+        </div>
+
+        <div class="col-md-6 col-lg-4">
+            <a href="{% url 'rca_page' %}" class="tool-card">
+                <div class="icon-box bg-rca"><i class="bi bi-search"></i></div>
+                <h3>Forensic RCA</h3>
+                <p>Automated investigation paths to identify underlying system failures.</p>
+                <div class="tower-badge">Intelligence</div>
+            </a>
+        </div>
+
+        <div class="col-md-6 col-lg-4">
+            <a href="{% url 'shift_handover' %}" class="tool-card">
+                <div class="icon-box bg-handover"><i class="bi bi-arrow-repeat"></i></div>
+                <h3>Shift Handover</h3>
+                <p>Seamless transition of logs and critical incidents between teams.</p>
+                <div class="tower-badge">Operations</div>
+            </a>
+        </div>
+
+        <div class="col-md-6 col-lg-4">
+            <a href="{% url 'patch_monitor' %}" class="tool-card">
+                <div class="icon-box bg-patch"><i class="bi bi-shield-check"></i></div>
+                <h3>Patch Monitor</h3>
+                <p>Real-time compliance tracking across all global towers.</p>
+                <div class="tower-badge">Security</div>
+            </a>
+        </div>
+
+        <div class="col-md-6 col-lg-4">
+            <a href="{% url 'automation_hub' %}" class="tool-card">
+                <div class="icon-box bg-automation"><i class="bi bi-lightning-charge-fill"></i></div>
+                <h3>Automation Hub</h3>
+                <p>Centralized control to trigger and monitor multi-tower workflows.</p>
+                <div class="tower-badge">Execution</div>
+            </a>
+        </div>
+
+        <div class="col-md-6 col-lg-4">
+            <a href="{% url 'automation_stats' %}" class="tool-card">
+                <div class="icon-box bg-stats"><i class="bi bi-graph-up"></i></div>
+                <h3>Automation Stats</h3>
+                <p>Visual analytics on success rates and time saved via automation.</p>
+                <div class="tower-badge">Analytics</div>
+            </a>
+        </div>
+    </div>
+</div>
+
+<div id="ai-trigger" class="ai-fab shadow">
+    <i class="bi bi-chat-dots-fill"></i>
+</div>
+
+<div id="ai-chat-window" class="ai-chat-card">
+    <div class="ai-chat-header">
+        <span>GOC Assistant</span>
+        <button type="button" class="btn-close btn-close-white" id="ai-close"></button>
+    </div>
+    <div class="ai-chat-body" id="chat-messages">
+        <div class="message ai-msg">Hello! I'm your GOC Assistant. How can I help you today?</div>
+    </div>
+    <div class="ai-chat-footer">
+        <input type="text" placeholder="Type a message..." id="chat-input">
+        <button id="send-btn"><i class="bi bi-send-fill"></i></button>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const trigger = document.getElementById('ai-trigger');
+    const chatWin = document.getElementById('ai-chat-window');
+    const closeBtn = document.getElementById('ai-close');
+    const input = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('send-btn');
+    const messages = document.getElementById('chat-messages');
+
+    // Toggle Chat
+    trigger.onclick = () => {
+        chatWin.style.display = (chatWin.style.display === 'flex') ? 'none' : 'flex';
+    };
+    closeBtn.onclick = () => { chatWin.style.display = 'none'; };
+
+    // Handle Messages
+    function sendMessage() {
+        const text = input.value.trim();
+        if (!text) return;
+        
+        const userDiv = document.createElement('div');
+        userDiv.className = 'message user-msg';
+        userDiv.textContent = text;
+        messages.appendChild(userDiv);
+        input.value = '';
+        messages.scrollTop = messages.scrollHeight;
+
+        // Mock AI Response
+        setTimeout(() => {
+            const aiDiv = document.createElement('div');
+            aiDiv.className = 'message ai-msg';
+            aiDiv.textContent = "Analyzing GOC data for your request...";
+            messages.appendChild(aiDiv);
+            messages.scrollTop = messages.scrollHeight;
+        }, 800);
+    }
+
+    sendBtn.onclick = sendMessage;
+    input.addEventListener('keypress', (e) => { if(e.key === 'Enter') sendMessage(); });
+</script>
+
+</body>
+</html>
