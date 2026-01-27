@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Atomic Analytics - Apple Style</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            background-color: #f5f5f7;
+            font-family: 'Inter', sans-serif;
+            color: #1d1d1f;
+            padding: 40px 0;
+        }
+
+        /* Apple-style Card */
+        .apple-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+            padding: 24px;
+            margin-bottom: 24px;
+            transition: transform 0.2s ease;
+        }
+
+        /* Typography */
+        h2 { font-weight: 600; letter-spacing: -0.5px; }
+        .stats-label { color: #86868b; font-size: 0.9rem; font-weight: 400; }
+        .stats-value { font-size: 2.5rem; font-weight: 600; color: #0071e3; }
+
+        /* Inputs & Buttons */
+        .form-control, .form-select {
+            border-radius: 12px;
+            border: 1px solid #d2d2d7;
+            padding: 10px 15px;
+            background-color: #ffffff;
+        }
+
+        .btn-apple {
+            background-color: #0071e3;
+            color: white;
+            border-radius: 20px;
+            padding: 8px 24px;
+            font-weight: 500;
+            border: none;
+        }
+
+        .btn-apple:hover {
+            background-color: #0077ed;
+            color: white;
+        }
+
+        /* Table Styling */
+        .table { border-collapse: separate; border-spacing: 0 8px; }
+        .table thead th { border: none; color: #86868b; font-weight: 500; }
+        .table tbody tr { background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.02); border-radius: 10px; }
+        .table tbody td { padding: 15px; border: none; }
+        .table tbody tr td:first-child { border-top-left-radius: 12px; border-bottom-left-radius: 12px; }
+        .table tbody tr td:last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
+
+        /* Badge for Tickets */
+        .badge-ticket { background: #e8e8ed; color: #0071e3; font-weight: 600; padding: 6px 12px; border-radius: 8px; text-decoration: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="row mb-4 align-items-end">
+        <div class="col-md-3">
+            <div class="apple-card text-center">
+                <div class="stats-label">Total Atomics</div>
+                <div class="stats-value">30</div>
+            </div>
+        </div>
+        <div class="col-md-9">
+            <div class="apple-card">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="stats-label">From</label>
+                        <input type="date" class="form-control">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="stats-label">To</label>
+                        <input type="date" class="form-control">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="stats-label">Tower</label>
+                        <select class="form-select">
+                            <option>Middleware</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="stats-label">Tech</label>
+                        <select class="form-select">
+                            <option>Apigee</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button class="btn btn-apple w-100">Apply</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4">
+            <div class="apple-card">
+                <h5 class="mb-4">Top Atomics</h5>
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Atomic</th>
+                            <th>Triggers</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>1</td><td>apigee-status_all</td><td><strong>183</strong></td></tr>
+                        <tr><td>2</td><td>apigee-restart_all</td><td><strong>109</strong></td></tr>
+                        <tr><td>3</td><td>apigee-validate...</td><td><strong>101</strong></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="apple-card">
+                <h5 class="mb-4">Recent Activity</h5>
+                <div class="table-responsive">
+                    <table class="table align-middle">
+                        <thead>
+                            <tr>
+                                <th>Ticket</th>
+                                <th>Atomic Name</th>
+                                <th>ID</th>
+                                <th>Triggered By</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><a href="#" class="badge-ticket">CTASK0915144</a></td>
+                                <td>apigee -> maintain_postgres</td>
+                                <td>2</td>
+                                <td>Senthur Selvan</td>
+                            </tr>
+                            <tr>
+                                <td><a href="#" class="badge-ticket">CHG0932978</a></td>
+                                <td>apigee -> repair_cassandra</td>
+                                <td>4</td>
+                                <td>SAI CHAND</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="apple-card">
+                <h5 class="mb-4">Trigger Distribution</h5>
+                <canvas id="appleChart" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const ctx = document.getElementById('appleChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Status All', 'Restart All', 'Validate', 'Stop All', 'Firewall'],
+            datasets: [{
+                label: 'Triggers',
+                data: [183, 109, 101, 56, 29],
+                backgroundColor: '#0071e3',
+                borderRadius: 8,
+                barThickness: 40
+            }]
+        },
+        options: {
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, grid: { display: false } },
+                x: { grid: { display: false } }
+            }
+        }
+    });
+</script>
+
+</body>
+</html>
