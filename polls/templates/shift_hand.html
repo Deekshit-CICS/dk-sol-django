@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shift Handover Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            background-color: #f5f5f7;
+            font-family: 'Inter', sans-serif;
+            color: #1d1d1f;
+            padding-top: 50px;
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .apple-heading {
+            font-weight: 600;
+            letter-spacing: -0.022em;
+        }
+
+        .form-select, .form-control {
+            border-radius: 10px;
+            border: 1px solid #d2d2d7;
+            padding: 10px 15px;
+            background-color: #ffffff;
+        }
+
+        .form-select:focus {
+            border-color: #0071e3;
+            box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.1);
+        }
+
+        .btn-apple {
+            background-color: #0071e3;
+            color: white;
+            border-radius: 20px;
+            padding: 8px 20px;
+            font-weight: 400;
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        .btn-apple:hover {
+            background-color: #0077ed;
+            color: white;
+        }
+
+        .badge-priority {
+            border-radius: 6px;
+            padding: 5px 12px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .table {
+            --bs-table-bg: transparent;
+        }
+
+        .table thead th {
+            border-bottom: 1px solid #d2d2d7;
+            color: #86868b;
+            font-weight: 400;
+            font-size: 0.85rem;
+        }
+
+        tr {
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <h1 class="apple-heading display-5">Shift Handover</h1>
+            <p class="text-secondary">Seamlessly transition pending tasks to the next team.</p>
+        </div>
+    </div>
+
+    <div class="glass-card">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label text-secondary small">Select Tower</label>
+                <select class="form-select" id="towerSelect">
+                    <option>Cloud Infrastructure</option>
+                    <option>Network Ops</option>
+                    <option>Security/SOC</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label text-secondary small">Current Shift</label>
+                <select class="form-select" id="shiftSelect">
+                    <option value="A">Shift A (08:00 - 16:00)</option>
+                    <option value="B">Shift B (16:00 - 00:00)</option>
+                </select>
+            </div>
+            <div class="col-md-4 text-md-end">
+                <button class="btn btn-apple" onclick="window.print()">Print Handover Report</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="glass-card">
+        <h4 class="apple-heading mb-4">Pending Incidents for Next Shift</h4>
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>TICKET ID</th>
+                        <th>PRIORITY</th>
+                        <th>SUBJECT</th>
+                        <th>STATUS</th>
+                        <th>HANDOVER NOTE</th>
+                    </tr>
+                </thead>
+                <tbody id="ticketBody">
+                    <tr>
+                        <td><strong>#INC-882</strong></td>
+                        <td><span class="badge badge-priority bg-danger text-white">Critical</span></td>
+                        <td>Latency spike in US-East region</td>
+                        <td><span class="text-warning">●</span> In-Progress</td>
+                        <td class="text-secondary">Vendor contacted, awaiting log analysis.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>#INC-901</strong></td>
+                        <td><span class="badge badge-priority bg-warning text-dark">High</span></td>
+                        <td>VPN authentication failures</td>
+                        <td><span class="text-info">●</span> Investigating</td>
+                        <td class="text-secondary">Rebooted gateway 2; monitoring traffic.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Simple logic to change view based on shift selection
+    document.getElementById('shiftSelect').addEventListener('change', function() {
+        const shift = this.value;
+        const ticketBody = document.getElementById('ticketBody');
+        
+        // This is where you'd typically fetch new data from an API
+        console.log("Filtering for Shift " + shift);
+        
+        // Example feedback for the user
+        if(shift === 'B') {
+            // Logic to update UI or filter rows
+        }
+    });
+</script>
+
+</body>
+</html>
