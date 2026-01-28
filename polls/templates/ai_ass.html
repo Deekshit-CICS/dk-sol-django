@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Workspace - Apple Style</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --sidebar-bg: #f2f2f7;
+            --main-bg: #ffffff;
+            --apple-blue: #007AFF;
+            --gemini-gradient: linear-gradient(90deg, #4285f4, #9b72cb, #d96570);
+        }
+
+        body {
+            background-color: var(--sidebar-bg);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- Left Sidebar --- */
+        .sidebar {
+            width: 280px;
+            background: var(--sidebar-bg);
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid rgba(0,0,0,0.05);
+        }
+
+        .section-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: #8e8e93;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 15px;
+            margin-left: 5px;
+        }
+
+        /* Clean Selector Cards */
+        .sidebar-card {
+            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            border-radius: 14px;
+            padding: 12px;
+            margin-bottom: 25px;
+            transition: all 0.2s ease;
+        }
+
+        .sidebar-card:hover {
+            background: #ffffff;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+        }
+
+        .nav-link-custom {
+            display: flex;
+            align-items: center;
+            padding: 8px 10px;
+            border-radius: 8px;
+            color: #1d1d1f;
+            text-decoration: none;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .nav-link-custom.active {
+            background: #ffffff;
+            font-weight: 500;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #34c759;
+            margin-right: 10px;
+        }
+
+        /* --- Main Chat Stage --- */
+        .chat-stage {
+            flex: 1;
+            background: var(--main-bg);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .chat-header {
+            padding: 20px 40px;
+            border-bottom: 1px solid rgba(0,0,0,0.03);
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-body {
+            flex: 1;
+            padding: 40px 15%;
+            overflow-y: auto;
+        }
+
+        /* AI Message with Gemini Sparkle */
+        .gemini-msg {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            font-size: 17px;
+            line-height: 1.6;
+        }
+
+        .sparkle-icon {
+            width: 24px;
+            height: 24px;
+            flex-shrink: 0;
+            background: var(--gemini-gradient);
+            -webkit-mask: url('data:image/svg+xml;utf8,<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>');
+            mask: url('data:image/svg+xml;utf8,<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>');
+        }
+
+        /* Minimalist Bottom Input */
+        .input-wrapper {
+            padding: 20px 15% 40px 15%;
+        }
+
+        .input-pill {
+            background: #f5f5f7;
+            border-radius: 24px;
+            padding: 10px 15px;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-pill input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            padding: 5px 10px;
+            font-size: 16px;
+        }
+
+        .send-btn {
+            background: #000;
+            color: white;
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="section-label">Active Model</div>
+        <div class="sidebar-card">
+            <a href="#" class="nav-link-custom active">
+                <div class="status-dot"></div>
+                Gemini 3.0 Pro
+            </a>
+            <a href="#" class="nav-link-custom" style="opacity: 0.6;">
+                <div class="status-dot" style="background: #c7c7cc;"></div>
+                GPT-4o
+            </a>
+        </div>
+
+        <div class="section-label">Capabilities</div>
+        <div class="sidebar-card">
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" checked>
+                <label class="small ms-2">Web Search</label>
+            </div>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox">
+                <label class="small ms-2">Image Generation</label>
+            </div>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" checked>
+                <label class="small ms-2">Code Interpreter</label>
+            </div>
+        </div>
+
+        <div class="mt-auto">
+            <div class="nav-link-custom" style="cursor: pointer; opacity: 0.7;">
+                ⚙️ Settings
+            </div>
+        </div>
+    </div>
+
+    <div class="chat-stage">
+        <div class="chat-header">
+            <span>Clean Workspace</span>
+            <span class="badge rounded-pill bg-light text-dark border fw-normal">New Chat</span>
+        </div>
+
+        <div class="chat-body">
+            <div class="gemini-msg">
+                <div class="sparkle-icon"></div>
+                <div>
+                    Hello. I have initialized <strong>Gemini 3.0 Pro</strong> with Web Search enabled. How can I assist you today?
+                </div>
+            </div>
+        </div>
+
+        <div class="input-wrapper">
+            <div class="input-pill">
+                <input type="text" placeholder="Ask anything...">
+                <button class="send-btn">↑</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
