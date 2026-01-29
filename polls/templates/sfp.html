@@ -170,6 +170,52 @@
 </div>
 
 <script>
+
+    // 1. Define the Logic Function
+    async function handleLDAPLogin(event) {
+        event.preventDefault(); // Stop form from refreshing the page
+
+        const form = event.currentTarget;
+        const user = document.getElementById('username').value;
+        const pass = document.getElementById('password').value;
+        const submitBtn = form.querySelector('button[type="submit"]');
+
+        // UI Feedback: Disable button so user doesn't double-click
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verifying...';
+
+        try {
+            const response = await fetch('/api/ldap-login/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({ username: user, password: pass })
+            });
+
+            if (response.ok) {
+                // Success: Close the modal
+                const modalElement = document.getElementById('ldapModal');
+                const modalInstance = bootstrap.Modal.getInstance(modalElement);
+                modalInstance.hide();
+                console.log("LDAP Auth Success");
+            } else {
+                // Fail: User not in Group or wrong password
+                alert("Auth Failed: Ensure you are in the 'fabric-admins' LDAP group.");
+            }
+        } catch (error) {
+            console.error('Network Error:', error);
+        } finally {
+            // Re-enable button
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="bi bi-key-fill"></i> Authenticate';
+        }
+    }
+
+    // 2. The Trigger: Attach the function to the form
+    document.getElementById('loginForm').addEventListener('submit', handleLDAPLogin);
+
     function toggleResolver(start) {
         const dot = document.getElementById('status-dot');
         const text = document.getElementById('status-text');
