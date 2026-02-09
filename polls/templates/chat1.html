@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Ops Workspace - Neural Pulse</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --main-bg: #ffffff;
+            --secondary-bg: #f5f5f7;
+            --apple-blue: #007AFF;
+            --status-green: #34c759;
+            --status-red: #ff3b30;
+            --llm-purple: #9b72cb;
+            --border-color: rgba(0, 0, 0, 0.08);
+        }
+
+        body {
+            background-color: var(--secondary-bg);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- Sidebar Strip --- */
+        .tool-monitor {
+            width: 100px;
+            background: #ffffff;
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 0;
+            gap: 10px;
+            overflow-y: auto;
+            scrollbar-width: none;
+        }
+
+        /* --- Neural LLM Pulse Unit --- */
+        .llm-pulse-unit {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+
+        .neural-node-wrapper {
+            position: relative;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .neural-img {
+            width: 42px;
+            height: 42px;
+            z-index: 2;
+            filter: drop-shadow(0 0 5px var(--llm-purple));
+        }
+
+        /* Ripple Pulse Effect */
+        .ripple {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border: 2px solid var(--llm-purple);
+            border-radius: 50%;
+            animation: rippleEffect 2.5s infinite ease-out;
+            opacity: 0;
+        }
+
+        @keyframes rippleEffect {
+            0% { transform: scale(0.8); opacity: 0.8; }
+            100% { transform: scale(1.8); opacity: 0; }
+        }
+
+        .status-label-vert {
+            writing-mode: vertical-rl;
+            text-transform: uppercase;
+            font-size: 8px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            color: #1d1d1f;
+            transform: rotate(180deg);
+        }
+
+        .bar-container {
+            width: 5px;
+            height: 60px;
+            background: #f2f2f7;
+            border-radius: 10px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .llm-fill {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 94%;
+            background: linear-gradient(to top, var(--apple-blue), var(--llm-purple));
+            box-shadow: 0 0 10px var(--llm-purple);
+            animation: barGlow 2s infinite ease-in-out;
+        }
+
+        @keyframes barGlow {
+            0%, 100% { filter: brightness(1); }
+            50% { filter: brightness(1.4); }
+        }
+
+        /* --- Tools --- */
+        .tool-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            position: relative;
+            padding: 8px 0;
+            border-radius: 12px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            width: 75px;
+        }
+
+        .tool-box:hover { background: #f5f5f7; }
+
+        .tool-logo {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
+            transition: 0.3s ease;
+        }
+
+        .tool-status-dot {
+            position: absolute;
+            top: 4px;
+            right: 20px;
+            width: 7px;
+            height: 7px;
+            background: var(--status-green);
+            border: 1.5px solid white;
+            border-radius: 50%;
+        }
+
+        .tool-box.disabled .tool-logo { filter: grayscale(100%); opacity: 0.2; }
+        .tool-box.disabled .tool-status-dot { background: var(--status-red); }
+        .tool-name { font-size: 7px; font-weight: 700; color: #86868b; text-transform: uppercase; }
+
+        /* --- Workspace --- */
+        .workspace-container { flex: 1; background: var(--main-bg); display: flex; flex-direction: column; }
+        .chat-header { padding: 15px 40px; border-bottom: 1px solid rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
+        .chat-body { flex: 1; padding: 30px 12%; overflow-y: auto; }
+        .message-row { display: flex; gap: 20px; margin-bottom: 30px; }
+        .robot-avatar { width: 40px; height: 40px; background: #f2f2f7; border-radius: 10px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-color); }
+        .input-wrapper { padding: 20px 12% 40px 12%; }
+        .input-pill { background: #f5f5f7; border-radius: 20px; padding: 10px 25px; display: flex; align-items: center; }
+        .input-pill input { flex: 1; background: transparent; border: none; outline: none; font-size: 16px; }
+        .send-btn { background: #1d1d1f; color: white; border: none; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    </style>
+</head>
+<body>
+
+    <div class="tool-monitor">
+        <div class="llm-pulse-unit">
+            <div class="neural-node-wrapper">
+                <div class="ripple"></div>
+                <div class="ripple" style="animation-delay: 0.8s"></div>
+                <svg class="neural-img" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="#9b72cb" stroke-width="2"/>
+                    <path d="M12 8V16M8 12H16" stroke="#007AFF" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="12" cy="12" r="3" fill="#9b72cb" fill-opacity="0.3"/>
+                </svg>
+            </div>
+            <span class="status-label-vert">LLM Pulse</span>
+            <div class="bar-container">
+                <div class="llm-fill"></div>
+            </div>
+        </div>
+
+        <hr style="width: 30px; opacity: 0.1; margin: 0;">
+
+        <div class="tool-box" onclick="toggleTool(this)" title="Jenkins"><img class="tool-logo" src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/jenkins/jenkins-original.svg"><div class="tool-status-dot"></div><span class="tool-name">JKNS</span></div>
+        <div class="tool-box" onclick="toggleTool(this)" title="Elastic"><img class="tool-logo" src="https://www.vectorlogo.zone/logos/elastic/elastic-icon.svg"><div class="tool-status-dot"></div><span class="tool-name">ELST</span></div>
+        <div class="tool-box" onclick="toggleTool(this)" title="MSSQL"><img class="tool-logo" src="https://www.svgrepo.com/show/303229/microsoft-sql-server-logo.svg"><div class="tool-status-dot"></div><span class="tool-name">MSSQL</span></div>
+        <div class="tool-box" onclick="toggleTool(this)" title="Foglight"><img class="tool-logo" src="https://www.quest.com/image/quest-logo-og.png" style="border-radius:2px;"><div class="tool-status-dot"></div><span class="tool-name">FOGL</span></div>
+        <div class="tool-box" onclick="toggleTool(this)" title="Jira"><img class="tool-logo" src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/jira/jira-original.svg"><div class="tool-status-dot"></div><span class="tool-name">JIRA</span></div>
+        <div class="tool-box" onclick="toggleTool(this)" title="Confluence"><img class="tool-logo" src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/confluence/confluence-original.svg"><div class="tool-status-dot"></div><span class="tool-name">CONF</span></div>
+        <div class="tool-box" onclick="toggleTool(this)" title="SharePoint"><img class="tool-logo" src="https://www.vectorlogo.zone/logos/microsoft_sharepoint/microsoft_sharepoint-icon.svg"><div class="tool-status-dot"></div><span class="tool-name">SPNT</span></div>
+        <div class="tool-box" onclick="toggleTool(this)" title="ServiceNow"><img class="tool-logo" src="https://www.vectorlogo.zone/logos/servicenow/servicenow-icon.svg"><div class="tool-status-dot"></div><span class="tool-name">SNOW</span></div>
+    </div>
+
+    <div class="workspace-container">
+        <div class="chat-header">
+            <div class="fw-bold">🤖 IT Ops Neural Link</div>
+            <div class="text-muted small">Status: Logic Pulse Active</div>
+        </div>
+
+        <div class="chat-body">
+            <div class="message-row">
+                <div class="robot-avatar">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#424245" stroke-width="2">
+                        <rect x="3" y="11" width="18" height="10" rx="2"></rect>
+                        <circle cx="12" cy="5" r="2"></circle>
+                        <path d="M12 7v4"></path>
+                    </svg>
+                </div>
+                <div class="message-text">
+                    <strong>Neural Pulse Synchronized.</strong> <br>
+                    Connection to the organizational LLM is active. All toolchain integrations are ready for orchestration.
+                </div>
+            </div>
+        </div>
+
+        <div class="input-wrapper">
+            <div class="input-pill">
+                <input type="text" placeholder="Issue a system command...">
+                <button class="send-btn">↑</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleTool(element) { element.classList.toggle('disabled'); }
+    </script>
+</body>
+</html>
