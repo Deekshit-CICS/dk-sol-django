@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise RAG - Integrated Controls</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --sidebar-bg: #fbfbfd;
+            --apple-blue: #007AFF;
+            --border-light: rgba(0, 0, 0, 0.06);
+            --text-secondary: #86868b;
+        }
+
+        body {
+            background-color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            color: #1d1d1f;
+        }
+
+        /* --- Sidebar Strip --- */
+        .sidebar-monitor {
+            width: 80px;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 30px 0;
+            gap: 20px;
+        }
+
+        /* --- Neural Core Node --- */
+        .core-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 15px;
+        }
+
+        .core-icon {
+            width: 42px;
+            height: 42px;
+            background: white;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-light);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+        }
+
+        /* --- Integrated Tool Unit --- */
+        .tool-unit {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            width: 100%;
+            position: relative;
+        }
+
+        /* The Integrated Container */
+        .icon-box {
+            width: 44px;
+            height: 44px;
+            background: #ffffff;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid transparent; /* Placeholder for active state */
+            background-clip: padding-box;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        /* Tool Image Styling */
+        .tool-img {
+            width: 22px;
+            height: 22px;
+            transition: all 0.2s;
+        }
+
+        /* ACTIVE STATE: Integrated Blue Border & Glow */
+        .tool-unit.active .icon-box {
+            border-color: var(--apple-blue);
+            box-shadow: 0 0 10px rgba(0, 122, 255, 0.15);
+        }
+
+        /* ACTIVE STATE: Indicator Dot inside the icon box */
+        .status-light {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            width: 10px;
+            height: 10px;
+            background: #34c759;
+            border: 2.5px solid var(--sidebar-bg);
+            border-radius: 50%;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .tool-unit.active .status-light {
+            opacity: 1;
+        }
+
+        /* DISABLED STATE */
+        .tool-unit:not(.active) .tool-img {
+            filter: grayscale(100%);
+            opacity: 0.3;
+        }
+
+        .tool-unit:not(.active) .icon-box {
+            background: rgba(0,0,0,0.02);
+            border-color: transparent;
+        }
+
+        .tool-label {
+            font-size: 8px;
+            font-weight: 800;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* --- Workspace --- */
+        .main-workspace { flex: 1; display: flex; flex-direction: column; }
+        .header-bar { padding: 18px 40px; border-bottom: 1px solid var(--border-light); font-size: 13px; font-weight: 600; }
+        .chat-view { flex: 1; padding: 40px 15%; overflow-y: auto; }
+        .footer-pill { background: #f2f2f7; border-radius: 24px; padding: 10px 20px; margin: 20px 15% 40px 15%; display: flex; align-items: center; }
+        .footer-pill input { flex: 1; border: none; background: transparent; outline: none; font-size: 15px; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar-monitor">
+        <div class="core-node">
+            <div class="core-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1d1d1f" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+                </svg>
+            </div>
+            <span class="tool-label" style="color:#1d1d1f">Core</span>
+        </div>
+
+        <hr style="width: 30px; opacity: 0.1; margin: 0 0 10px 0;">
+
+        <div class="tool-unit active" onclick="this.classList.toggle('active')">
+            <div class="icon-box">
+                <img class="tool-img" src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/jenkins/jenkins-original.svg">
+                <div class="status-light"></div>
+            </div>
+            <span class="tool-label">JKNS</span>
+        </div>
+
+        <div class="tool-unit active" onclick="this.classList.toggle('active')">
+            <div class="icon-box">
+                <img class="tool-img" src="https://www.svgrepo.com/show/303229/microsoft-sql-server-logo.svg">
+                <div class="status-light"></div>
+            </div>
+            <span class="tool-label">SQL</span>
+        </div>
+
+        <div class="tool-unit" onclick="this.classList.toggle('active')">
+            <div class="icon-box">
+                <img class="tool-img" src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/jira/jira-original.svg">
+                <div class="status-light"></div>
+            </div>
+            <span class="tool-label">JIRA</span>
+        </div>
+
+        <div class="tool-unit active" onclick="this.classList.toggle('active')">
+            <div class="icon-box">
+                <img class="tool-img" src="https://www.vectorlogo.zone/logos/servicenow/servicenow-icon.svg">
+                <div class="status-light"></div>
+            </div>
+            <span class="tool-label">SNOW</span>
+        </div>
+    </div>
+
+    <div class="main-workspace">
+        <div class="header-bar">Organizational LLM Workspace / RAG Node Active</div>
+        <div class="chat-view">
+            </div>
+        <div class="footer-pill">
+            <input type="text" placeholder="Query Knowledge Base...">
+            <button style="border:none; background:none; font-weight:bold; color:var(--apple-blue);">↑</button>
+        </div>
+    </div>
+
+</body>
+</html>
