@@ -175,6 +175,42 @@
             70% { box-shadow: 0 0 0 8px rgba(52, 199, 89, 0); }
             100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0); }
         }
+
+        /* --- Apple-style Reload Button --- */
+        .btn-reload {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(0, 122, 255, 0.3);
+            background: transparent;
+            color: var(--blue);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            padding: 0;
+        }
+
+        .btn-reload:hover {
+            background: rgba(0, 122, 255, 0.08);
+            border-color: var(--blue);
+            transform: rotate(20deg);
+        }
+
+        .btn-reload:active {
+            transform: rotate(-30deg) scale(0.95);
+        }
+
+        .btn-reload.rotating {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -207,8 +243,9 @@
             <li class="nav-item">
                 <button class="nav-link active" id="tab-current" data-bs-toggle="pill" data-bs-target="#view-current">Current Scan</button>
             </li>
-            <li class="nav-item">
+            <li class="nav-item d-flex align-items-center gap-2">
                 <button class="nav-link" id="tab-history" data-bs-toggle="pill" data-bs-target="#view-history">History (24h)</button>
+                <button class="btn-reload" id="history-reload" onclick="reloadHistoryData()" title="Reload history"><i class="bi bi-arrow-repeat"></i></button>
             </li>
         </ul>
     </div>
@@ -424,6 +461,18 @@
         document.getElementById('line1').setAttribute('d', `M ${n1.right} ${n1.y} L ${n2.left} ${n2.y}`);
         document.getElementById('line2').setAttribute('d', `M ${n2.right} ${n2.y} L ${n3.left} ${n3.y}`);
         document.getElementById('line3').setAttribute('d', `M ${n3.right} ${n3.y} L ${n4.left} ${n4.y}`);
+    }
+
+    /* --- Reload History Data --- */
+    function reloadHistoryData() {
+        const btn = document.getElementById('history-reload');
+        btn.classList.add('rotating');
+        
+        // Simulate data reload - replace with actual API call if needed
+        setTimeout(() => {
+            btn.classList.remove('rotating');
+            location.reload();
+        }, 1500);
     }
 
     // Initialize and Resizing
