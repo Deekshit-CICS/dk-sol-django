@@ -32,9 +32,26 @@
             height: 100%;
         }
 
-        .glass-card:hover { 
-            transform: translateY(-5px); 
-            box-shadow: 0 20px 40px rgba(0,0,0,0.06); 
+        .tower-item {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .filter-pill {
+            border-radius: 20px;
+            padding: 6px 18px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid rgba(0,0,0,0.05);
+            background: white;
+            color: var(--apple-gray);
+            transition: 0.2s;
+        }
+
+        .filter-pill.active {
+            background: var(--apple-blue);
+            color: white;
+            border-color: var(--apple-blue);
         }
 
         .status-pill { 
@@ -60,7 +77,6 @@
         .bg-critical { background: var(--apple-red); color: white; cursor: pointer; }
         .bg-stable { background: #f0f0f2; color: var(--apple-gray); cursor: default; }
 
-        /* Agentic AI Terminal */
         .agent-terminal {
             background: #1c1c1e;
             color: #f5f5f7;
@@ -73,18 +89,16 @@
             border: 1px solid rgba(255,255,255,0.1);
         }
 
-        .log-container {
-            max-height: 250px;
-            overflow-y: auto;
-        }
-
+        .log-container { max-height: 250px; overflow-y: auto; }
         .chart-container { height: 100px; position: relative; }
+        .spin-icon { animation: rotation 2s infinite linear; }
+        @keyframes rotation { from { transform: rotate(0deg); } to { transform: rotate(359deg); } }
     </style>
 </head>
 <body class="py-5">
 
 <div class="container-fluid px-lg-5">
-    <header class="row mb-5 align-items-end">
+    <header class="row mb-4 align-items-end">
         <div class="col-md-7">
             <h1 class="display-6 fw-bold mb-1">Tower<span class="text-primary">Nexus</span></h1>
             <p class="text-muted mb-0">Cross-Tower Anomaly Detection & ServiceNow Change Correlation</p>
@@ -104,8 +118,18 @@
         </div>
     </header>
 
-    <div class="row g-4" id="main-grid">
+    <div class="row mb-5">
+        <div class="col-12 d-flex flex-wrap gap-2">
+            <div class="filter-pill active" onclick="filterTowers('all', this)">All Towers</div>
+            <div class="filter-pill" onclick="filterTowers('unix', this)">UNIX</div>
+            <div class="filter-pill" onclick="filterTowers('win', this)">Windows</div>
+            <div class="filter-pill" onclick="filterTowers('mw', this)">Middleware</div>
+            <div class="filter-pill" onclick="filterTowers('st', this)">Storage</div>
+            <div class="filter-pill" onclick="filterTowers('bk', this)">Backup</div>
         </div>
+    </div>
+
+    <div class="row g-4" id="main-grid"></div>
 
     <div class="row mt-5">
         <div class="col-lg-8">
@@ -122,8 +146,7 @@
         <div class="col-lg-4">
             <div class="glass-card p-4">
                 <h3 class="h6 fw-bold text-uppercase text-muted mb-4" style="letter-spacing: 0.1em;">Correlation Log</h3>
-                <div id="event-log" class="log-container small fw-medium">
-                    </div>
+                <div id="event-log" class="log-container small fw-medium"></div>
             </div>
         </div>
     </div>
@@ -131,12 +154,12 @@
 
 <script>
     const TOWERS = [
-        { id: 'unix', name: 'UNIX/Linux', icon: 'bi-server', metric: 'CPU Behavior', snow_chk: true },
-        { id: 'win', name: 'Windows Srv', icon: 'bi-display', metric: 'Memory Pattern', snow_chk: false },
-        { id: 'db', name: 'Database Ops', icon: 'bi-database', metric: 'I/O Latency', snow_chk: true },
-        { id: 'mw', name: 'Middleware', icon: 'bi-layers', metric: 'JVM GC Drift', snow_chk: false },
-        { id: 'st', name: 'Storage SAN', icon: 'bi-hdd-network', metric: 'R/W Entropy', snow_chk: false },
-        { id: 'bk', name: 'Cloud Backup', icon: 'bi-shield-check', metric: 'Dedupe Ratio', snow_chk: false }
+        { id: 'unix', name: 'UNIX/Linux', category: 'unix', icon: 'bi-server', metric: 'CPU Behavior', snow_chk: true },
+        { id: 'win', name: 'Windows Srv', category: 'win', icon: 'bi-display', metric: 'Memory Pattern', snow_chk: false },
+        { id: 'db', name: 'Database Ops', category: 'st', icon: 'bi-database', metric: 'I/O Latency', snow_chk: true },
+        { id: 'mw', name: 'Middleware', category: 'mw', icon: 'bi-layers', metric: 'JVM GC Drift', snow_chk: false },
+        { id: 'st', name: 'Storage SAN', category: 'st', icon: 'bi-hdd-network', metric: 'R/W Entropy', snow_chk: false },
+        { id: 'bk', name: 'Cloud Backup', category: 'bk', icon: 'bi-shield-check', metric: 'Dedupe Ratio', snow_chk: false }
     ];
 
     const charts = {};
@@ -145,7 +168,7 @@
         const grid = document.getElementById('main-grid');
         TOWERS.forEach(t => {
             const col = document.createElement('div');
-            col.className = 'col-md-6 col-lg-4';
+            col.className = `col-md-6 col-lg-4 tower-item tower-${t.category}`;
             col.innerHTML = `
                 <div id="card-${t.id}" class="glass-card p-4 d-flex flex-column justify-content-between">
                     <div>
@@ -180,6 +203,26 @@
         syncLoop();
     }
 
+    // FILTER LOGIC
+    function filterTowers(category, element) {
+        // Update Active UI
+        document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+        element.classList.add('active');
+
+        // Show/Hide Cards
+        const items = document.querySelectorAll('.tower-item');
+        items.forEach(item => {
+            if (category === 'all' || item.classList.contains(`tower-${category}`)) {
+                item.style.display = 'block';
+                setTimeout(() => { item.style.opacity = '1'; item.style.transform = 'scale(1)'; }, 10);
+            } else {
+                item.style.opacity = '0';
+                item.style.transform = 'scale(0.95)';
+                setTimeout(() => { item.style.display = 'none'; }, 300);
+            }
+        });
+    }
+
     function setupChart(id) {
         const ctx = document.getElementById(`chart-${id}`).getContext('2d');
         charts[id] = new Chart(ctx, {
@@ -199,32 +242,34 @@
             const actionZone = document.getElementById(`action-zone-${t.id}`);
             const card = document.getElementById(`card-${t.id}`);
 
-            scoreEl.innerText = score.toFixed(1);
+            if(scoreEl) {
+                scoreEl.innerText = score.toFixed(1);
 
-            if (score > 75) {
-                const hasTicket = t.snow_chk && isAnomaly; 
-                
-                if (hasTicket) {
-                    snowEl.innerHTML = `<span class="text-primary fw-bold">Planned: CHG-88210</span>`;
-                    actionZone.innerHTML = `<button class="action-btn bg-planned">VIEW CHANGE ORDER</button>`;
-                    card.style.borderColor = "#0071e3";
-                    logEvent(`[SNOW] Suppressed anomaly for ${t.name}. Matched CHG-88210.`, 'text-primary');
+                if (score > 75) {
+                    const hasTicket = t.snow_chk && isAnomaly; 
+                    
+                    if (hasTicket) {
+                        snowEl.innerHTML = `<span class="text-primary fw-bold">Planned: CHG-88210</span>`;
+                        actionZone.innerHTML = `<button class="action-btn bg-planned">VIEW CHANGE ORDER</button>`;
+                        card.style.borderColor = "#0071e3";
+                        logEvent(`[SNOW] Suppressed anomaly for ${t.name}. Matched CHG-88210.`, 'text-primary');
+                    } else {
+                        snowEl.innerHTML = `<span class="text-danger fw-bold">Unplanned Anomaly</span>`;
+                        actionZone.innerHTML = `<button onclick="triggerAgent('${t.id}')" class="action-btn bg-critical shadow-sm">RUN AGENTIC FIX</button>`;
+                        card.style.borderColor = "#ff3b30";
+                        logEvent(`[CRITICAL] Alert on ${t.name}. No ServiceNow context.`, 'text-danger');
+                    }
                 } else {
-                    snowEl.innerHTML = `<span class="text-danger fw-bold">Unplanned Anomaly</span>`;
-                    actionZone.innerHTML = `<button onclick="triggerAgent('${t.id}')" class="action-btn bg-critical shadow-sm">RUN AGENTIC FIX</button>`;
-                    card.style.borderColor = "#ff3b30";
-                    logEvent(`[CRITICAL] Alert on ${t.name}. No ServiceNow context.`, 'text-danger');
+                    snowEl.innerText = "No maintenance found.";
+                    actionZone.innerHTML = `<button class="action-btn bg-stable">SYSTEM STABLE</button>`;
+                    card.style.borderColor = "rgba(0,0,0,0.08)";
                 }
-            } else {
-                snowEl.innerText = "No maintenance found.";
-                actionZone.innerHTML = `<button class="action-btn bg-stable">SYSTEM STABLE</button>`;
-                card.style.borderColor = "rgba(0,0,0,0.08)";
-            }
 
-            const chart = charts[t.id];
-            chart.data.datasets[0].data.shift();
-            chart.data.datasets[0].data.push(score);
-            chart.update('none');
+                const chart = charts[t.id];
+                chart.data.datasets[0].data.shift();
+                chart.data.datasets[0].data.push(score);
+                chart.update('none');
+            }
         });
         setTimeout(syncLoop, 5000);
     }
@@ -262,11 +307,5 @@
 
     init();
 </script>
-
-<style>
-    .spin-icon { animation: rotation 2s infinite linear; }
-    @keyframes rotation { from { transform: rotate(0deg); } to { transform: rotate(359deg); } }
-</style>
-
 </body>
 </html>
