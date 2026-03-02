@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise Infrastructure Tower Health</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at top right, #f1f5f9, #e2e8f0);
+            min-height: 100vh;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .glass-card:hover {
+            transform: translateY(-4px);
+            background: rgba(255, 255, 255, 0.8);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05);
+        }
+        .severity-75 { border-top: 4px solid #ef4444; box-shadow: 0 0 15px rgba(239, 68, 68, 0.1); }
+        .severity-25 { border-top: 4px solid #f59e0b; }
+        .severity-0  { border-top: 4px solid #10b981; }
+        
+        @keyframes pulse-red {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .animate-critical { animation: pulse-red 1.5s infinite; color: #ef4444; font-weight: 700; }
+    </style>
+</head>
+<body class="p-6 lg:p-12">
+
+    <header class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
+        <div>
+            <h1 class="text-3xl font-light text-slate-800 tracking-tight">Infrastructure <span class="font-semibold text-blue-600">Towers</span></h1>
+            <p class="text-slate-500 text-sm">Real-time Anomaly Detection via Elastic Machine Learning</p>
+        </div>
+        <div class="flex items-center space-x-4">
+            <div class="glass-card px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Data Refresh: <span id="timer" class="text-slate-800">10s</span>
+            </div>
+            <div class="h-10 w-10 rounded-full bg-white shadow-sm flex items-center justify-center border border-slate-200">
+                <div class="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+            </div>
+        </div>
+    </header>
+
+    <main id="dashboard-grid" class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        </main>
+
+    <script>
+        // --- CONFIGURATION ---
+        const ELASTIC_CONFIG = {
+            baseUrl: "https://your-elastic-cluster:9200",
+            apiKey: "YOUR_API_KEY_HERE",
+            refreshRate: 10000 // 10 seconds
+        };
+
+        const TOWERS = [
+            { id: 'unix', name: 'UNIX/Linux', jobId: 'ml-unix-load', icon: '🐧' },
+            { id: 'windows', name: 'Windows', jobId: 'ml-win-resource', icon: '🪟' },
+            { id: 'middleware', name: 'Middleware', jobId: 'ml-jvm-heap', icon: '⚙️' },
+            { id: 'database', name: 'Database', jobId: 'ml-db-latency', icon: '🗄️' },
+            { id: 'storage', name: 'Storage', jobId: 'ml-storage-iops', icon: '💾' },
+            { id: 'backup', name: 'Backup', jobId: 'ml-backup-fail', icon: '☁️' }
+        ];
+
+        // --- UI INITIALIZATION ---
+        const grid = document.getElementById('dashboard-grid');
+        const charts = {};
+
+        function createTowerCards() {
+            TOWERS.forEach(tower => {
+                const card = document.createElement('div');
+                card.id = `card-${tower.id}`;
+                card.className = `glass-card p-6 rounded-[2rem] severity-0`;
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="flex items-center space-x-3">
+                            <span class="text-2xl">${tower.icon}</span>
+                            <h3 class="font-semibold text-slate-800">${tower.name}</h3>
+                        </div>
+                        <span id="status-${tower.id}" class="text-[10px] font-bold uppercase text-slate-400">Stable</span>
+                    </div>
+                    
+                    <div class="flex items-baseline space-x-2">
+                        <span id="score-${tower.id}" class="text-5xl font-light tracking-tighter text-slate-900">0.0</span>
+                        <span class="text-xs text-slate-400">Score</span>
+                    </div>
+
+                    <div class="h-20 w-full mt-4">
+                        <canvas id="chart-${tower.id}"></canvas>
+                    </div>
+
+                    <div class="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center">
+                        <div class="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Last 15 Buckets</div>
+                        <div id="trend-${tower.id}" class="flex space-x-1"></div>
+                    </div>
+                `;
+                grid.appendChild(card);
+                initChart(tower.id);
+            });
+        }
+
+        function initChart(id) {
+            const ctx = document.getElementById(`chart-${id}`).getContext('2d');
+            charts[id] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: Array(15).fill(''),
+                    datasets: [{
+                        data: Array(15).fill(0),
+                        borderColor: '#94a3b8',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.4,
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } }
+                }
+            });
+        }
+
+        // --- ELASTIC DATA FETCHING ---
+        async function fetchTowerData(tower) {
+            // NOTE: In a real environment, you'd use fetch() with ELASTIC_CONFIG.
+            // For this demo, we simulate the structure of an Elastic ML Record.
+            
+            const isAnomaly = Math.random() > 0.85; // Simulate 15% chance of anomaly
+            return {
+                score: isAnomaly ? (Math.random() * 60 + 40) : (Math.random() * 5),
+                timestamp: new Date().getTime()
+            };
+        }
+
+        async function refreshDashboard() {
+            for (const tower of TOWERS) {
+                const data = await fetchTowerData(tower);
+                updateUI(tower.id, data.score);
+            }
+        }
+
+        function updateUI(id, score) {
+            const card = document.getElementById(`card-${id}`);
+            const scoreText = document.getElementById(`score-${id}`);
+            const statusText = document.getElementById(`status-${id}`);
+            const trendContainer = document.getElementById(`trend-${id}`);
+
+            scoreText.innerText = score.toFixed(1);
+
+            // Severity Logic (Elastic Standard)
+            card.classList.remove('severity-0', 'severity-25', 'severity-75');
+            statusText.classList.remove('animate-critical');
+            
+            let color = '#94a3b8';
+            if (score >= 75) {
+                card.classList.add('severity-75');
+                statusText.innerText = 'Critical';
+                statusText.classList.add('animate-critical');
+                color = '#ef4444';
+            } else if (score >= 25) {
+                card.classList.add('severity-25');
+                statusText.innerText = 'Warning';
+                statusText.classList.add('text-amber-500');
+                color = '#f59e0b';
+            } else {
+                card.classList.add('severity-0');
+                statusText.innerText = 'Stable';
+                statusText.classList.add('text-slate-400');
+                color = '#10b981';
+            }
+
+            // Update Chart
+            const chart = charts[id];
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[0].data.push(score);
+            chart.data.datasets[0].borderColor = color;
+            chart.update('none');
+
+            // Update Swimlane
+            if (trendContainer.children.length >= 10) trendContainer.removeChild(trendContainer.firstChild);
+            const pill = document.createElement('div');
+            pill.className = `h-2 w-2 rounded-full ${score >= 75 ? 'bg-red-500' : (score >= 25 ? 'bg-amber-500' : 'bg-emerald-400')}`;
+            trendContainer.appendChild(pill);
+        }
+
+        // --- INIT ---
+        createTowerCards();
+        setInterval(refreshDashboard, ELASTIC_CONFIG.refreshRate);
+        refreshDashboard();
+
+        // Timer Display
+        let timeLeft = 10;
+        setInterval(() => {
+            timeLeft--;
+            if (timeLeft < 0) timeLeft = 10;
+            document.getElementById('timer').innerText = `${timeLeft}s`;
+        }, 1000);
+
+    </script>
+</body>
+</html>

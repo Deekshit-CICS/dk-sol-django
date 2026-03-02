@@ -18,7 +18,24 @@
             --border: rgba(0,0,0,0.08);
         }
 
-        body { background-color: var(--apple-bg); color: var(--text-main); font-family: -apple-system, sans-serif; padding: 30px; }
+        body { background: linear-gradient(135deg, #f5f5f7 0%, #ffffff 100%); color: var(--text-main); font-family: -apple-system, sans-serif; padding: 30px; }
+        .navbar { border-bottom: 1px solid rgba(0,0,0,0.05); }
+        h1.page-title { font-size: 1.4rem; font-weight: 700; margin:0; color: var(--text-main); }
+
+        /* make table header sticky */
+        .table-container thead th {
+            position: sticky;
+            top: 0;
+            background: #fff;
+            z-index: 2;
+        }
+
+        /* subtle custom scrollbar */
+        .table-container::-webkit-scrollbar { height:6px; width:6px; }
+        .table-container::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius:3px; }
+
+        .header-section { text-align: left; margin-bottom: 2rem; }
+        .header-section p { margin: 0; }
         .dashboard-container { max-width: 1250px; margin: auto; position: relative; }
 
         /* Connectors */
@@ -35,7 +52,8 @@
 
         /* Expander Logic */
         .collapse-btn { position: absolute; top: 15px; right: 15px; border: none; background: rgba(0,0,0,0.05); border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.3s; }
-        .collapse-btn:hover { background: rgba(0,0,0,0.1); }
+        .collapse-btn:hover { background: rgba(0,0,0,0.1); transform: scale(1.1); }
+        .apple-card:hover { box-shadow: 0 12px 48px rgba(0,0,0,0.06); transform: translateY(-2px); }
         .details-content { max-height: 0; opacity: 0; overflow: hidden; transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
         .details-content.expanded { max-height: 400px; opacity: 1; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border); }
 
@@ -55,10 +73,24 @@
         pre { font-size: 0.72rem; background: #1c1c1e; color: #ff6961; padding: 15px; border-radius: 14px; margin: 0; max-height: 250px; overflow-y: auto; }
         .btn-execute { background: var(--blue); color: white; border: none; width: 100%; padding: 12px; border-radius: 12px; font-weight: 600; margin-top: 15px; }
         .table-container { margin-top: 40px; border-radius: 20px; overflow: hidden; background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+        .table-container tbody tr:hover { background: rgba(0,0,0,0.03); }
         .table-selected { background-color: rgba(0, 113, 227, 0.08) !important; }
     </style>
 </head>
 <body>
+
+    <!-- top navigation bar -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-4">
+        <div class="container-fluid dashboard-container">
+            <a class="navbar-brand" href="#"><h1 class="page-title">Forensic RCA | Enterprise</h1></a>
+            <div class="d-flex ms-auto" style="max-width:500px; width:100%;">
+                <div class="search-container" style="margin:0; width:100%;">
+                    <i class="bi bi-search" style="position: absolute; left: 15px; top: 12px; color: var(--text-sec);"></i>
+                    <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch()">
+                </div>
+            </div>
+        </div>
+    </nav>
 
 <div class="dashboard-container" id="main-canvas">
     <svg id="flow-canvas">
@@ -67,12 +99,9 @@
         <path id="line-discovery-to-fix" class="connector" />
     </svg>
 
-    <div class="header-section">
+    <div class="header-section mb-4">
         <h1 class="fw-bold h2 mb-1" style="letter-spacing: -0.04em;">Forensic RCA</h1>
-        <div class="search-container">
-            <i class="bi bi-search" style="position: absolute; left: 15px; top: 12px; color: var(--text-sec);"></i>
-            <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch()">
-        </div>
+        <p class="text-secondary small">Enterprise dashboard &amp; troubleshooting</p>
     </div>
 
     <div class="tier-header">Layer 01: Triage</div>

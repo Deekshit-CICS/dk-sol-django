@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TowerCommand Nexus | Enterprise AI Ops</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root { --apple-blue: #0071e3; --apple-red: #ff3b30; --apple-gray: #86868b; }
+        body { background: #f5f5f7; font-family: 'Inter', sans-serif; color: #1d1d1f; }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(0,0,0,0.05);
+            border-radius: 24px;
+            transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+        }
+        .glass-card:hover { transform: translateY(-5px); box-shadow: 0 20px 40px rgba(0,0,0,0.05); }
+        .status-pill { font-size: 0.65rem; font-weight: 700; padding: 4px 12px; border-radius: 20px; text-transform: uppercase; }
+        .action-btn { width: 100%; border-radius: 14px; font-weight: 600; font-size: 0.75rem; padding: 12px; transition: 0.3s; text-align: center; }
+        .bg-planned { background: #e8f2ff; color: #0071e3; border: 1px solid #0071e3; }
+        .bg-critical { background: var(--apple-red); color: white; cursor: pointer; }
+        .bg-stable { background: #f5f5f7; color: var(--apple-gray); pointer-events: none; }
+    </style>
+</head>
+<body class="p-6 lg:p-12">
+
+<div class="max-w-[1600px] mx-auto">
+    <header class="flex flex-col md:flex-row justify-between items-start mb-12 gap-6">
+        <div>
+            <h1 class="text-4xl font-semibold tracking-tight">Tower<span class="text-blue-600 font-bold">Nexus</span></h1>
+            <p class="text-slate-400 mt-2 text-lg">Cross-Tower Anomaly Detection & ServiceNow Change Correlation</p>
+        </div>
+        <div class="flex gap-4">
+            <div class="glass-card px-6 py-3 flex items-center space-x-3">
+                <i data-lucide="refresh-cw" class="w-4 h-4 text-blue-500 animate-spin"></i>
+                <div>
+                    <div class="text-[10px] font-bold text-slate-400">SERVICENOW SYNC</div>
+                    <div class="text-xs font-semibold">CHG-99281 Active</div>
+                </div>
+            </div>
+            <div class="glass-card px-6 py-3 flex items-center space-x-3 border-green-200 bg-green-50/30">
+                <div class="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+                <div class="text-xs font-bold text-green-700 uppercase">Elastic ML: Normal</div>
+            </div>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8" id="main-grid">
+        </div>
+
+    <section class="mt-12 glass-card p-8">
+        <div class="flex justify-between items-center mb-6">
+            <h3 class="text-sm font-bold uppercase tracking-widest text-slate-400">Correlation Engine (Multi-Source Log)</h3>
+            <span class="text-[10px] bg-slate-100 px-3 py-1 rounded-full font-bold">Total Events: 1,204</span>
+        </div>
+        <div id="event-log" class="space-y-3 max-h-48 overflow-y-auto text-xs font-medium">
+            <div class="text-slate-400 p-2 border-b border-black/5 flex justify-between">
+                <span>[SYSTEM] Dashboard initialized. Syncing with ServiceNow Production...</span>
+                <span>13:42:01</span>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script>
+    const TOWERS = [
+        { id: 'unix', name: 'UNIX/Linux', icon: 'server', metric: 'CPU Behavior', snow_chk: true },
+        { id: 'win', name: 'Windows Srv', icon: 'monitor', metric: 'Memory Pattern', snow_chk: false },
+        { id: 'db', name: 'Database Ops', icon: 'database', metric: 'I/O Latency', snow_chk: true },
+        { id: 'mw', name: 'Middleware', icon: 'layers', metric: 'JVM GC Drift', snow_chk: false },
+        { id: 'st', name: 'Storage SAN', icon: 'hard-drive', metric: 'R/W Entropy', snow_chk: false },
+        { id: 'bk', name: 'Cloud Backup', icon: 'shield-check', metric: 'Dedupe Ratio', snow_chk: false }
+    ];
+
+    const charts = {};
+
+    function init() {
+        const grid = document.getElementById('main-grid');
+        TOWERS.forEach(t => {
+            const card = document.createElement('div');
+            card.id = `card-${t.id}`;
+            card.className = 'glass-card p-8 h-[480px] flex flex-col justify-between';
+            card.innerHTML = `
+                <div>
+                    <div class="flex justify-between items-start mb-6">
+                        <div class="p-3 bg-slate-100 rounded-2xl"><i data-lucide="${t.icon}" class="w-5 h-5"></i></div>
+                        <span id="score-${t.id}" class="status-pill bg-slate-100 text-slate-500">0.0</span>
+                    </div>
+                    <h3 class="text-xl font-semibold mb-1">${t.name}</h3>
+                    <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-6">${t.metric}</div>
+                    
+                    <div id="correlation-${t.id}" class="rounded-2xl p-4 mb-4 border border-black/5 bg-slate-50/50">
+                        <div class="flex items-center space-x-2 mb-2">
+                            <i data-lucide="link" class="w-3 h-3 text-blue-500"></i>
+                            <span class="text-[10px] font-bold uppercase text-slate-400">ServiceNow Correlation</span>
+                        </div>
+                        <div id="snow-status-${t.id}" class="text-xs font-medium text-slate-600 italic">Checking for Change Tickets...</div>
+                    </div>
+                </div>
+
+                <div class="h-24 mb-6">
+                    <canvas id="chart-${t.id}"></canvas>
+                </div>
+
+                <div id="action-zone-${t.id}">
+                    <div class="action-btn bg-stable">SYSTEM STABLE</div>
+                </div>
+            `;
+            grid.appendChild(card);
+            setupChart(t.id);
+        });
+        lucide.createIcons();
+        syncLoop();
+    }
+
+    function setupChart(id) {
+        const ctx = document.getElementById(`chart-${id}`).getContext('2d');
+        charts[id] = new Chart(ctx, {
+            type: 'line',
+            data: { labels: Array(12).fill(''), datasets: [{ data: Array(12).fill(0), borderColor: '#0071e3', borderWidth: 2, pointRadius: 0, tension: 0.4 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } } }
+        });
+    }
+
+    function syncLoop() {
+        TOWERS.forEach(t => {
+            const isAnomaly = Math.random() > 0.88;
+            const score = isAnomaly ? (Math.random() * 40 + 60) : (Math.random() * 8);
+            
+            // UI References
+            const scoreEl = document.getElementById(`score-${t.id}`);
+            const snowEl = document.getElementById(`snow-status-${t.id}`);
+            const actionZone = document.getElementById(`action-zone-${t.id}`);
+            const card = document.getElementById(`card-${t.id}`);
+
+            scoreEl.innerText = score.toFixed(1);
+
+            if (score > 75) {
+                // If it's a high score, check if a ServiceNow Change exists
+                const hasTicket = t.snow_chk && isAnomaly; 
+                
+                if (hasTicket) {
+                    snowEl.innerHTML = `<span class="text-blue-600 font-bold">Planned Activity: CHG-88210 Found</span>`;
+                    actionZone.innerHTML = `<div class="action-btn bg-planned">VIEW CHANGE TICKET</div>`;
+                    card.style.borderColor = "#0071e3";
+                    logEvent(`[SNOW] Anomaly in ${t.name} suppressed. Correlated with CHG-88210.`, 'blue');
+                } else {
+                    snowEl.innerHTML = `<span class="text-red-500 font-bold">Out-of-Process: No Active Change</span>`;
+                    actionZone.innerHTML = `<div onclick="remediate('${t.id}')" class="action-btn bg-critical animate-pulse">REMEDIATE NOW</div>`;
+                    card.style.borderColor = "#ff3b30";
+                    logEvent(`[CRITICAL] Unplanned anomaly in ${t.name}. Score: ${score.toFixed(1)}`, 'red');
+                }
+            } else {
+                snowEl.innerText = "No active maintenance found.";
+                actionZone.innerHTML = `<div class="action-btn bg-stable text-slate-400">SYSTEM STABLE</div>`;
+                card.style.borderColor = "rgba(0,0,0,0.05)";
+            }
+
+            const chart = charts[t.id];
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[0].data.push(score);
+            chart.update('none');
+        });
+        setTimeout(syncLoop, 5000);
+    }
+
+    function logEvent(msg, color) {
+        const log = document.getElementById('event-log');
+        const time = new Date().toLocaleTimeString();
+        const entry = document.createElement('div');
+        entry.className = `p-2 border-b border-black/5 flex justify-between text-${color}-600`;
+        entry.innerHTML = `<span>${msg}</span><span>${time}</span>`;
+        log.prepend(entry);
+    }
+
+    function remediate(id) {
+        alert(`REMEDIATION: Triggering Ansible Tower for ${id} tower.\n\nContext: Out-of-Process Anomaly (No ServiceNow Change Found)`);
+    }
+
+    init();
+</script>
+</body>
+</html>

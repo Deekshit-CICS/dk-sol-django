@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise ML Anomaly Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at top right, #f8fafc, #e2e8f0, #f1f5f9);
+            min-height: 100vh;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .anomaly-critical {
+            background: rgba(255, 59, 48, 0.1) !important;
+            border: 1px solid rgba(255, 59, 48, 0.3) !important;
+            box-shadow: 0 0 20px rgba(255, 59, 48, 0.15);
+        }
+        .anomaly-warning {
+            background: rgba(255, 159, 10, 0.1) !important;
+            border: 1px solid rgba(255, 159, 10, 0.3) !important;
+        }
+    </style>
+</head>
+<body class="p-8">
+
+    <nav class="flex justify-between items-center max-w-7xl mx-auto mb-12">
+        <div class="glass px-6 py-2 rounded-2xl flex items-center space-x-3 shadow-sm">
+            <div class="w-3 h-3 rounded-full bg-red-500"></div>
+            <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+            <div class="w-3 h-3 rounded-full bg-green-500"></div>
+            <span class="pl-4 font-semibold text-slate-800 tracking-tight text-sm">Elastic ML Monitor</span>
+        </div>
+        <div id="status-pill" class="glass px-5 py-2 rounded-full text-xs font-medium text-slate-600 shadow-sm border border-white">
+            Job Status: <span class="text-green-600">Running</span>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        
+        <div id="score-card" class="glass p-8 rounded-[2.5rem] relative overflow-hidden">
+            <p class="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-1">Severity Score</p>
+            <h2 id="current-score" class="text-6xl font-light text-slate-900 tracking-tighter">0.0</h2>
+            <p id="score-label" class="text-xs text-slate-500 mt-4 italic">No anomalies detected in the last bucket.</p>
+        </div>
+
+        <div id="metric-card" class="glass p-8 rounded-[2.5rem]">
+            <p class="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-1">Current Metric</p>
+            <div class="flex items-baseline space-x-2">
+                <span id="actual-val" class="text-4xl font-semibold text-slate-800">--</span>
+                <span id="typical-val" class="text-sm text-slate-400 font-medium">Typical: --</span>
+            </div>
+            <div class="mt-6 flex space-x-1" id="swimlane">
+                <div class="h-8 w-full bg-slate-100 rounded-lg overflow-hidden flex space-x-0.5 p-0.5">
+                    <div class="h-full w-1/5 bg-green-400/40 rounded-sm"></div>
+                    <div class="h-full w-1/5 bg-green-400/40 rounded-sm"></div>
+                    <div class="h-full w-1/5 bg-yellow-400/40 rounded-sm"></div>
+                    <div class="h-full w-1/5 bg-green-400/40 rounded-sm"></div>
+                    <div id="latest-swim" class="h-full w-1/5 bg-green-400/40 rounded-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass p-8 rounded-[2.5rem] flex flex-col justify-between">
+            <p class="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-1">Source Index</p>
+            <span class="text-sm font-medium text-slate-700">.ml-anomalies-read</span>
+            <button class="mt-4 bg-slate-900 text-white text-xs py-3 px-6 rounded-2xl hover:bg-slate-700 transition-colors">Open in Kibana</button>
+        </div>
+
+        <div class="md:col-span-3 glass p-10 rounded-[3rem]">
+            <div class="flex justify-between items-end mb-10">
+                <div>
+                    <h3 class="text-2xl font-semibold text-slate-900 tracking-tight">Anomaly Distribution</h3>
+                    <p class="text-sm text-slate-400">Time-series forecasting from Elastic ML job results</p>
+                </div>
+                <div class="bg-white/50 p-1 rounded-xl flex text-[10px] font-bold uppercase tracking-tighter">
+                    <span class="px-3 py-1 bg-white rounded-lg shadow-sm">Real-time</span>
+                    <span class="px-3 py-1 text-slate-400">History</span>
+                </div>
+            </div>
+            <div class="h-[300px]">
+                <canvas id="mlChart"></canvas>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const ctx = document.getElementById('mlChart').getContext('2d');
+        
+        // Elastic UI Colors
+        const colors = {
+            blue: '#007AFF',
+            grey: '#D1D1D6',
+            red: '#FF3B30',
+            orange: '#FF9500'
+        };
+
+        const chartData = {
+            labels: Array(24).fill(''),
+            datasets: [
+                {
+                    label: 'Actual Value',
+                    data: Array(24).fill(null),
+                    borderColor: colors.blue,
+                    borderWidth: 3,
+                    pointRadius: 0,
+                    tension: 0.4
+                },
+                {
+                    label: 'Typical (Learned)',
+                    data: Array(24).fill(null),
+                    borderColor: colors.grey,
+                    borderDash: [5, 5],
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.4
+                }
+            ]
+        };
+
+        const mlChart = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { display: false },
+                    y: { border: {display: false}, grid: { color: 'rgba(0,0,0,0.03)' } }
+                }
+            }
+        });
+
+        // Function to update the Apple-style UI with Elastic Data
+        function updateDashboard(elasticRecord) {
+            const { actual, typical, anomaly_score, timestamp } = elasticRecord;
+
+            // 1. Update Primary Score
+            const scoreEl = document.getElementById('current-score');
+            const scoreCard = document.getElementById('score-card');
+            scoreEl.innerText = anomaly_score.toFixed(1);
+
+            // 2. Handle Severity Styling (Elastic Scoring)
+            scoreCard.classList.remove('anomaly-critical', 'anomaly-warning');
+            const swim = document.getElementById('latest-swim');
+
+            if (anomaly_score > 75) {
+                scoreCard.classList.add('anomaly-critical');
+                document.getElementById('score-label').innerText = "Critical anomaly detected.";
+                swim.className = "h-full w-1/5 bg-red-500 rounded-sm";
+            } else if (anomaly_score > 25) {
+                scoreCard.classList.add('anomaly-warning');
+                document.getElementById('score-label').innerText = "Warning: Deviating from typical behavior.";
+                swim.className = "h-full w-1/5 bg-orange-400 rounded-sm";
+            } else {
+                document.getElementById('score-label').innerText = "System behavior is typical.";
+                swim.className = "h-full w-1/5 bg-green-400 rounded-sm";
+            }
+
+            // 3. Update Metric Values
+            document.getElementById('actual-val').innerText = actual.toFixed(2);
+            document.getElementById('typical-val').innerText = `Typical: ${typical.toFixed(2)}`;
+
+            // 4. Push to Chart
+            chartData.datasets[0].data.shift();
+            chartData.datasets[0].data.push(actual);
+            chartData.datasets[1].data.shift();
+            chartData.datasets[1].data.push(typical);
+            mlChart.update();
+        }
+
+        // MOCK ELASTIC API PUSH (Simulate what your backend would send)
+        function simulateElasticPush() {
+            const isAnomaly = Math.random() > 0.85;
+            const typicalVal = 50;
+            const actualVal = isAnomaly ? (typicalVal + Math.random() * 40) : (typicalVal + (Math.random() * 4 - 2));
+            const score = isAnomaly ? (Math.random() * 60 + 40) : (Math.random() * 5);
+
+            updateDashboard({
+                actual: actualVal,
+                typical: typicalVal,
+                anomaly_score: score,
+                timestamp: new Date()
+            });
+        }
+
+        // Initial setup and loop
+        setInterval(simulateElasticPush, 3000);
+        simulateElasticPush();
+
+    </script>
+</body>
+</html>
