@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TowerCommand Nexus | Enterprise AI Ops</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        :root { 
+            --apple-blue: #0071e3; 
+            --apple-red: #ff3b30; 
+            --apple-gray: #86868b;
+            --glass-bg: rgba(255, 255, 255, 0.8);
+        }
+        
+        body { 
+            background: #f5f5f7; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #1d1d1f; 
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(0,0,0,0.08);
+            border-radius: 24px;
+            transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+        }
+
+        /* View Toggler Styling */
+        .view-nav {
+            background: rgba(0,0,0,0.05);
+            padding: 4px;
+            border-radius: 12px;
+            display: inline-flex;
+        }
+
+        .view-btn {
+            border: none;
+            background: transparent;
+            padding: 6px 20px;
+            border-radius: 9px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--apple-gray);
+            transition: 0.2s;
+        }
+
+        .view-btn.active {
+            background: white;
+            color: var(--apple-blue);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .tower-item { transition: opacity 0.3s ease, transform 0.3s ease; }
+
+        .filter-pill {
+            border-radius: 20px;
+            padding: 6px 18px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid rgba(0,0,0,0.05);
+            background: white;
+            color: var(--apple-gray);
+            transition: 0.2s;
+        }
+
+        .filter-pill.active {
+            background: var(--apple-blue);
+            color: white;
+            border-color: var(--apple-blue);
+        }
+
+        .status-pill { font-size: 0.65rem; font-weight: 700; padding: 4px 12px; border-radius: 20px; text-transform: uppercase; }
+
+        .action-btn { 
+            width: 100%; border-radius: 14px; font-weight: 600; font-size: 0.75rem; 
+            padding: 12px; transition: 0.3s; text-align: center; border: none;
+        }
+
+        .bg-planned { background: #e8f2ff; color: #0071e3; border: 1px solid #0071e3; }
+        .bg-critical { background: var(--apple-red); color: white; cursor: pointer; }
+        .bg-stable { background: #f0f0f2; color: var(--apple-gray); cursor: default; }
+
+        .agent-terminal {
+            background: #1c1c1e; color: #f5f5f7; font-family: 'SFMono-Regular', Consolas, monospace;
+            font-size: 0.7rem; padding: 15px; border-radius: 16px; height: 150px; overflow-y: auto;
+        }
+
+        .history-table { font-size: 0.85rem; }
+        .history-table thead th { border: none; color: var(--apple-gray); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; }
+
+        .log-container { max-height: 250px; overflow-y: auto; }
+        .chart-container { height: 100px; position: relative; }
+        .spin-icon { animation: rotation 2s infinite linear; }
+        @keyframes rotation { from { transform: rotate(0deg); } to { transform: rotate(359deg); } }
+    </style>
+</head>
+<body class="py-5">
+
+<div class="container-fluid px-lg-5">
+    <header class="row mb-4 align-items-center">
+        <div class="col-md-7">
+            <h1 class="display-6 fw-bold mb-1">Tower<span class="text-primary">Nexus</span></h1>
+            <div class="view-nav mt-2">
+                <button class="view-btn active" onclick="switchTab('live')">Live Monitor</button>
+                <button class="view-btn" onclick="switchTab('history')">History Tab</button>
+            </div>
+        </div>
+        <div class="col-md-5 d-flex justify-content-md-end mt-3 mt-md-0">
+            <div class="glass-card px-4 py-2 me-3 d-flex align-items-center">
+                <i class="bi bi-arrow-repeat text-primary me-2 spin-icon"></i>
+                <div>
+                    <div class="small fw-bold text-muted" style="font-size: 0.6rem;">SERVICENOW SYNC</div>
+                    <div class="small fw-semibold">CHG-99281 Active</div>
+                </div>
+            </div>
+            <div class="glass-card px-4 py-2 d-flex align-items-center bg-success bg-opacity-10 border-success">
+                <div class="rounded-circle bg-success me-2" style="width: 8px; height: 8px;"></div>
+                <div class="small fw-bold text-success uppercase" style="font-size: 0.65rem;">ELASTIC ML: NOMINAL</div>
+            </div>
+        </div>
+    </header>
+
+    <div id="live-tab">
+        <div class="row mb-5">
+            <div class="col-12 d-flex flex-wrap gap-2">
+                <div class="filter-pill active" onclick="filterTowers('all', this)">All Towers</div>
+                <div class="filter-pill" onclick="filterTowers('unix', this)">UNIX</div>
+                <div class="filter-pill" onclick="filterTowers('win', this)">Windows</div>
+                <div class="filter-pill" onclick="filterTowers('mw', this)">Middleware</div>
+                <div class="filter-pill" onclick="filterTowers('st', this)">Storage</div>
+                <div class="filter-pill" onclick="filterTowers('bk', this)">Backup</div>
+            </div>
+        </div>
+
+        <div class="row g-4" id="main-grid"></div>
+
+        <div class="row mt-5">
+            <div class="col-lg-8">
+                <div class="glass-card p-4">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h3 class="h6 fw-bold text-uppercase text-muted m-0">Agentic AI Reasoning Feed</h3>
+                        <span class="status-pill bg-dark text-white">Autonomous Mode</span>
+                    </div>
+                    <div class="agent-terminal" id="agent-terminal">
+                        <div class="text-info">> [System] Ready for Agentic Remediation...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="glass-card p-4">
+                    <h3 class="h6 fw-bold text-uppercase text-muted mb-4">Correlation Log</h3>
+                    <div id="event-log" class="log-container small fw-medium"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="history-tab" style="display: none;">
+        <div class="glass-card p-4">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h3 class="h5 fw-bold m-0">Forensic Anomaly History</h3>
+                <button class="btn btn-sm btn-outline-primary rounded-pill px-3" onclick="exportHistory()">Export CSV</button>
+            </div>
+            <div class="table-responsive">
+                <table class="table history-table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Tower</th>
+                            <th>Score</th>
+                            <th>Correlation Type</th>
+                            <th>Reference</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table-body">
+                        </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const TOWERS = [
+        { id: 'unix', name: 'UNIX/Linux', category: 'unix', icon: 'bi-server', metric: 'CPU Behavior', snow_chk: true },
+        { id: 'win', name: 'Windows Srv', category: 'win', icon: 'bi-display', metric: 'Memory Pattern', snow_chk: false },
+        { id: 'db', name: 'Database Ops', category: 'st', icon: 'bi-database', metric: 'I/O Latency', snow_chk: true },
+        { id: 'mw', name: 'Middleware', category: 'mw', icon: 'bi-layers', metric: 'JVM GC Drift', snow_chk: false },
+        { id: 'st', name: 'Storage SAN', category: 'st', icon: 'bi-hdd-network', metric: 'R/W Entropy', snow_chk: false },
+        { id: 'bk', name: 'Cloud Backup', category: 'bk', icon: 'bi-shield-check', metric: 'Dedupe Ratio', snow_chk: false }
+    ];
+
+    const charts = {};
+
+    function init() {
+        const grid = document.getElementById('main-grid');
+        TOWERS.forEach(t => {
+            const col = document.createElement('div');
+            col.className = `col-md-6 col-lg-4 tower-item tower-${t.category}`;
+            col.innerHTML = `
+                <div id="card-${t.id}" class="glass-card p-4 d-flex flex-column justify-content-between">
+                    <div>
+                        <div class="d-flex justify-content-between align-items-start mb-4">
+                            <div class="p-3 bg-light rounded-4"><i class="bi ${t.icon} h5 text-primary"></i></div>
+                            <span id="score-${t.id}" class="status-pill bg-light text-muted">0.0</span>
+                        </div>
+                        <h3 class="h5 fw-bold mb-1">${t.name}</h3>
+                        <div class="small fw-bold text-muted text-uppercase mb-4" style="font-size: 0.65rem;">${t.metric}</div>
+                        <div id="correlation-${t.id}" class="rounded-4 p-3 mb-4 bg-light bg-opacity-50 border">
+                            <div id="snow-status-${t.id}" class="small fw-medium text-muted fst-italic">Syncing metadata...</div>
+                        </div>
+                    </div>
+                    <div class="chart-container mb-4"><canvas id="chart-${t.id}"></canvas></div>
+                    <div id="action-zone-${t.id}"><button class="action-btn bg-stable">SYSTEM STABLE</button></div>
+                </div>`;
+            grid.appendChild(col);
+            setupChart(t.id);
+        });
+        syncLoop();
+    }
+
+    function switchTab(tabId) {
+        document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+        event.target.classList.add('active');
+        document.getElementById('live-tab').style.display = tabId === 'live' ? 'block' : 'none';
+        document.getElementById('history-tab').style.display = tabId === 'history' ? 'block' : 'none';
+    }
+
+    function setupChart(id) {
+        const ctx = document.getElementById(`chart-${id}`).getContext('2d');
+        charts[id] = new Chart(ctx, {
+            type: 'line',
+            data: { labels: Array(12).fill(''), datasets: [{ data: Array(12).fill(0), borderColor: '#0071e3', borderWidth: 2, pointRadius: 0, tension: 0.4 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } } }
+        });
+    }
+
+    function syncLoop() {
+        TOWERS.forEach(t => {
+            const isAnomaly = Math.random() > 0.92;
+            const score = isAnomaly ? (Math.random() * 30 + 70) : (Math.random() * 10);
+            const scoreEl = document.getElementById(`score-${t.id}`);
+            if(!scoreEl) return;
+
+            scoreEl.innerText = score.toFixed(1);
+
+            if (score > 75) {
+                const hasTicket = t.snow_chk && Math.random() > 0.4;
+                const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+                
+                if (hasTicket) {
+                    updateTowerUI(t, 'Planned: CHG-88210', 'bg-planned', 'VIEW CHANGE', '#0071e3');
+                    logEvent(`[SNOW] Suppressed anomaly for ${t.name}.`, 'text-primary');
+                    addToHistoryTable(time, t.name, score.toFixed(1), 'ServiceNow Match', 'CHG-88210', 'Suppressed');
+                } else {
+                    updateTowerUI(t, 'Unplanned Anomaly', 'bg-critical', 'RUN AGENTIC FIX', '#ff3b30');
+                    logEvent(`[CRITICAL] Alert on ${t.name}.`, 'text-danger');
+                    addToHistoryTable(time, t.name, score.toFixed(1), 'Unplanned', 'N/A', 'Active Alert');
+                }
+            } else {
+                updateTowerUI(t, 'No maintenance found.', 'bg-stable', 'SYSTEM STABLE', 'rgba(0,0,0,0.08)');
+            }
+
+            const chart = charts[t.id];
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[0].data.push(score);
+            chart.update('none');
+        });
+        setTimeout(syncLoop, 4000);
+    }
+
+    function updateTowerUI(t, snowText, btnClass, btnText, borderColor) {
+        document.getElementById(`snow-status-${t.id}`).innerHTML = snowText;
+        document.getElementById(`action-zone-${t.id}`).innerHTML = `<button class="action-btn ${btnClass}">${btnText}</button>`;
+        document.getElementById(`card-${t.id}`).style.borderColor = borderColor;
+    }
+
+    function logEvent(msg, colorClass) {
+        const log = document.getElementById('event-log');
+        const entry = document.createElement('div');
+        entry.className = `p-2 border-bottom d-flex justify-content-between ${colorClass}`;
+        entry.innerHTML = `<span>${msg}</span><span class="text-muted small">${new Date().toLocaleTimeString()}</span>`;
+        log.prepend(entry);
+    }
+
+    function addToHistoryTable(time, tower, score, type, ref, status) {
+        const tbody = document.getElementById('history-table-body');
+        const row = `<tr>
+            <td class="text-muted">${time}</td>
+            <td class="fw-bold">${tower}</td>
+            <td><span class="badge ${score > 85 ? 'bg-danger' : 'bg-warning'} bg-opacity-10 ${score > 85 ? 'text-danger' : 'text-warning'}">${score}</span></td>
+            <td>${type}</td>
+            <td class="font-monospace small">${ref}</td>
+            <td><span class="status-pill ${status === 'Suppressed' ? 'bg-light text-muted' : 'bg-danger text-white'}">${status}</span></td>
+        </tr>`;
+        tbody.insertAdjacentHTML('afterbegin', row);
+        if(tbody.rows.length > 20) tbody.deleteRow(20); // Keep it performant
+    }
+
+    function filterTowers(category, element) {
+        document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+        element.classList.add('active');
+        document.querySelectorAll('.tower-item').forEach(item => {
+            if (category === 'all' || item.classList.contains(`tower-${category}`)) {
+                item.style.display = 'block';
+            } else {
+                item.style.display = 'none';
+            }
+        });
+    }
+
+    init();
+</script>
+</body>
+</html>

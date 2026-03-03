@@ -3,214 +3,251 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enterprise Infrastructure Tower Health</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>TowerCommand Nexus | Multi-Monitor AIOps</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background: radial-gradient(circle at top right, #f1f5f9, #e2e8f0);
-            min-height: 100vh;
-        }
-        .glass-card {
-            background: rgba(255, 255, 255, 0.6);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .glass-card:hover {
-            transform: translateY(-4px);
-            background: rgba(255, 255, 255, 0.8);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05);
-        }
-        .severity-75 { border-top: 4px solid #ef4444; box-shadow: 0 0 15px rgba(239, 68, 68, 0.1); }
-        .severity-25 { border-top: 4px solid #f59e0b; }
-        .severity-0  { border-top: 4px solid #10b981; }
+        :root { --apple-blue: #0071e3; --apple-red: #ff3b30; --apple-gray: #86868b; --glass-bg: rgba(255, 255, 255, 0.8); }
+        body { background: #f5f5f7; font-family: -apple-system, sans-serif; color: #1d1d1f; }
+        .glass-card { background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid rgba(0,0,0,0.08); border-radius: 24px; transition: 0.3s; }
         
-        @keyframes pulse-red {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-        .animate-critical { animation: pulse-red 1.5s infinite; color: #ef4444; font-weight: 700; }
+        /* Navigation */
+        .view-nav { background: rgba(0,0,0,0.05); padding: 4px; border-radius: 12px; display: inline-flex; }
+        .view-btn { border: none; background: transparent; padding: 6px 20px; border-radius: 9px; font-size: 0.85rem; font-weight: 600; color: var(--apple-gray); transition: 0.2s; }
+        .view-btn.active { background: white; color: var(--apple-blue); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        
+        .filter-pill { border-radius: 20px; padding: 6px 16px; font-size: 0.75rem; font-weight: 600; cursor: pointer; border: 1px solid rgba(0,0,0,0.05); background: white; color: var(--apple-gray); transition: 0.2s; }
+        .filter-pill.active { background: var(--apple-blue); color: white; border-color: var(--apple-blue); }
+
+        /* Typography & Table */
+        .status-pill { font-size: 0.6rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; text-transform: uppercase; }
+        .ci-badge { font-family: 'SFMono-Regular', monospace; font-size: 0.75rem; font-weight: 600; color: var(--apple-blue); background: rgba(0,113,227,0.05); padding: 4px 8px; border-radius: 6px; }
+        .monitor-label { font-size: 0.55rem; font-weight: 800; color: var(--apple-gray); text-transform: uppercase; letter-spacing: 0.05em; }
+        .chart-container { height: 50px; margin-bottom: 10px; }
+        
+        .live-table { font-size: 0.8rem; }
+        .live-table thead th { border: none; color: var(--apple-gray); font-size: 0.65rem; text-transform: uppercase; padding: 15px; }
+        .score-pill { width: 40px; display: inline-block; text-align: center; font-weight: 700; border-radius: 6px; padding: 2px 0; font-size: 0.75rem; }
+        
+        .tower-hidden { display: none; }
+        .drill-down-panel { display: none; animation: fadeIn 0.4s ease; margin-top: 2rem; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
-<body class="p-6 lg:p-12">
+<body class="py-5">
 
-    <header class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
-        <div>
-            <h1 class="text-3xl font-light text-slate-800 tracking-tight">Infrastructure <span class="font-semibold text-blue-600">Towers</span></h1>
-            <p class="text-slate-500 text-sm">Real-time Anomaly Detection via Elastic Machine Learning</p>
-        </div>
-        <div class="flex items-center space-x-4">
-            <div class="glass-card px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                Data Refresh: <span id="timer" class="text-slate-800">10s</span>
-            </div>
-            <div class="h-10 w-10 rounded-full bg-white shadow-sm flex items-center justify-center border border-slate-200">
-                <div class="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+<div class="container-fluid px-lg-5">
+    <header class="row mb-4 align-items-center">
+        <div class="col-md-7">
+            <h1 class="display-6 fw-bold mb-1">Tower<span class="text-primary">Nexus</span></h1>
+            <div class="view-nav mt-2">
+                <button class="view-btn active" onclick="showSection('live')">Live Monitor</button>
+                <button class="view-btn" onclick="showSection('history')">History Tab</button>
             </div>
         </div>
     </header>
 
-    <main id="dashboard-grid" class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        </main>
+    <div class="d-flex flex-wrap gap-2 mb-5" id="filter-bar">
+        <div class="filter-pill active" onclick="filterTowers('all', this)">All Towers</div>
+        <div class="filter-pill" onclick="filterTowers('unix', this)">UNIX</div>
+        <div class="filter-pill" onclick="filterTowers('win', this)">Windows</div>
+        <div class="filter-pill" onclick="filterTowers('st', this)">Storage</div>
+        <div class="filter-pill" onclick="filterTowers('bk', this)">Backup</div>
+        <div class="filter-pill" onclick="filterTowers('mw', this)">Middleware</div>
+    </div>
 
-    <script>
-        // --- CONFIGURATION ---
-        const ELASTIC_CONFIG = {
-            baseUrl: "https://your-elastic-cluster:9200",
-            apiKey: "YOUR_API_KEY_HERE",
-            refreshRate: 10000 // 10 seconds
-        };
+    <div id="live-section">
+        <div class="row g-4 mb-5" id="main-grid"></div>
 
-        const TOWERS = [
-            { id: 'unix', name: 'UNIX/Linux', jobId: 'ml-unix-load', icon: '🐧' },
-            { id: 'windows', name: 'Windows', jobId: 'ml-win-resource', icon: '🪟' },
-            { id: 'middleware', name: 'Middleware', jobId: 'ml-jvm-heap', icon: '⚙️' },
-            { id: 'database', name: 'Database', jobId: 'ml-db-latency', icon: '🗄️' },
-            { id: 'storage', name: 'Storage', jobId: 'ml-storage-iops', icon: '💾' },
-            { id: 'backup', name: 'Backup', jobId: 'ml-backup-fail', icon: '☁️' }
-        ];
+        <div class="glass-card shadow-sm overflow-hidden mb-5">
+            <div class="p-3 border-bottom bg-white d-flex justify-content-between align-items-center">
+                <h2 class="h6 fw-bold m-0 text-uppercase text-muted"><i class="bi bi-activity me-2"></i>Live Anomaly Stream</h2>
+                <span class="small text-muted">Auto-Correlation: Enabled</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table live-table m-0">
+                    <thead>
+                        <tr>
+                            <th>Date & Time</th>
+                            <th>Tower</th>
+                            <th>Configuration Item (CI)</th>
+                            <th>Monitor Type</th>
+                            <th>Score</th>
+                            <th>Correlation / Change Ref</th>
+                        </tr>
+                    </thead>
+                    <tbody id="live-stream-body"></tbody>
+                </table>
+            </div>
+        </div>
 
-        // --- UI INITIALIZATION ---
-        const grid = document.getElementById('dashboard-grid');
-        const charts = {};
+        <div id="drill-down-container" class="drill-down-panel">
+            <div class="glass-card p-4 border-primary bg-white shadow-lg">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2 class="h4 fw-bold mb-0" id="drill-tower-name">Tower Explorer</h2>
+                    <button class="btn-close" onclick="closeDrill()"></button>
+                </div>
+                <div id="ci-explorer-list"></div>
+            </div>
+        </div>
+    </div>
 
-        function createTowerCards() {
-            TOWERS.forEach(tower => {
-                const card = document.createElement('div');
-                card.id = `card-${tower.id}`;
-                card.className = `glass-card p-6 rounded-[2rem] severity-0`;
-                card.innerHTML = `
-                    <div class="flex justify-between items-start mb-4">
-                        <div class="flex items-center space-x-3">
-                            <span class="text-2xl">${tower.icon}</span>
-                            <h3 class="font-semibold text-slate-800">${tower.name}</h3>
+    <div id="history-section" style="display:none;">
+        <div class="glass-card shadow-sm overflow-hidden bg-white">
+            <div class="p-3 border-bottom d-flex justify-content-between">
+                <h3 class="h5 fw-bold m-0">Forensic Audit History (Last 30 Events)</h3>
+            </div>
+            <div class="table-responsive">
+                <table class="table live-table align-middle m-0">
+                    <thead>
+                        <tr>
+                            <th>Date & Time</th>
+                            <th>Tower</th>
+                            <th>Configuration Item (CI)</th>
+                            <th>Monitor Type</th>
+                            <th>Score</th>
+                            <th>Correlation / Change Ref</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const TOWERS = [
+        { id: 'unix', name: 'UNIX/Linux', cat: 'unix', icon: 'bi-server', prefix: 'LX-PRD-', monitors: ['CPU', 'IO', 'Net'] },
+        { id: 'win', name: 'Windows Srv', cat: 'win', icon: 'bi-display', prefix: 'WN-ENT-', monitors: ['RAM', 'CPU', 'Disk'] },
+        { id: 'st', name: 'Storage SAN', cat: 'st', icon: 'bi-hdd-network', prefix: 'ST-VOL-', monitors: ['Lat', 'IOPS', 'Cap'] },
+        { id: 'bk', name: 'Cloud Backup', cat: 'bk', icon: 'bi-shield-check', prefix: 'BK-JOB-', monitors: ['Dedup', 'Speed', 'Fail'] },
+        { id: 'mw', name: 'Middleware', cat: 'mw', icon: 'bi-layers', prefix: 'MW-NODE-', monitors: ['Heap', 'GC', 'Threads'] }
+    ];
+
+    const charts = {};
+
+    function init() {
+        const grid = document.getElementById('main-grid');
+        TOWERS.forEach(t => {
+            const col = document.createElement('div');
+            col.className = `col-md-6 col-lg-4 tower-card tower-${t.cat}`;
+            let monitors = t.monitors.map(m => `
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between monitor-label"><span>${m}</span><span id="val-${t.id}-${m.toLowerCase()}">0.0</span></div>
+                    <div class="chart-container"><canvas id="chart-${t.id}-${m.toLowerCase()}"></canvas></div>
+                </div>`).join('');
+
+            col.innerHTML = `
+                <div class="glass-card p-4 h-100" onclick="drillDown('${t.id}')" id="card-${t.id}">
+                    <div class="d-flex justify-content-between mb-4">
+                        <div class="d-flex align-items-center">
+                            <div class="p-2 bg-light rounded-3 text-primary me-3"><i class="bi ${t.icon} h5"></i></div>
+                            <h3 class="h6 fw-bold mb-0">${t.name}</h3>
                         </div>
-                        <span id="status-${tower.id}" class="text-[10px] font-bold uppercase text-slate-400">Stable</span>
+                        <span id="score-${t.id}" class="status-pill bg-light text-muted">STABLE</span>
                     </div>
-                    
-                    <div class="flex items-baseline space-x-2">
-                        <span id="score-${tower.id}" class="text-5xl font-light tracking-tighter text-slate-900">0.0</span>
-                        <span class="text-xs text-slate-400">Score</span>
-                    </div>
+                    ${monitors}
+                </div>`;
+            grid.appendChild(col);
+            t.monitors.forEach(m => setupChart(`${t.id}-${m.toLowerCase()}`));
+        });
+        sync();
+        setInterval(streamLiveAnomaly, 4000);
+    }
 
-                    <div class="h-20 w-full mt-4">
-                        <canvas id="chart-${tower.id}"></canvas>
-                    </div>
+    function setupChart(id) {
+        const ctx = document.getElementById(`chart-${id}`).getContext('2d');
+        charts[id] = new Chart(ctx, {
+            type: 'line',
+            data: { labels: Array(10).fill(''), datasets: [{ data: Array(10).fill(0), borderColor: '#0071e3', borderWidth: 1.5, pointRadius: 0, tension: 0.4 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } } }
+        });
+    }
 
-                    <div class="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center">
-                        <div class="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Last 15 Buckets</div>
-                        <div id="trend-${tower.id}" class="flex space-x-1"></div>
-                    </div>
-                `;
-                grid.appendChild(card);
-                initChart(tower.id);
+    function sync() {
+        TOWERS.forEach(t => {
+            let max = 0;
+            t.monitors.forEach(m => {
+                const score = (Math.random() > 0.9) ? (Math.random() * 40 + 60) : (Math.random() * 15);
+                if(score > max) max = score;
+                document.getElementById(`val-${t.id}-${m.toLowerCase()}`).innerText = score.toFixed(1);
+                charts[`${t.id}-${m.toLowerCase()}`].data.datasets[0].data.shift();
+                charts[`${t.id}-${m.toLowerCase()}`].data.datasets[0].data.push(score);
+                charts[`${t.id}-${m.toLowerCase()}`].update('none');
             });
+            document.getElementById(`score-${t.id}`).className = `status-pill ${max > 75 ? 'bg-danger text-white' : 'bg-light text-muted'}`;
+            document.getElementById(`score-${t.id}`).innerText = max > 75 ? 'ANOMALY' : 'STABLE';
+        });
+        setTimeout(sync, 3000);
+    }
+
+    function streamLiveAnomaly() {
+        const tower = TOWERS[Math.floor(Math.random() * TOWERS.length)];
+        const ci = `${tower.prefix}${Math.floor(Math.random() * 900 + 100)}`;
+        const monitor = tower.monitors[Math.floor(Math.random() * tower.monitors.length)];
+        const score = (Math.random() * 100).toFixed(1);
+        const date = new Date().toLocaleDateString();
+        const time = new Date().toLocaleTimeString();
+        
+        // Correlation Logic
+        let corr = '';
+        if (score > 85) {
+            corr = `<span class="text-danger fw-bold"><i class="bi bi-bell-fill"></i> ACTIVE ALERT</span>`;
+        } else if (score > 65) {
+            corr = `<span class="text-primary fw-bold">CHG-${Math.floor(Math.random()*90000+10000)}</span>`;
+        } else {
+            corr = `<span class="text-muted">Suppressed (Baseline)</span>`;
         }
 
-        function initChart(id) {
-            const ctx = document.getElementById(`chart-${id}`).getContext('2d');
-            charts[id] = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: Array(15).fill(''),
-                    datasets: [{
-                        data: Array(15).fill(0),
-                        borderColor: '#94a3b8',
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        tension: 0.4,
-                        fill: false
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } }
-                }
-            });
-        }
+        const scoreClass = score > 85 ? 'bg-danger text-white' : score > 65 ? 'bg-warning text-dark' : 'bg-success text-white';
 
-        // --- ELASTIC DATA FETCHING ---
-        async function fetchTowerData(tower) {
-            // NOTE: In a real environment, you'd use fetch() with ELASTIC_CONFIG.
-            // For this demo, we simulate the structure of an Elastic ML Record.
-            
-            const isAnomaly = Math.random() > 0.85; // Simulate 15% chance of anomaly
-            return {
-                score: isAnomaly ? (Math.random() * 60 + 40) : (Math.random() * 5),
-                timestamp: new Date().getTime()
-            };
-        }
+        const rowHTML = `<tr>
+            <td class="text-muted small">${date} ${time}</td>
+            <td class="fw-bold">${tower.name}</td>
+            <td><span class="ci-badge">${ci}</span></td>
+            <td class="small fw-semibold text-muted">${monitor}</td>
+            <td><span class="score-pill ${scoreClass}">${score}</span></td>
+            <td>${corr}</td>
+        </tr>`;
 
-        async function refreshDashboard() {
-            for (const tower of TOWERS) {
-                const data = await fetchTowerData(tower);
-                updateUI(tower.id, data.score);
-            }
-        }
+        // Update Live Stream
+        const liveBody = document.getElementById('live-stream-body');
+        liveBody.insertAdjacentHTML('afterbegin', rowHTML);
+        if(liveBody.rows.length > 10) liveBody.deleteRow(10);
 
-        function updateUI(id, score) {
-            const card = document.getElementById(`card-${id}`);
-            const scoreText = document.getElementById(`score-${id}`);
-            const statusText = document.getElementById(`status-${id}`);
-            const trendContainer = document.getElementById(`trend-${id}`);
+        // Update History Table (Keep 30)
+        const histBody = document.getElementById('history-body');
+        histBody.insertAdjacentHTML('afterbegin', rowHTML);
+        if(histBody.rows.length > 30) histBody.deleteRow(30);
+    }
 
-            scoreText.innerText = score.toFixed(1);
+    function filterTowers(cat, el) {
+        document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+        el.classList.add('active');
+        document.querySelectorAll('.tower-card').forEach(card => {
+            card.classList.toggle('tower-hidden', cat !== 'all' && !card.classList.contains(`tower-${cat}`));
+        });
+    }
 
-            // Severity Logic (Elastic Standard)
-            card.classList.remove('severity-0', 'severity-25', 'severity-75');
-            statusText.classList.remove('animate-critical');
-            
-            let color = '#94a3b8';
-            if (score >= 75) {
-                card.classList.add('severity-75');
-                statusText.innerText = 'Critical';
-                statusText.classList.add('animate-critical');
-                color = '#ef4444';
-            } else if (score >= 25) {
-                card.classList.add('severity-25');
-                statusText.innerText = 'Warning';
-                statusText.classList.add('text-amber-500');
-                color = '#f59e0b';
-            } else {
-                card.classList.add('severity-0');
-                statusText.innerText = 'Stable';
-                statusText.classList.add('text-slate-400');
-                color = '#10b981';
-            }
+    function showSection(sec) {
+        document.getElementById('live-section').style.display = sec === 'live' ? 'block' : 'none';
+        document.getElementById('history-section').style.display = sec === 'history' ? 'block' : 'none';
+        document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.innerText.toLowerCase().includes(sec)));
+    }
 
-            // Update Chart
-            const chart = charts[id];
-            chart.data.datasets[0].data.shift();
-            chart.data.datasets[0].data.push(score);
-            chart.data.datasets[0].borderColor = color;
-            chart.update('none');
+    function drillDown(towerId) {
+        const tower = TOWERS.find(t => t.id === towerId);
+        document.getElementById('drill-tower-name').innerText = tower.name + " Explorer";
+        document.getElementById('drill-down-container').style.display = 'block';
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }
 
-            // Update Swimlane
-            if (trendContainer.children.length >= 10) trendContainer.removeChild(trendContainer.firstChild);
-            const pill = document.createElement('div');
-            pill.className = `h-2 w-2 rounded-full ${score >= 75 ? 'bg-red-500' : (score >= 25 ? 'bg-amber-500' : 'bg-emerald-400')}`;
-            trendContainer.appendChild(pill);
-        }
+    function closeDrill() { document.getElementById('drill-down-container').style.display = 'none'; }
 
-        // --- INIT ---
-        createTowerCards();
-        setInterval(refreshDashboard, ELASTIC_CONFIG.refreshRate);
-        refreshDashboard();
-
-        // Timer Display
-        let timeLeft = 10;
-        setInterval(() => {
-            timeLeft--;
-            if (timeLeft < 0) timeLeft = 10;
-            document.getElementById('timer').innerText = `${timeLeft}s`;
-        }, 1000);
-
-    </script>
+    init();
+</script>
 </body>
 </html>
