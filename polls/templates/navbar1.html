@@ -83,7 +83,12 @@
                 <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="profileMenu">
                     <li><h6 class="dropdown-header">User Controls</h6></li>
                     <li>
-                        <a class="dropdown-item" href="#">
+                        <a class="dropdown-item" href="{% url 'home' %}">
+                            <i class="bi bi-house me-2"></i> Home
+                        </a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" href="{% url 'user_settings' %}">
                             <i class="bi bi-person-gear me-2"></i> User Settings
                         </a>
                     </li>
