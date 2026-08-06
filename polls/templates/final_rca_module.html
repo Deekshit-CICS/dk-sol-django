@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forensic RCA | Enterprise</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --apple-bg: #f5f5f7;
+            --glass: rgba(255, 255, 255, 0.9);
+            --blue: #0071e3;
+            --green: #28cd41;
+            --text-main: #1d1d1f;
+            --text-sec: #6e6e73;
+            --connector-color: #3a3a3c;
+            --border: rgba(0,0,0,0.08);
+            --panel-width: 420px;
+        }
+
+        body { background: linear-gradient(135deg, #f5f5f7 0%, #ffffff 100%); color: var(--text-main); font-family: -apple-system, sans-serif; padding: 30px; }
+        .navbar { border-bottom: 1px solid rgba(0,0,0,0.05); }
+        h1.page-title { font-size: 1.4rem; font-weight: 700; margin:0; color: var(--text-main); }
+
+        /* make table header sticky */
+        .table-container thead th {
+            position: sticky;
+            top: 0;
+            background: #fff;
+            z-index: 2;
+        }
+
+        /* subtle custom scrollbar */
+        .table-container::-webkit-scrollbar { height:6px; width:6px; }
+        .table-container::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius:3px; }
+
+        .header-section { text-align: left; margin-bottom: 2rem; }
+        .header-section p { margin: 0; }
+        .dashboard-container { max-width: 1250px; margin: auto; position: relative; transition: margin-right 0.4s cubic-bezier(0.4,0,0.2,1); }
+
+        /* Connectors */
+        #flow-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connector { fill: none; stroke: var(--connector-color); stroke-width: 1.5; stroke-dasharray: 5, 5; opacity: 0.3; transition: 0.4s ease; }
+
+        /* Tier Headers */
+        .tier-header { font-size: 0.7rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.1em; margin: 40px 0 20px 0; display: flex; align-items: center; gap: 15px; }
+        .tier-header::after { content: ""; height: 1px; background: var(--border); flex-grow: 1; }
+
+        /* Card System */
+        .apple-card { background: var(--glass); backdrop-filter: blur(20px); border-radius: 20px; border: 1px solid #fff; box-shadow: 0 8px 32px rgba(0,0,0,0.04); z-index: 2; position: relative; transition: 0.3s; cursor: pointer; }
+        .apple-card:hover { box-shadow: 0 12px 48px rgba(0,0,0,0.06); transform: translateY(-2px); }
+        .apple-card.active-node { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue), 0 12px 48px rgba(0,113,227,0.12); }
+        .node-disabled { opacity: 0.4; filter: grayscale(1); cursor: not-allowed; }
+        .node-disabled:hover { transform: none; box-shadow: 0 8px 32px rgba(0,0,0,0.04); }
+
+        /* click affordance */
+        .open-hint { position: absolute; top: 18px; right: 18px; color: var(--text-sec); opacity: 0.5; font-size: 0.9rem; transition: 0.3s; }
+        .apple-card:hover .open-hint { opacity: 1; color: var(--blue); transform: translateX(2px); }
+
+        /* UI Elements */
+        .search-container { position: relative; max-width: 450px; margin-top: 15px; }
+        .search-input { padding-left: 40px; border-radius: 12px; border: 1px solid var(--border); height: 45px; width: 100%; }
+        .label { font-size: 0.62rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; margin-bottom: 2px; }
+        .val { font-size: 0.88rem; font-weight: 500; margin-bottom: 10px; }
+        .ci-item { padding: 10px 14px; border-radius: 12px; cursor: pointer; background: rgba(0,0,0,0.02); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; border: 1.5px solid transparent; font-size: 0.85rem; }
+        .ci-item:hover { background: rgba(0,113,227,0.05); }
+        .ci-item.active { background: white; border-color: var(--blue); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+        /* Animations */
+        .pulse-dot { display: inline-block; width: 8px; height: 8px; background: var(--green); border-radius: 50%; margin-right: 8px; position: relative; }
+        .pulse-dot::after { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--green); border-radius: 50%; animation: pulse-ring 1.5s infinite; }
+        @keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 0.5; } 100% { transform: scale(2.5); opacity: 0; } }
+
+        pre { font-size: 0.72rem; background: #1c1c1e; color: #ff6961; padding: 15px; border-radius: 14px; margin: 0; max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+        .btn-execute { background: var(--blue); color: white; border: none; width: 100%; padding: 12px; border-radius: 12px; font-weight: 600; margin-top: 15px; }
+        .table-container { margin-top: 40px; border-radius: 20px; overflow: hidden; background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+        .table-container tbody tr:hover { background: rgba(0,0,0,0.03); }
+        .table-selected { background-color: rgba(0, 113, 227, 0.08) !important; }
+
+        /* ---------- Right-side detail panel ---------- */
+        .panel-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.18);
+            opacity: 0; pointer-events: none; transition: opacity 0.35s ease; z-index: 90;
+        }
+        .panel-overlay.open { opacity: 1; pointer-events: auto; }
+
+        .side-panel {
+            position: fixed; top: 0; right: calc(-1 * var(--panel-width) - 20px);
+            width: var(--panel-width); max-width: 92vw; height: 100vh;
+            background: #fff; box-shadow: -12px 0 48px rgba(0,0,0,0.12);
+            z-index: 100; transition: right 0.45s cubic-bezier(0.4,0,0.2,1);
+            display: flex; flex-direction: column;
+        }
+        .side-panel.open { right: 0; }
+
+        .panel-head {
+            padding: 24px 26px 18px 26px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+        }
+        .panel-eyebrow { font-size: 0.62rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
+        .panel-title { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; }
+        .panel-close {
+            border: none; background: rgba(0,0,0,0.05); border-radius: 50%;
+            width: 30px; height: 30px; flex: 0 0 30px; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: 0.2s; color: var(--text-main);
+        }
+        .panel-close:hover { background: rgba(0,0,0,0.1); transform: rotate(90deg); }
+
+        .panel-body { padding: 22px 26px 30px 26px; overflow-y: auto; flex: 1; }
+        .panel-body .label { margin-top: 2px; }
+        .panel-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 4px; }
+        .panel-empty { color: var(--text-sec); font-size: 0.9rem; text-align: center; padding: 60px 10px; }
+        .panel-empty i { font-size: 1.6rem; display: block; margin-bottom: 10px; opacity: 0.5; }
+        .panel-chip { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; background: rgba(0,113,227,0.08); color: var(--blue); margin-bottom: 14px; }
+
+        /* ---------- Triage scan overlay ---------- */
+        .triage-overlay {
+            position: fixed; inset: 0; background: rgba(20,20,22,0.45); backdrop-filter: blur(6px);
+            z-index: 200; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .triage-overlay.open { opacity: 1; pointer-events: auto; }
+        .triage-card {
+            background: #fff; border-radius: 26px; padding: 42px 46px 36px 46px; width: 340px;
+            text-align: center; box-shadow: 0 40px 90px rgba(0,0,0,0.3);
+            transform: scale(0.92) translateY(6px); transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+        }
+        .triage-overlay.open .triage-card { transform: scale(1) translateY(0); }
+
+        .scan-wrap { width: 86px; height: 86px; margin: 0 auto 22px; position: relative; }
+        .scan-ring { width: 100%; height: 100%; border-radius: 50%; border: 3px solid rgba(0,113,227,0.12); border-top-color: var(--blue); animation: spin 0.85s linear infinite; }
+        .scan-ring::after { content: ''; position: absolute; inset: 10px; border-radius: 50%; border: 2px solid rgba(0,113,227,0.08); border-bottom-color: var(--blue); animation: spin 1.3s linear infinite reverse; }
+        .scan-icon { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.35rem; color: var(--blue); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .triage-query { font-size: 1.02rem; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 2px; }
+        .triage-steps { margin: 20px 0 2px 0; text-align: left; }
+        .t-step { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; color: var(--text-sec); padding: 6px 2px; opacity: 0.45; transition: opacity 0.3s, color 0.3s; }
+        .t-step i { font-size: 0.95rem; width: 16px; text-align: center; flex: 0 0 16px; }
+        .t-step.done { opacity: 1; color: var(--text-main); }
+        .t-step.done i { color: var(--green); }
+
+        .result-wrap { width: 74px; height: 74px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 18px; font-size: 2rem; color: #fff; animation: pop 0.45s cubic-bezier(0.34,1.56,0.64,1); }
+        .result-wrap.success { background: var(--green); }
+        .result-wrap.fail { background: #ff3b30; }
+        @keyframes pop { 0% { transform: scale(0); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
+        .btn-triage-done { flex: 1; background: var(--text-main); color: #fff; border: none; padding: 11px 16px; border-radius: 12px; font-weight: 600; margin-top: 8px; font-size: 0.85rem; }
+        .btn-triage-secondary { flex: 1; background: rgba(0,0,0,0.06); color: var(--text-main); border: none; padding: 11px 16px; border-radius: 12px; font-weight: 600; font-size: 0.85rem; }
+        .triage-btn-row { display: flex; gap: 10px; margin-top: 4px; }
+        .confirm-icon-wrap { width: 74px; height: 74px; border-radius: 50%; margin: 0 auto 18px; display: flex; align-items: center; justify-content: center; background: rgba(255,159,10,0.12); animation: pop 0.45s cubic-bezier(0.34,1.56,0.64,1); }
+    </style>
+</head>
+<body>
+
+    <!-- top navigation bar -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-4">
+        <div class="container-fluid dashboard-container">
+            <a class="navbar-brand" href="#"><h1 class="page-title">Forensic RCA | Enterprise</h1></a>
+            <div class="d-flex ms-auto" style="max-width:500px; width:100%;">
+                <div class="search-container" style="margin:0; width:100%;">
+                    <i class="bi bi-search" style="position: absolute; left: 15px; top: 12px; color: var(--text-sec);"></i>
+                    <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch()">
+                </div>
+            </div>
+        </div>
+    </nav>
+
+<div class="dashboard-container" id="main-canvas">
+    <svg id="flow-canvas">
+        <path id="line-inc-to-ci" class="connector" /> 
+        <path id="line-chg-to-ci" class="connector" />
+        <path id="line-discovery-to-fix" class="connector" />
+    </svg>
+
+    <div class="header-section mb-4">
+        <h1 class="fw-bold h2 mb-1" style="letter-spacing: -0.04em;">Forensic RCA</h1>
+        <p class="text-secondary small">Enterprise dashboard &amp; troubleshooting</p>
+    </div>
+
+    <div class="tier-header">Layer 01: Triage</div>
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div id="node-inc" class="apple-card p-4" onclick="showIncPanel()">
+                <i class="bi bi-arrow-up-right-square open-hint"></i>
+                <div class="label text-primary">Incident Record</div>
+                <h4 class="fw-bold mb-1" id="d-inc">---</h4>
+                <div class="small text-muted" id="d-desc">Select a record below...</div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div id="node-chg" class="apple-card p-4" onclick="showChgPanel()">
+                <i class="bi bi-arrow-up-right-square open-hint"></i>
+                <div class="label">Linked Change</div>
+                <h4 class="fw-bold mb-1" id="d-chg">---</h4>
+                <div class="small text-muted" id="chg-status-text">Correlation Status</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tier-header">Layer 02: Discovery & Evidence</div>
+    <div class="row g-4" id="discovery-layer">
+        <div class="col-md-5">
+            <div id="node-ci" class="apple-card p-4">
+                <div class="label mb-3">Asset Inventory</div>
+                <div id="ci-list"></div>
+            </div>
+        </div>
+        <div class="col-md-7">
+            <div id="node-log" class="apple-card p-4 border-start border-danger border-4" onclick="showLogPanel()">
+                <i class="bi bi-arrow-up-right-square open-hint"></i>
+                <div class="label text-danger mb-2">Technical Evidence</div>
+                <div id="log-summary" class="small fw-bold mb-2">No CI Selected</div>
+                <pre id="m-log">Awaiting discovery data...</pre>
+            </div>
+        </div>
+    </div>
+
+    <div class="tier-header">Layer 03: Remediate</div>
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div id="node-fix" class="apple-card p-4 border-top border-success border-4" onclick="showFixPanel()">
+                <i class="bi bi-arrow-up-right-square open-hint"></i>
+                <div class="label text-success mb-2">AI Remediation Plan</div>
+                <div style="background: rgba(40,205,65,0.06); border-radius:14px; padding:15px;">
+                    <div class="d-flex align-items-center mb-1">
+                        <span class="pulse-dot"></span>
+                        <span class="label mb-0" style="color:var(--green)">Engine Status: Ready</span>
+                    </div>
+                    <div id="m-fix" class="val small text-muted mb-0">Select asset for recommendation...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-container">
+        <table class="table table-hover mb-0">
+            <thead class="table-light small text-uppercase">
+                <tr><th>App ID</th><th>Incident</th><th>Change</th><th>Priority</th></tr>
+            </thead>
+            <tbody id="masterTable" style="cursor: pointer;"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Right-side detail panel -->
+<div id="panelOverlay" class="panel-overlay" onclick="closePanel()"></div>
+<div id="sidePanel" class="side-panel">
+    <div class="panel-head">
+        <div>
+            <div class="panel-eyebrow" id="panel-eyebrow">Details</div>
+            <div class="panel-title" id="panel-title">—</div>
+        </div>
+        <button class="panel-close" onclick="closePanel()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="panel-body" id="panel-body"></div>
+</div>
+
+<!-- Triage scan overlay (search + Enter) -->
+<div id="triageOverlay" class="triage-overlay">
+    <div class="triage-card">
+        <div id="triageLoading">
+            <div class="scan-wrap">
+                <div class="scan-ring"></div>
+                <div class="scan-icon"><i class="bi bi-radar"></i></div>
+            </div>
+            <div class="label" style="color: var(--blue);">Triage Engine</div>
+            <div class="triage-query" id="triageQueryText">Analyzing —</div>
+            <div class="triage-steps" id="triageSteps">
+                <div class="t-step"><i class="bi bi-circle"></i><span>Fetching incident record</span></div>
+                <div class="t-step"><i class="bi bi-circle"></i><span>Correlating change &amp; assets</span></div>
+                <div class="t-step"><i class="bi bi-circle"></i><span>Validating triage state</span></div>
+            </div>
+        </div>
+        <div id="triageResult" style="display:none;">
+            <div class="result-wrap" id="resultIconWrap"><i class="bi" id="resultIcon"></i></div>
+            <div class="fw-bold mb-1" id="resultTitle" style="font-size:1.15rem;">Triage Successful</div>
+            <div class="text-muted small mb-2" id="resultDetail">Incident correlated successfully.</div>
+            <button class="btn-triage-done" style="width:100%;" onclick="closeTriage()">Done</button>
+        </div>
+        <div id="triageConfirm" style="display:none;">
+            <div class="confirm-icon-wrap"><i class="bi bi-arrow-repeat" style="font-size:1.6rem; color:#ff9f0a;"></i></div>
+            <div class="fw-bold mb-1" style="font-size:1.1rem;">Already Triaged</div>
+            <div class="text-muted small mb-3">Incident <b id="confirmIncidentId">—</b> has already been triaged. Redo the triage?</div>
+            <div class="triage-btn-row">
+                <button class="btn-triage-secondary" onclick="keepTriageSuccessful()">Keep Successful</button>
+                <button class="btn-triage-done" style="margin-top:0;" onclick="confirmRedoTriage()">Redo Triage</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const dataRepo = [
+        {
+            app: 'PAY-GW-01', id: 'INC-8821', desc: 'DB Query Timeout', chg: 'CHG-5501',
+            group: 'DBA-Tier-1', prio: 'P1', state: 'Work in Progress', impact: 'High Availability',
+            risk: 'High', window: '20-Jan 02:00 UTC', cab: 'Approved (CAB-04)', triaged: false,
+            cis: [{ name: 'SQL-PROD-01', crit: 'Tier 0', patch: '15-Jan-2026', log: 'ERR: Locked Process 99\nWARN: I/O Wait > 500ms', fix: 'Kill blocking PID 99 and re-index metadata.', action: 'Kill PID' }]
+        },
+        {
+            app: 'AUTH-SERVER', id: 'INC-4402', desc: 'Sudden OOM Crash', chg: null,
+            group: 'Platform-SRE', prio: 'P2', state: 'New', impact: 'Internal Auth',
+            risk: 'N/A', window: 'N/A', cab: 'N/A', triaged: false,
+            cis: [{ name: 'AUTH-POD-X', crit: 'Tier 1', patch: '01-Jan-2026', log: 'CRIT: OOM Error at 0x4f32\nFATAL: Memory leak in worker.js', fix: 'Scale horizontal replicas and increase memory to 2Gi.', action: 'Scale Replicas' }]
+        }
+    ];
+
+    let pendingTriageMatch = null;
+
+    let currentInc = null;
+    let currentCi = null;
+
+    function handleSearch() {
+        const q = document.getElementById('masterSearch').value.toLowerCase();
+        const filtered = dataRepo.filter(i => i.app.toLowerCase().includes(q) || i.id.toLowerCase().includes(q) || (i.chg && i.chg.toLowerCase().includes(q)));
+        renderTable(filtered);
+    }
+
+    function renderTable(list) {
+        const body = document.getElementById('masterTable');
+        body.innerHTML = '';
+        list.forEach((inc) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td><b>${inc.app}</b></td><td>${inc.id}</td><td>${inc.chg || '<span class="text-muted">N/A</span>'}</td><td>${inc.prio}</td>`;
+            tr.onclick = () => loadInc(tr, inc);
+            body.appendChild(tr);
+        });
+        if(list.length) loadInc(null, list[0]);
+    }
+
+    function loadInc(row, inc) {
+        document.querySelectorAll('tr').forEach(r => r.classList.remove('table-selected'));
+        if(row) row.classList.add('table-selected');
+
+        currentInc = inc;
+        currentCi = null;
+
+        document.getElementById('d-inc').innerText = inc.id;
+        document.getElementById('d-desc').innerText = inc.desc;
+
+        const chgCard = document.getElementById('node-chg');
+        document.getElementById('d-chg').innerText = inc.chg || "N/A";
+
+        if(!inc.chg) chgCard.classList.add('node-disabled');
+        else chgCard.classList.remove('node-disabled');
+
+        // reset evidence / remediation preview
+        document.getElementById('m-log').innerText = 'Awaiting discovery data...';
+        document.getElementById('log-summary').innerText = 'No CI Selected';
+        document.getElementById('m-fix').innerText = 'Select asset for recommendation...';
+
+        const list = document.getElementById('ci-list');
+        list.innerHTML = '';
+        inc.cis.forEach(ci => {
+            const d = document.createElement('div');
+            d.className = 'ci-item';
+            d.innerHTML = `<span><b>${ci.name}</b></span> <i class="bi bi-chevron-right small text-muted"></i>`;
+            d.onclick = (e) => {
+                e.stopPropagation();
+                document.querySelectorAll('.ci-item').forEach(i => i.classList.remove('active'));
+                d.classList.add('active');
+                currentCi = ci;
+                document.getElementById('m-log').innerText = ci.log;
+                document.getElementById('m-fix').innerText = ci.fix;
+                document.getElementById('log-summary').innerText = "Logs for " + ci.name;
+                showCiPanel(ci);
+            };
+            list.appendChild(d);
+        });
+
+        closePanel();
+        setTimeout(draw, 100);
+    }
+
+    /* ---------- Detail panel logic ---------- */
+
+    function openPanel(eyebrow, title, bodyHtml) {
+        document.getElementById('panel-eyebrow').innerText = eyebrow;
+        document.getElementById('panel-title').innerText = title;
+        document.getElementById('panel-body').innerHTML = bodyHtml;
+        document.getElementById('sidePanel').classList.add('open');
+        document.getElementById('panelOverlay').classList.add('open');
+    }
+
+    function closePanel() {
+        document.getElementById('sidePanel').classList.remove('open');
+        document.getElementById('panelOverlay').classList.remove('open');
+    }
+
+    function showIncPanel() {
+        if(!currentInc) return;
+        const inc = currentInc;
+        openPanel('Incident Record', inc.id, `
+            <div class="panel-chip">${inc.state}</div>
+            <div class="label">Description</div>
+            <div class="val">${inc.desc}</div>
+            <div class="panel-row">
+                <div><div class="label">Priority</div><div class="val">${inc.prio}</div></div>
+                <div><div class="label">State</div><div class="val">${inc.state}</div></div>
+            </div>
+            <div class="panel-row">
+                <div><div class="label">Assignment Group</div><div class="val">${inc.group}</div></div>
+                <div><div class="label">Service Impact</div><div class="val">${inc.impact}</div></div>
+            </div>
+            <div class="panel-row">
+                <div><div class="label">App ID</div><div class="val">${inc.app}</div></div>
+                <div><div class="label">Linked Change</div><div class="val">${inc.chg || 'None'}</div></div>
+            </div>
+        `);
+    }
+
+    function showChgPanel() {
+        if(!currentInc) return;
+        const inc = currentInc;
+        if(!inc.chg) {
+            openPanel('Linked Change', 'No Change Linked', `
+                <div class="panel-empty">
+                    <i class="bi bi-link-45deg"></i>
+                    This incident has no correlated change record.
+                </div>
+            `);
+            return;
+        }
+        openPanel('Linked Change', inc.chg, `
+            <div class="panel-chip">${inc.cab}</div>
+            <div class="panel-row">
+                <div><div class="label">Risk Assessment</div><div class="val">${inc.risk}</div></div>
+                <div><div class="label">Implementation Window</div><div class="val">${inc.window}</div></div>
+            </div>
+            <div class="label">CAB Approval</div>
+            <div class="val">${inc.cab}</div>
+            <div class="label">Related Incident</div>
+            <div class="val">${inc.id}</div>
+        `);
+    }
+
+    function showCiPanel(ci) {
+        ci = ci || currentCi;
+        if(!ci) return;
+        openPanel('Asset Inventory', ci.name, `
+            <div class="panel-row">
+                <div><div class="label">Criticality</div><div class="val">${ci.crit}</div></div>
+                <div><div class="label">Last Patch</div><div class="val">${ci.patch}</div></div>
+            </div>
+            <div class="label">Latest Evidence</div>
+            <pre style="max-height:180px;">${ci.log}</pre>
+            <div class="label">Recommended Action</div>
+            <div class="val">${ci.fix}</div>
+        `);
+    }
+
+    function showLogPanel() {
+        if(!currentCi) {
+            openPanel('Technical Evidence', 'No Asset Selected', `
+                <div class="panel-empty">
+                    <i class="bi bi-terminal"></i>
+                    Select an asset from the inventory list to view its evidence.
+                </div>
+            `);
+            return;
+        }
+        const ci = currentCi;
+        openPanel('Technical Evidence', ci.name, `
+            <div class="label">Raw Log Output</div>
+            <pre>${ci.log}</pre>
+            <div class="label mt-3">Criticality</div>
+            <div class="val">${ci.crit}</div>
+        `);
+    }
+
+    function showFixPanel() {
+        if(!currentCi) {
+            openPanel('AI Remediation', 'No Asset Selected', `
+                <div class="panel-empty">
+                    <i class="bi bi-cpu"></i>
+                    Select an asset from the inventory list to generate a recommendation.
+                </div>
+            `);
+            return;
+        }
+        const ci = currentCi;
+        openPanel('AI Remediation Plan', ci.action, `
+            <div class="panel-chip">Confidence 94%</div>
+            <div class="label">Target Asset</div>
+            <div class="val">${ci.name}</div>
+            <div class="label">Recommendation</div>
+            <div class="val">${ci.fix}</div>
+            <button id="exec-btn" class="btn-execute" onclick="execute(this)">Execute: ${ci.action}</button>
+        `);
+    }
+
+    function execute(btn) {
+        btn.innerText = "Applying Fix...";
+        setTimeout(() => { btn.innerText = "Mitigation Successful"; btn.style.backgroundColor = "var(--green)"; }, 1500);
+    }
+
+    /* ---------- Triage scan on Enter ---------- */
+
+    document.getElementById('masterSearch').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            runTriage(this.value.trim());
+        }
+    });
+
+    document.getElementById('triageOverlay').addEventListener('click', function(e) {
+        if (e.target.id !== 'triageOverlay') return;
+        if (document.getElementById('triageResult').style.display !== 'none') closeTriage();
+    });
+
+    let triageStepTimer = null;
+    let triageFinishTimer = null;
+
+    function runTriage(query) {
+        if (!query) return;
+        const match = dataRepo.find(i => i.id.toLowerCase() === query.toLowerCase());
+
+        if (match && match.triaged) {
+            showTriageConfirm(match);
+            return;
+        }
+        startTriageScan(match, query);
+    }
+
+    function startTriageScan(match, query) {
+        openTriageLoading(query);
+
+        const steps = document.querySelectorAll('#triageSteps .t-step');
+        let idx = 0;
+        clearInterval(triageStepTimer);
+        clearTimeout(triageFinishTimer);
+        triageStepTimer = setInterval(() => {
+            if (steps[idx]) {
+                steps[idx].classList.add('done');
+                steps[idx].querySelector('i').className = 'bi bi-check-circle-fill';
+            }
+            idx++;
+            if (idx >= steps.length) clearInterval(triageStepTimer);
+        }, 550);
+
+        triageFinishTimer = setTimeout(() => {
+            clearInterval(triageStepTimer);
+            steps.forEach(s => { s.classList.add('done'); s.querySelector('i').className = 'bi bi-check-circle-fill'; });
+            setTimeout(() => {
+                if (match) match.triaged = true;
+                showTriageResult(!!match, match, query);
+            }, 250);
+        }, 2000);
+    }
+
+    function showTriageConfirm(match) {
+        pendingTriageMatch = match;
+        document.getElementById('triageLoading').style.display = 'none';
+        document.getElementById('triageResult').style.display = 'none';
+        document.getElementById('triageConfirm').style.display = 'block';
+        document.getElementById('confirmIncidentId').innerText = match.id;
+        document.getElementById('triageOverlay').classList.add('open');
+    }
+
+    function confirmRedoTriage() {
+        const match = pendingTriageMatch;
+        document.getElementById('triageConfirm').style.display = 'none';
+        startTriageScan(match, match.id);
+    }
+
+    function keepTriageSuccessful() {
+        const match = pendingTriageMatch;
+        document.getElementById('triageConfirm').style.display = 'none';
+        showTriageResult(true, match, match.id, true);
+    }
+
+    function openTriageLoading(query) {
+        document.getElementById('triageQueryText').innerText = 'Analyzing ' + query;
+        document.getElementById('triageConfirm').style.display = 'none';
+        document.getElementById('triageLoading').style.display = 'block';
+        document.getElementById('triageResult').style.display = 'none';
+        document.querySelectorAll('#triageSteps .t-step').forEach(s => {
+            s.classList.remove('done');
+            s.querySelector('i').className = 'bi bi-circle';
+        });
+        document.getElementById('triageOverlay').classList.add('open');
+    }
+
+    function showTriageResult(success, match, query, skippedRerun) {
+        document.getElementById('triageLoading').style.display = 'none';
+        document.getElementById('triageConfirm').style.display = 'none';
+        document.getElementById('triageResult').style.display = 'block';
+
+        const iconWrap = document.getElementById('resultIconWrap');
+        const icon = document.getElementById('resultIcon');
+        const title = document.getElementById('resultTitle');
+        const detail = document.getElementById('resultDetail');
+
+        iconWrap.className = 'result-wrap ' + (success ? 'success' : 'fail');
+        icon.className = 'bi ' + (success ? 'bi-check-lg' : 'bi-x-lg');
+
+        if (success) {
+            title.innerText = 'Triage Successful';
+            detail.innerText = skippedRerun
+                ? `Incident ${match.id} (${match.app}) was already triaged — kept as successful.`
+                : `Incident ${match.id} (${match.app}) correlated successfully.`;
+            selectIncidentById(match.id);
+        } else {
+            title.innerText = 'Triage Failed';
+            detail.innerText = `No incident record found for "${query}".`;
+        }
+    }
+
+    function selectIncidentById(id) {
+        renderTable(dataRepo);
+        const rows = document.querySelectorAll('#masterTable tr');
+        rows.forEach(r => {
+            if (r.children[1] && r.children[1].innerText === id) {
+                loadInc(r, dataRepo.find(i => i.id === id));
+            }
+        });
+    }
+
+    function closeTriage() {
+        document.getElementById('triageOverlay').classList.remove('open');
+    }
+
+    function draw() {
+        const cont = document.getElementById('main-canvas').getBoundingClientRect();
+        const box = (id) => {
+            const r = document.getElementById(id).getBoundingClientRect();
+            return { cx: r.left - cont.left + (r.width / 2), y: r.top - cont.top, h: r.height };
+        };
+        const inc = box('node-inc'), chg = box('node-chg'), ci_layer = box('discovery-layer'), fix = box('node-fix');
+
+        if(document.getElementById('node-chg').classList.contains('node-disabled')) {
+            document.getElementById('line-inc-to-ci').setAttribute('d', `M ${inc.cx} ${inc.y + inc.h} C ${inc.cx} ${ci_layer.y - 40}, ${ci_layer.cx} ${ci_layer.y - 40}, ${ci_layer.cx} ${ci_layer.y}`);
+            document.getElementById('line-chg-to-ci').setAttribute('d', '');
+        } else {
+            document.getElementById('line-inc-to-ci').setAttribute('d', `M ${inc.cx} ${inc.y + inc.h} C ${inc.cx} ${ci_layer.y - 20}, ${ci_layer.cx - 100} ${ci_layer.y - 20}, ${ci_layer.cx - 100} ${ci_layer.y}`);
+            document.getElementById('line-chg-to-ci').setAttribute('d', `M ${chg.cx} ${chg.y + chg.h} C ${chg.cx} ${ci_layer.y - 20}, ${ci_layer.cx + 100} ${ci_layer.y - 20}, ${ci_layer.cx + 100} ${ci_layer.y}`);
+        }
+        document.getElementById('line-discovery-to-fix').setAttribute('d', `M ${ci_layer.cx} ${ci_layer.y + ci_layer.h} C ${ci_layer.cx} ${fix.y - 40}, ${fix.cx} ${fix.y - 40}, ${fix.cx} ${fix.y}`);
+    }
+
+    window.onload = () => renderTable(dataRepo);
+    window.onresize = draw;
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closePanel();
+            if (document.getElementById('triageResult').style.display !== 'none') closeTriage();
+        }
+    });
+</script>
+</body>
+</html>
