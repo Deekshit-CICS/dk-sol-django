@@ -161,7 +161,7 @@
             <div class="d-flex ms-auto" style="max-width:500px; width:100%;">
                 <div class="search-container" style="margin:0; width:100%;">
                     <i class="bi bi-search" style="position: absolute; left: 15px; top: 12px; color: var(--text-sec);"></i>
-                    <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch()">
+                    <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch(event)">
                 </div>
             </div>
         </div>
@@ -320,7 +320,8 @@
     let currentInc = null;
     let currentCi = null;
 
-    function handleSearch() {
+    function handleSearch(e) {
+        if (e && e.key === 'Enter') return; // Enter is handled exclusively by runTriage() -> the Django API
         const q = document.getElementById('masterSearch').value.toLowerCase();
         const filtered = dataRepo.filter(i => i.app.toLowerCase().includes(q) || i.id.toLowerCase().includes(q) || (i.chg && i.chg.toLowerCase().includes(q)));
         renderTable(filtered);
