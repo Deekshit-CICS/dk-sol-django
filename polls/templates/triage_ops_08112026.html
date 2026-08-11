@@ -342,7 +342,9 @@
     /**
      * Selecting a row fires ONE API call to the combined details endpoint;
      * the response is expected to carry everything needed for every card
-     * (incident, change, remediation, assets, evidence) in one JSON payload.
+     * (incident, change, remediation, assets) in one JSON payload.
+     * Technical Evidence is asset-specific, so it stays empty until an
+     * asset is picked from the inventory — see selectAsset() below.
      */
     async function selectIncidentRow(row, incId) {
         document.querySelectorAll('tr').forEach(r => r.classList.remove('table-selected'));
@@ -351,7 +353,7 @@
 
         let inc = dataRepo.find(i => i.id === incId);
         if (!inc) {
-            inc = { id: incId, app: 'N/A', desc: '', chg: null, group: 'N/A', prio: 'N/A', state: 'N/A', impact: 'N/A', risk: 'N/A', window: 'N/A', cab: 'N/A', cis: [], fix: '', action: '', confidence: null, log: '' };
+            inc = { id: incId, app: 'N/A', desc: '', chg: null, group: 'N/A', prio: 'N/A', state: 'N/A', impact: 'N/A', risk: 'N/A', window: 'N/A', cab: 'N/A', cis: [], fix: '', action: '', confidence: null, evidenceByAsset: {} };
             dataRepo.push(inc);
         }
         currentInc = inc;
@@ -362,8 +364,8 @@
         document.getElementById('d-chg').innerText = '…';
         document.getElementById('chg-status-text').innerText = 'Loading…';
         document.getElementById('ci-list').innerHTML = '<div class="text-muted small">Loading asset inventory…</div>';
-        document.getElementById('log-summary').innerText = 'Loading evidence…';
-        document.getElementById('m-log').innerText = 'Fetching technical evidence…';
+        document.getElementById('log-summary').innerText = 'No Asset Selected';
+        document.getElementById('m-log').innerText = 'Select an asset from the inventory to view its evidence.';
         document.getElementById('m-fix').innerText = 'Generating AI recommendation…';
 
         setTimeout(draw, 100);
@@ -378,8 +380,6 @@
             document.getElementById('d-desc').innerText = 'Failed to load incident details.';
             document.getElementById('chg-status-text').innerText = 'Failed to load change details.';
             document.getElementById('ci-list').innerHTML = '<div class="text-muted small">Failed to load asset inventory.</div>';
-            document.getElementById('m-log').innerText = 'Failed to load technical evidence.';
-            document.getElementById('log-summary').innerText = 'Error loading evidence';
             document.getElementById('m-fix').innerText = 'Failed to generate recommendation.';
         }
     }
@@ -394,7 +394,6 @@
         const incidentPart    = data.incident || data;
         const changePart      = data.change || data;
         const remediationPart = data.remediation || data.ai_recommendation || data.fredai || {};
-        const evidencePart    = data.evidence || data.technical_evidence || {};
         const assetsRaw       = data.assets || data.cis || data.configuration_items ||
                                  (data.result || data.results) || [];
 
@@ -425,21 +424,36 @@
         inc.confidence = remediationPart.confidence != null ? remediationPart.confidence : null;
         document.getElementById('m-fix').innerText = inc.fix;
 
-        // Asset Inventory (ServiceNow)
+        // Asset Inventory (ServiceNow) — evidence, if embedded per-asset in this
+        // same response, is cached straight onto the CI object (item.log /
+        // item.evidence / item.technical_evidence). Otherwise it's lazy-loaded
+        // per asset when clicked — see selectAsset().
         inc.cis = assetsRaw.map(item => ({
+            id: item.sys_id || item.asset_id || item.id || item.name || item.ci_name,
             name: item.name || item.ci_name || item.display_value || item.sys_id || 'Unknown Asset',
             crit: item.criticality || item.crit || 'N/A',
-            patch: item.last_patch || item.patch || item.sys_updated_on || 'N/A'
+            patch: item.last_patch || item.patch || item.sys_updated_on || 'N/A',
+            log: item.log || item.evidence || item.technical_evidence || null
         }));
+
+        // Optional: a top-level `evidence` map/array keyed by asset, if your
+        // backend returns per-asset evidence separately from `assets`.
+        // Handles { "<assetId>": "log text" } or [{ asset_id/asset/ci, log/evidence }].
+        inc.evidenceByAsset = {};
+        const evidenceRaw = data.evidence || data.technical_evidence;
+        if (Array.isArray(evidenceRaw)) {
+            evidenceRaw.forEach(e => {
+                const key = (e.asset_id || e.asset || e.ci || e.name || '').toString().toLowerCase();
+                if (key) inc.evidenceByAsset[key] = e.log || e.evidence || '';
+            });
+        } else if (evidenceRaw && typeof evidenceRaw === 'object') {
+            Object.keys(evidenceRaw).forEach(key => {
+                const val = evidenceRaw[key];
+                inc.evidenceByAsset[key.toLowerCase()] = typeof val === 'string' ? val : (val.log || val.evidence || '');
+            });
+        }
+
         renderCiList(inc);
-
-        // Technical Evidence
-        inc.log = evidencePart.log || evidencePart.evidence ||
-                  (Array.isArray(evidencePart.logs) ? evidencePart.logs.join('\n') : null) ||
-                  'No evidence returned.';
-        document.getElementById('m-log').innerText = inc.log;
-        document.getElementById('log-summary').innerText = 'Evidence for ' + inc.id;
-
         setTimeout(draw, 50);
     }
 
@@ -458,11 +472,61 @@
                 e.stopPropagation();
                 document.querySelectorAll('.ci-item').forEach(i => i.classList.remove('active'));
                 d.classList.add('active');
-                currentCi = ci;
-                showCiPanel(ci);
+                selectAsset(ci);
             };
             list.appendChild(d);
         });
+    }
+
+    /**
+     * Called when an asset is clicked in the Asset Inventory list.
+     * Technical Evidence is looked up in this order so a given asset never
+     * pays for a network round trip it doesn't need:
+     *   1. Evidence already embedded on the asset itself (from the combined
+     *      /details/ response, e.g. assets[].log)
+     *   2. A per-asset entry in the incident-level evidence map/array
+     *   3. A lazy fetch to a dedicated per-asset evidence endpoint
+     */
+    async function selectAsset(ci) {
+        currentCi = ci;
+        showCiPanel(ci);
+        await loadAssetEvidence(ci);
+    }
+
+    async function loadAssetEvidence(ci) {
+        document.getElementById('log-summary').innerText = 'Loading evidence for ' + ci.name + '…';
+        document.getElementById('m-log').innerText = 'Fetching technical evidence…';
+
+        if (ci.log) {
+            renderAssetEvidence(ci);
+            return;
+        }
+
+        const key = (ci.id || ci.name || '').toString().toLowerCase();
+        if (currentInc && currentInc.evidenceByAsset && currentInc.evidenceByAsset[key]) {
+            ci.log = currentInc.evidenceByAsset[key];
+            renderAssetEvidence(ci);
+            return;
+        }
+
+        try {
+            const data = await fetchAssetEvidence(currentInc.id, ci.id || ci.name);
+            ci.log = data.log || data.evidence ||
+                     (Array.isArray(data.logs) ? data.logs.join('\n') : null) ||
+                     'No evidence returned for this asset.';
+            if (currentCi !== ci) return; // a different asset was clicked before this resolved
+            renderAssetEvidence(ci);
+        } catch (err) {
+            console.error('asset evidence load failed', err);
+            if (currentCi !== ci) return;
+            document.getElementById('log-summary').innerText = 'Error loading evidence';
+            document.getElementById('m-log').innerText = 'Failed to load technical evidence for ' + ci.name + '.';
+        }
+    }
+
+    function renderAssetEvidence(ci) {
+        document.getElementById('log-summary').innerText = 'Evidence for ' + ci.name;
+        document.getElementById('m-log').innerText = ci.log;
     }
 
     /* ---------- Detail panel logic ---------- */
@@ -545,19 +609,19 @@
     }
 
     function showLogPanel() {
-        if(!currentInc || !currentInc.log) {
-            openPanel('Technical Evidence', 'No Evidence Yet', `
+        if(!currentCi || !currentCi.log) {
+            openPanel('Technical Evidence', 'No Asset Selected', `
                 <div class="panel-empty">
                     <i class="bi bi-terminal"></i>
-                    Select an incident from the table to load its technical evidence.
+                    Select an asset from the inventory list to view its evidence.
                 </div>
             `);
             return;
         }
-        const inc = currentInc;
-        openPanel('Technical Evidence', inc.id, `
+        const ci = currentCi;
+        openPanel('Technical Evidence', ci.name, `
             <div class="label">Raw Log Output</div>
-            <pre>${inc.log}</pre>
+            <pre>${ci.log}</pre>
         `);
     }
 
@@ -624,11 +688,22 @@
                  change:      { change_number, risk, implementation_window,
                                  cab_approval, ... },
                  remediation: { fix / recommendation, action, confidence },
-                 assets:      [ { name, criticality, last_patch, ... } ],  // ServiceNow CIs
-                 evidence:    { log }  or  { logs: [...] }
+                 assets:      [ { name, criticality, last_patch,
+                                   log (optional, per-asset evidence) } ],  // ServiceNow CIs
+                 evidence:    (optional) a per-asset map/array, e.g.
+                                 { "<asset_id>": "log text", ... }  or
+                                 [ { asset_id, log }, ... ]
                }
                A flat (non-nested) response is also handled — each section
                falls back to reading fields straight off the root object.
+               Technical Evidence is asset-specific (an incident can have
+               multiple CIs/assets), so it's NOT auto-populated on row
+               select — it only fills in once an asset is clicked.
+
+       GET  {API_BASE}/api/triage/evidence/?incident_number=<id>&asset_id=<assetId>
+            -> Per-asset evidence, lazy-fetched only when a clicked asset has
+               no evidence already embedded in DETAILS_URL's response.
+               Assumed { log } or { logs: [...] }.
 
        Adjust API_BASE, the STATUS_* constants, DETAILS_URL, its HTTP method,
        and the fetch options (auth headers / CSRF) to match your backend.
@@ -642,6 +717,12 @@
 
     const DETAILS_URL = (id) => `${API_BASE}/api/triage/details/?incident_number=${encodeURIComponent(id)}`;
 
+    // Lazy-loaded only when an asset is clicked and no evidence for it was
+    // already embedded in the DETAILS_URL response (assets[].log) or in a
+    // top-level evidence map — see applyIncidentDetails() / loadAssetEvidence().
+    const ASSET_EVIDENCE_URL = (incId, assetId) =>
+        `${API_BASE}/api/triage/evidence/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}`;
+
     function getCookie(name) {
         const match = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
         return match ? decodeURIComponent(match.pop()) : '';
@@ -652,6 +733,12 @@
     async function fetchIncidentDetails(id) {
         const res = await fetch(DETAILS_URL(id), { credentials: 'same-origin' });
         if (!res.ok) throw new Error(`Details fetch failed (HTTP ${res.status})`);
+        return res.json();
+    }
+
+    async function fetchAssetEvidence(incId, assetId) {
+        const res = await fetch(ASSET_EVIDENCE_URL(incId, assetId), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`Evidence fetch failed (HTTP ${res.status})`);
         return res.json();
     }
 
