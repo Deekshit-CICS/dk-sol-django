@@ -89,10 +89,11 @@
             position: fixed; top: 0; right: calc(-1 * var(--panel-width) - 20px);
             width: var(--panel-width); max-width: 92vw; height: 100vh;
             background: #fff; box-shadow: -12px 0 48px rgba(0,0,0,0.12);
-            z-index: 100; transition: right 0.45s cubic-bezier(0.4,0,0.2,1);
+            z-index: 100; transition: right 0.45s cubic-bezier(0.4,0,0.2,1), width 0.35s cubic-bezier(0.4,0,0.2,1);
             display: flex; flex-direction: column;
         }
         .side-panel.open { right: 0; }
+        .side-panel.expanded { width: min(920px, 94vw); }
 
         .panel-head {
             padding: 24px 26px 18px 26px; border-bottom: 1px solid var(--border);
@@ -100,12 +101,14 @@
         }
         .panel-eyebrow { font-size: 0.62rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
         .panel-title { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; }
+        .panel-head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
         .panel-close {
             border: none; background: rgba(0,0,0,0.05); border-radius: 50%;
             width: 30px; height: 30px; flex: 0 0 30px; display: flex; align-items: center; justify-content: center;
             cursor: pointer; transition: 0.2s; color: var(--text-main);
         }
         .panel-close:hover { background: rgba(0,0,0,0.1); transform: rotate(90deg); }
+        .panel-expand:hover { background: rgba(0,0,0,0.1); transform: none; }
 
         .panel-body { padding: 22px 26px 30px 26px; overflow-y: auto; flex: 1; }
         .panel-body .label { margin-top: 2px; }
@@ -252,7 +255,12 @@
             <div class="panel-eyebrow" id="panel-eyebrow">Details</div>
             <div class="panel-title" id="panel-title">—</div>
         </div>
-        <button class="panel-close" onclick="closePanel()"><i class="bi bi-x-lg"></i></button>
+        <div class="panel-head-actions">
+            <button class="panel-close panel-expand" id="panel-expand-btn" onclick="togglePanelExpand()" title="Expand panel">
+                <i class="bi bi-arrows-angle-expand"></i>
+            </button>
+            <button class="panel-close" onclick="closePanel()"><i class="bi bi-x-lg"></i></button>
+        </div>
     </div>
     <div class="panel-body" id="panel-body"></div>
 </div>
@@ -580,6 +588,16 @@
     function closePanel() {
         document.getElementById('sidePanel').classList.remove('open');
         document.getElementById('panelOverlay').classList.remove('open');
+    }
+
+    function togglePanelExpand() {
+        const panel = document.getElementById('sidePanel');
+        const btn = document.getElementById('panel-expand-btn');
+        const expanded = panel.classList.toggle('expanded');
+        btn.innerHTML = expanded
+            ? '<i class="bi bi-arrows-angle-contract"></i>'
+            : '<i class="bi bi-arrows-angle-expand"></i>';
+        btn.title = expanded ? 'Collapse panel' : 'Expand panel';
     }
 
     function showIncPanel() {
