@@ -1,1 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ops Console — Incident Copilot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --navy-950: #0b1120;
+            --navy-900: #0f1729;
+            --slate-50: #f8fafc;
+            --slate-100: #f1f5f9;
+            --slate-200: #e2e8f0;
+            --slate-300: #cbd5e1;
+            --slate-400: #94a3b8;
+            --slate-500: #64748b;
+            --slate-600: #475569;
+            --slate-900: #0f172a;
+            --indigo: #4f46e5;
+            --indigo-light: #eef2ff;
+            --red: #b91c1c;
+            --red-bg: #fef2f2;
+            --amber: #b45309;
+            --amber-bg: #fffbeb;
+            --green: #15803d;
+            --green-bg: #f0fdf4;
+            --blue: #1d4ed8;
+            --blue-bg: #eff6ff;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+        }
 
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            font-family: var(--font-sans);
+            color: var(--slate-900);
+            background: var(--slate-50);
+            font-size: 14px;
+        }
+
+        /* ============ SIDEBAR ============ */
+        .nav-sidebar {
+            width: 232px;
+            background: var(--navy-950);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            color: var(--slate-300);
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 20px 20px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .nav-brand-mark {
+            width: 28px; height: 28px;
+            border-radius: 7px;
+            background: linear-gradient(135deg, var(--indigo), #7c3aed);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        .nav-brand-mark svg { width: 16px; height: 16px; }
+        .nav-brand-text { font-size: 13.5px; font-weight: 600; color: #fff; line-height: 1.3; }
+        .nav-brand-sub { font-size: 10.5px; color: var(--slate-500); }
+
+        .nav-section {
+            padding: 16px 12px 4px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: var(--slate-500);
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            margin: 1px 8px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            color: var(--slate-300);
+        }
+        .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.75; }
+        .nav-item:hover { background: rgba(255,255,255,0.04); }
+        .nav-item.active { background: rgba(79,70,229,0.18); color: #fff; }
+        .nav-item.active svg { opacity: 1; }
+
+        .nav-spacer { flex: 1; }
+
+        /* Connector status panel */
+        .connector-panel {
+            margin: 8px 12px 16px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            padding-top: 14px;
+        }
+        .connector-panel-title {
+            font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+            text-transform: uppercase; color: var(--slate-500);
+            padding: 0 8px 8px;
+        }
+        .connector-row {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 6px 8px;
+            border-radius: 6px;
+            font-size: 12.5px;
+            cursor: pointer;
+        }
+        .connector-row:hover { background: rgba(255,255,255,0.04); }
+        .connector-icon {
+            width: 20px; height: 20px;
+            border-radius: 5px;
+            background: rgba(255,255,255,0.06);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        .connector-icon img { width: 12px; height: 12px; }
+        .connector-row.inactive .connector-icon img { filter: grayscale(100%); opacity: 0.35; }
+        .connector-row.inactive { color: var(--slate-500); }
+        .connector-name { flex: 1; }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+        .connector-row.inactive .status-dot { background: #475569; }
+
+        .nav-footer {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 16px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+        }
+        .avatar {
+            width: 26px; height: 26px; border-radius: 50%;
+            background: var(--indigo); color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700; flex-shrink: 0;
+        }
+        .nav-footer-name { font-size: 12.5px; font-weight: 600; color: #fff; }
+        .nav-footer-role { font-size: 10.5px; color: var(--slate-500); }
+
+        /* ============ MAIN ============ */
+        .main-workspace { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+        .top-bar {
+            height: 56px;
+            padding: 0 28px;
+            border-bottom: 1px solid var(--slate-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #fff;
+            flex-shrink: 0;
+        }
+        .breadcrumb { font-size: 13px; color: var(--slate-500); display: flex; align-items: center; gap: 6px; }
+        .breadcrumb strong { color: var(--slate-900); font-weight: 600; }
+        .env-badge {
+            font-size: 11px; font-weight: 700; padding: 3px 9px;
+            border-radius: 4px; background: var(--green-bg); color: var(--green);
+            border: 1px solid #bbf7d0; margin-left: 10px;
+        }
+
+        .top-bar-right { display: flex; align-items: center; gap: 14px; }
+        .route-indicator {
+            display: flex; align-items: center; gap: 7px;
+            font-size: 12px; font-weight: 600;
+            padding: 6px 12px; border-radius: 6px;
+            border: 1px solid var(--slate-200);
+        }
+        .route-indicator.mcp { color: var(--blue); background: var(--blue-bg); border-color: #bfdbfe; }
+        .route-indicator.langgraph { color: var(--indigo); background: var(--indigo-light); border-color: #c7d2fe; }
+        .route-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+        .icon-btn {
+            width: 32px; height: 32px; border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            border: 1px solid var(--slate-200); background: #fff; cursor: pointer;
+        }
+        .icon-btn svg { width: 15px; height: 15px; color: var(--slate-500); }
+
+        .chat-view { flex: 1; padding: 28px 8%; overflow-y: auto; }
+        .exchange { margin-bottom: 32px; max-width: 640px; }
+
+        .msg-row { display: flex; margin-bottom: 4px; }
+        .msg-row.user { justify-content: flex-end; }
+        .bubble-user {
+            background: var(--navy-900); color: #fff;
+            border-radius: 10px 10px 2px 10px;
+            padding: 10px 15px; font-size: 13.5px; max-width: 80%;
+        }
+        .msg-meta { font-size: 11px; color: var(--slate-400); margin-top: 4px; text-align: right; }
+
+        .assistant-block { margin-top: 16px; }
+
+        .tool-chip {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: #fff; border: 1px solid var(--slate-200);
+            border-radius: 6px; padding: 6px 12px;
+            font-size: 11.5px; font-family: var(--font-mono);
+            color: var(--slate-500); margin-bottom: 12px;
+        }
+        .tool-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); }
+
+        /* Incident card */
+        .card {
+            border: 1px solid var(--slate-200);
+            border-radius: 10px;
+            background: #fff;
+            overflow: hidden;
+        }
+        .card-header {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--slate-100);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .card-id { font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; color: var(--slate-900); }
+        .card-body { padding: 16px 18px; }
+        .card-desc { font-size: 14px; margin-bottom: 16px; color: var(--slate-900); line-height: 1.5; }
+
+        .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
+        .field-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--slate-500); font-weight: 700; margin-bottom: 4px; }
+        .field-value { font-size: 13px; color: var(--slate-900); font-weight: 500; }
+
+        .pill { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 4px; letter-spacing: 0.2px; }
+        .pill.p1 { background: var(--red-bg); color: var(--red); border: 1px solid #fecaca; }
+        .pill.p2 { background: var(--amber-bg); color: var(--amber); border: 1px solid #fde68a; }
+        .pill.progress { background: var(--blue-bg); color: var(--blue); border: 1px solid #bfdbfe; }
+
+        /* Trace */
+        .trace { border: 1px solid var(--slate-200); border-radius: 10px; background: #fff; margin-bottom: 14px; overflow: hidden; }
+        .trace-step {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 18px; font-size: 12.5px;
+            border-bottom: 1px solid var(--slate-100);
+        }
+        .trace-step:last-child { border-bottom: none; }
+        .trace-step .check {
+            width: 16px; height: 16px; border-radius: 50%;
+            background: var(--green-bg); border: 1px solid #bbf7d0;
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .trace-step .check svg { width: 9px; height: 9px; }
+        .trace-step .label { font-weight: 600; color: var(--slate-900); }
+        .trace-step .detail { color: var(--slate-500); font-family: var(--font-mono); font-size: 11px; }
+
+        .approval-gate {
+            display: flex; align-items: center; justify-content: space-between;
+            background: var(--amber-bg); border-top: 1px solid #fde68a;
+            padding: 12px 18px;
+        }
+        .approval-gate .text { font-size: 12px; color: var(--amber); font-weight: 600; }
+        .approval-actions { display: flex; gap: 8px; }
+        .btn-approve, .btn-decline { font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 6px; border: none; cursor: pointer; }
+        .btn-approve { background: var(--navy-900); color: #fff; }
+        .btn-decline { background: #fff; color: var(--slate-600); border: 1px solid var(--slate-300); }
+
+        /* ============ COMMAND BAR ============ */
+        .suggestion-row { display: flex; gap: 8px; margin: 0 8% 10px; flex-wrap: wrap; }
+        .suggestion-chip {
+            font-size: 12px; padding: 6px 12px; border-radius: 6px;
+            border: 1px solid var(--slate-200); color: var(--slate-500);
+            cursor: pointer; background: #fff; font-family: var(--font-mono);
+        }
+        .suggestion-chip:hover { border-color: var(--indigo); color: var(--indigo); }
+
+        .command-bar {
+            margin: 0 8% 24px;
+            border: 1px solid var(--slate-300);
+            border-radius: 10px;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            padding: 4px 6px 4px 14px;
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .command-bar input { flex: 1; border: none; outline: none; font-size: 13.5px; padding: 9px 0; font-family: var(--font-sans); }
+        .command-bar-send {
+            width: 32px; height: 32px; border-radius: 7px;
+            background: var(--navy-900); border: none; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .command-bar-send svg { width: 14px; height: 14px; color: #fff; }
+    </style>
+</head>
+<body>
+
+    <div class="nav-sidebar">
+        <div class="nav-brand">
+            <div class="nav-brand-mark">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            </div>
+            <div>
+                <div class="nav-brand-text">Ops Console</div>
+                <div class="nav-brand-sub">Incident Copilot</div>
+            </div>
+        </div>
+
+        <div class="nav-section">Workspace</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Dashboard</div>
+        <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> Incident copilot</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg> Triage agent</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Run history</div>
+
+        <div class="nav-spacer"></div>
+
+        <div class="connector-panel">
+            <div class="connector-panel-title">Connectors</div>
+            <div class="connector-row">
+                <div class="connector-icon"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/jenkins/jenkins-original.svg" alt=""></div>
+                <span class="connector-name">Jenkins</span>
+                <span class="status-dot"></span>
+            </div>
+            <div class="connector-row">
+                <div class="connector-icon"><img src="https://www.svgrepo.com/show/303229/microsoft-sql-server-logo.svg" alt=""></div>
+                <span class="connector-name">SQL Server</span>
+                <span class="status-dot"></span>
+            </div>
+            <div class="connector-row inactive">
+                <div class="connector-icon"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/jira/jira-original.svg" alt=""></div>
+                <span class="connector-name">Jira</span>
+                <span class="status-dot"></span>
+            </div>
+            <div class="connector-row">
+                <div class="connector-icon"><img src="https://www.vectorlogo.zone/logos/servicenow/servicenow-icon.svg" alt=""></div>
+                <span class="connector-name">ServiceNow</span>
+                <span class="status-dot"></span>
+            </div>
+            <div class="connector-row">
+                <div class="connector-icon"><img src="https://www.vectorlogo.zone/logos/elasticsearch/elasticsearch-icon.svg" alt=""></div>
+                <span class="connector-name">Elastic</span>
+                <span class="status-dot"></span>
+            </div>
+        </div>
+
+        <div class="nav-footer">
+            <div class="avatar">RK</div>
+            <div>
+                <div class="nav-footer-name">R. Kapoor</div>
+                <div class="nav-footer-role">Platform SRE</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-workspace">
+        <div class="top-bar">
+            <div class="breadcrumb">Ops Console <span>/</span> <strong>Incident Copilot</strong> <span class="env-badge">Production</span></div>
+            <div class="top-bar-right">
+                <div class="route-indicator langgraph" id="routeBadge">
+                    <span class="route-dot"></span>
+                    <span id="routeBadgeText">Route: LangGraph triage</span>
+                </div>
+                <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg></button>
+            </div>
+        </div>
+
+        <div class="chat-view">
+
+            <!-- Exchange 1: fetch intent -->
+            <div class="exchange">
+                <div class="msg-row user"><div class="bubble-user">Give me details of INC0123456</div></div>
+                <div class="msg-meta">09:41 AM</div>
+                <div class="assistant-block">
+                    <div class="tool-chip"><span class="dot"></span> ServiceNow MCP &middot; get_incident</div>
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-id">INC0123456</span>
+                            <span class="pill progress">In progress</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="card-desc">Checkout service returning 502 for EU traffic</div>
+                            <div class="field-grid">
+                                <div>
+                                    <div class="field-label">Priority</div>
+                                    <div class="field-value"><span class="pill p2">P2 &ndash; High</span></div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Assigned to</div>
+                                    <div class="field-value">Platform On-Call</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Opened</div>
+                                    <div class="field-value">14 min ago</div>
+                                </div>
+                                <div>
+                                    <div class="field-label">Affected CI</div>
+                                    <div class="field-value">checkout-service-eu</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Exchange 2: triage intent -->
+            <div class="exchange">
+                <div class="msg-row user"><div class="bubble-user">Can you triage INC0123456?</div></div>
+                <div class="msg-meta">09:42 AM</div>
+                <div class="assistant-block">
+                    <div class="trace">
+                        <div class="trace-step">
+                            <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span>
+                            <span class="label">Fetch incident</span>
+                            <span class="detail">get_incident</span>
+                        </div>
+                        <div class="trace-step">
+                            <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span>
+                            <span class="label">Gather context</span>
+                            <span class="detail">jenkins.builds, elastic.logs</span>
+                        </div>
+                        <div class="trace-step">
+                            <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span>
+                            <span class="label">Classify severity</span>
+                            <span class="detail">langgraph.node</span>
+                        </div>
+                        <div class="trace-step">
+                            <span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span>
+                            <span class="label">Propose action</span>
+                            <span class="detail">langgraph.node</span>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-id">Triage summary &middot; INC0123456</span>
+                            <span class="pill p1">Recommend P1</span>
+                        </div>
+                        <div class="card-body">
+                            <div style="margin-bottom:14px;">
+                                <div class="field-label">Likely root cause</div>
+                                <div class="field-value" style="font-weight:400; line-height:1.6;">Correlates with Jenkins deploy #4821 to checkout-service-eu 18 minutes ago &mdash; error rate step-changed immediately after rollout.</div>
+                            </div>
+                            <div>
+                                <div class="field-label">Recommended action</div>
+                                <div class="field-value" style="font-weight:400; line-height:1.6;">Roll back deploy #4821, reassign to Checkout team, raise priority to P1.</div>
+                            </div>
+                        </div>
+                        <div class="approval-gate">
+                            <span class="text">Write actions require approval</span>
+                            <div class="approval-actions">
+                                <button class="btn-decline">Edit</button>
+                                <button class="btn-approve">Approve &amp; apply</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="suggestion-row">
+            <div class="suggestion-chip" onclick="setQuery('Give me details of INC0123457')">details INC0123457</div>
+            <div class="suggestion-chip" onclick="setQuery('Triage INC0123457')">triage INC0123457</div>
+            <div class="suggestion-chip" onclick="setQuery('List open P1 incidents')">list open P1 incidents</div>
+        </div>
+
+        <div class="command-bar">
+            <input id="queryInput" type="text" placeholder="Ask about an incident, or type 'triage INC...'" oninput="updateRoute(this.value)">
+            <button class="command-bar-send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+        </div>
+    </div>
+
+    <script>
+        const badge = document.getElementById('routeBadge');
+        const badgeText = document.getElementById('routeBadgeText');
+
+        function setQuery(text) {
+            document.getElementById('queryInput').value = text;
+            updateRoute(text);
+        }
+
+        function updateRoute(value) {
+            const v = value.toLowerCase();
+            const isTriage = /triage|resolve|reassign|escalate|fix/.test(v);
+            if (isTriage) {
+                badge.className = 'route-indicator langgraph';
+                badgeText.textContent = 'Route: LangGraph triage';
+            } else {
+                badge.className = 'route-indicator mcp';
+                badgeText.textContent = 'Route: MCP fetch';
+            }
+        }
+    </script>
+
+</body>
+</html>
