@@ -89,10 +89,11 @@
             position: fixed; top: 0; right: calc(-1 * var(--panel-width) - 20px);
             width: var(--panel-width); max-width: 92vw; height: 100vh;
             background: #fff; box-shadow: -12px 0 48px rgba(0,0,0,0.12);
-            z-index: 100; transition: right 0.45s cubic-bezier(0.4,0,0.2,1);
+            z-index: 100; transition: right 0.45s cubic-bezier(0.4,0,0.2,1), width 0.35s cubic-bezier(0.4,0,0.2,1);
             display: flex; flex-direction: column;
         }
         .side-panel.open { right: 0; }
+        .side-panel.expanded { width: min(920px, 94vw); }
 
         .panel-head {
             padding: 24px 26px 18px 26px; border-bottom: 1px solid var(--border);
@@ -100,12 +101,14 @@
         }
         .panel-eyebrow { font-size: 0.62rem; font-weight: 700; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
         .panel-title { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; }
+        .panel-head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
         .panel-close {
             border: none; background: rgba(0,0,0,0.05); border-radius: 50%;
             width: 30px; height: 30px; flex: 0 0 30px; display: flex; align-items: center; justify-content: center;
             cursor: pointer; transition: 0.2s; color: var(--text-main);
         }
         .panel-close:hover { background: rgba(0,0,0,0.1); transform: rotate(90deg); }
+        .panel-expand:hover { background: rgba(0,0,0,0.1); transform: none; }
 
         .panel-body { padding: 22px 26px 30px 26px; overflow-y: auto; flex: 1; }
         .panel-body .label { margin-top: 2px; }
@@ -113,6 +116,19 @@
         .panel-empty { color: var(--text-sec); font-size: 0.9rem; text-align: center; padding: 60px 10px; }
         .panel-empty i { font-size: 1.6rem; display: block; margin-bottom: 10px; opacity: 0.5; }
         .panel-chip { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; background: rgba(0,113,227,0.08); color: var(--blue); margin-bottom: 14px; }
+
+        /* ---------- Technical Evidence: tabbed metrics ---------- */
+        .evidence-tab-bar { display: flex; gap: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+        .evidence-tab { border: none; background: transparent; padding: 8px 2px; font-size: 0.8rem; font-weight: 600; color: var(--text-sec); cursor: pointer; border-bottom: 2px solid transparent; transition: 0.2s; }
+        .evidence-tab:hover { color: var(--text-main); }
+        .evidence-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+        .evidence-stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
+        .evidence-stat { background: rgba(0,113,227,0.05); border-radius: 12px; padding: 12px 14px; }
+        .evidence-stat .val { font-size: 1.05rem; font-weight: 700; margin-bottom: 0; }
+        .evidence-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.8rem; }
+        .evidence-table th { text-align: left; font-size: 0.63rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-sec); padding: 8px 6px; border-bottom: 1px solid var(--border); }
+        .evidence-table td { padding: 8px 6px; border-bottom: 1px solid rgba(0,0,0,0.04); }
+        .evidence-table tbody tr:hover { background: rgba(0,0,0,0.02); }
 
         /* ---------- Triage scan overlay ---------- */
         .triage-overlay {
@@ -252,7 +268,12 @@
             <div class="panel-eyebrow" id="panel-eyebrow">Details</div>
             <div class="panel-title" id="panel-title">—</div>
         </div>
-        <button class="panel-close" onclick="closePanel()"><i class="bi bi-x-lg"></i></button>
+        <div class="panel-head-actions">
+            <button class="panel-close panel-expand" id="panel-expand-btn" onclick="togglePanelExpand()" title="Expand panel">
+                <i class="bi bi-arrows-angle-expand"></i>
+            </button>
+            <button class="panel-close" onclick="closePanel()"><i class="bi bi-x-lg"></i></button>
+        </div>
     </div>
     <div class="panel-body" id="panel-body"></div>
 </div>
@@ -396,8 +417,8 @@
      *       metadata: [{ id, session_id, short_description, assignment_group,
      *                     assigned_to, risk_assessment, implementation_window,
      *                     updated_at, fredai_rag_historical_resolution }],
-     *       evidence: [ ... ]   // per-asset entries; shape TBD once populated —
-     *                           // currently seen empty ([]) in the sample response
+     *       evidence: [{ id, session_id, hostname, asset_details,
+     *                     technical_evidence, elastic_query_meta, fetched_at }]
      *     }
      *   }
      * The `{status, data}` envelope is unwrapped in fetchIncidentDetails(),
@@ -405,11 +426,16 @@
      * object. Note: session[0].id is the *session/run* UUID, not the
      * incident number — inc.id keeps whatever incident number was searched.
      *
-     * There's no dedicated "assets"/"cis" list in this response — if your
-     * backend later adds one (data.assets / data.cis), it's still picked up
-     * automatically below. Until then, if `evidence` entries carry an asset
-     * identifier (asset_id/ci/asset/ci_name), each unique one becomes an
-     * Asset Inventory row with its evidence pre-attached.
+     * `evidence` is one entry per asset — `hostname` is the asset identifier
+     * and `technical_evidence` is that asset's log text. An incident with
+     * multiple assets simply has multiple evidence entries with different
+     * hostnames. There's still no dedicated "assets"/"cis" list in this API,
+     * so Asset Inventory rows are built from the unique hostnames in
+     * `evidence` (if your backend later adds a real data.assets/data.cis
+     * array, it's picked up automatically and takes priority instead).
+     * `asset_details` and `fetched_at` are carried through and shown in the
+     * asset panel; `elastic_query_meta` (the underlying Elastic query) isn't
+     * surfaced in the UI.
      */
     function applyIncidentDetails(inc, data) {
         const session  = (data.session && data.session[0]) || {};
@@ -448,31 +474,43 @@
         document.getElementById('m-fix').innerText = inc.fix;
 
         // Asset Inventory + per-asset evidence, derived from the `evidence`
-        // array (there's no separate assets/cis list in this API yet).
+        // array — CONFIRMED real shape, one entry per asset:
+        //   { id, session_id, hostname, asset_details, technical_evidence,
+        //     elastic_query_meta, fetched_at }
+        // `hostname` is the asset identifier and `technical_evidence` is the
+        // actual log/evidence text. There's still no separate assets/cis
+        // list in this API, so Asset Inventory rows come straight from the
+        // unique hostnames seen here — one incident can (and does) have
+        // multiple assets, each with its own technical_evidence.
         inc.evidenceByAsset = {};
         const assetsFromEvidence = [];
         evidenceArr.forEach(e => {
             if (typeof e === 'string') return; // no asset identifier to key off
-            const assetKey = (e.asset_id || e.ci || e.asset || e.ci_name || e.name || '').toString();
-            const logText = e.log || e.evidence || e.description || JSON.stringify(e);
+            const assetKey = (e.hostname || e.asset_id || e.ci || e.asset || e.ci_name || e.name || '').toString();
+            const logText = e.technical_evidence || e.log || e.evidence || e.description || JSON.stringify(e);
             if (!assetKey) return;
             inc.evidenceByAsset[assetKey.toLowerCase()] = logText;
             assetsFromEvidence.push({
                 id: assetKey,
-                name: assetKey,
-                crit: e.criticality || e.crit || 'N/A',
-                patch: e.last_patch || e.patch || 'N/A',
+                name: assetKey,               // hostname doubles as the display name
+                crit: e.criticality || e.crit || 'N/A',   // not present in this API — stays N/A unless a real assets list supplies it
+                patch: e.last_patch || e.patch || 'N/A',  // same as above
+                details: e.asset_details || '',
+                fetchedAt: e.fetched_at || null,
                 log: logText
             });
         });
 
         const assetsRaw = data.assets || data.cis || data.configuration_items || assetsFromEvidence;
         inc.cis = assetsRaw.map(item => ({
-            id: item.sys_id || item.asset_id || item.id || item.name || item.ci_name,
-            name: item.name || item.ci_name || item.display_value || item.sys_id || 'Unknown Asset',
+            id: item.sys_id || item.asset_id || item.hostname || item.id || item.name || item.ci_name,
+            name: item.hostname || item.name || item.ci_name || item.display_value || item.sys_id || 'Unknown Asset',
             crit: item.criticality || item.crit || 'N/A',
             patch: item.last_patch || item.patch || item.sys_updated_on || 'N/A',
-            log: item.log || item.evidence || item.technical_evidence || null
+            details: item.asset_details || item.details || '',
+            fetchedAt: item.fetched_at || item.fetchedAt || null,
+            log: item.log || item.evidence || item.technical_evidence || null,
+            metricsCache: {} // populated lazily per tab — see loadEvidenceTab()
         }));
 
         renderCiList(inc);
@@ -566,6 +604,16 @@
         document.getElementById('panelOverlay').classList.remove('open');
     }
 
+    function togglePanelExpand() {
+        const panel = document.getElementById('sidePanel');
+        const btn = document.getElementById('panel-expand-btn');
+        const expanded = panel.classList.toggle('expanded');
+        btn.innerHTML = expanded
+            ? '<i class="bi bi-arrows-angle-contract"></i>'
+            : '<i class="bi bi-arrows-angle-expand"></i>';
+        btn.title = expanded ? 'Collapse panel' : 'Expand panel';
+    }
+
     function showIncPanel() {
         if(!currentInc) return;
         const inc = currentInc;
@@ -624,11 +672,38 @@
                 <div><div class="label">Criticality</div><div class="val">${ci.crit}</div></div>
                 <div><div class="label">Last Patch</div><div class="val">${ci.patch}</div></div>
             </div>
+            ${ci.details ? `
+            <div class="label">Asset Details</div>
+            <div class="val">${ci.details}</div>` : ''}
+            ${ci.fetchedAt ? `
+            <div class="label">Evidence Fetched At</div>
+            <div class="val">${ci.fetchedAt}</div>` : ''}
         `);
     }
 
+    /* ---------- Technical Evidence: tabbed CPU / Memory / Disk / Network ----------
+       No timeframe control — the backend derives the historical window from
+       the incident's own opened time (created_at) through now, and
+       current_avg is simply the live/latest average. See EVIDENCE_METRIC_URL
+       below for the assumed request/response shape.
+    ---------------------------------------------------------------------- */
+
+    const EVIDENCE_TABS = [
+        { id: 'cpu', label: 'CPU' },
+        { id: 'memory', label: 'Memory' },
+        { id: 'disk', label: 'Disk' },
+        { id: 'network', label: 'Network' },
+        { id: 'raw', label: 'Raw Log' }
+    ];
+
+    let currentEvidenceTab = 'cpu';
+
     function showLogPanel() {
-        if(!currentCi || !currentCi.log) {
+        openEvidencePanel(currentCi);
+    }
+
+    function openEvidencePanel(ci) {
+        if (!ci) {
             openPanel('Technical Evidence', 'No Asset Selected', `
                 <div class="panel-empty">
                     <i class="bi bi-terminal"></i>
@@ -637,11 +712,141 @@
             `);
             return;
         }
-        const ci = currentCi;
-        openPanel('Technical Evidence', ci.name, `
-            <div class="label">Raw Log Output</div>
-            <pre>${ci.log}</pre>
-        `);
+        openPanel('Technical Evidence', ci.name, renderEvidenceShell());
+        bindEvidenceTabHandlers(ci);
+        loadEvidenceTab(ci, currentEvidenceTab);
+    }
+
+    function renderEvidenceShell() {
+        const tabButtons = EVIDENCE_TABS.map(t =>
+            `<button class="evidence-tab${t.id === currentEvidenceTab ? ' active' : ''}" data-evidence-tab="${t.id}">${t.label}</button>`
+        ).join('');
+
+        return `
+            <div class="evidence-tab-bar" id="evidenceTabBar">${tabButtons}</div>
+            <div class="evidence-tab-content" id="evidenceTabContent">
+                <div class="panel-empty"><i class="bi bi-hourglass-split"></i>Loading…</div>
+            </div>
+        `;
+    }
+
+    function bindEvidenceTabHandlers(ci) {
+        document.querySelectorAll('#evidenceTabBar .evidence-tab').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('#evidenceTabBar .evidence-tab').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentEvidenceTab = btn.dataset.evidenceTab;
+                loadEvidenceTab(ci, currentEvidenceTab);
+            };
+        });
+    }
+
+    async function loadEvidenceTab(ci, tab) {
+        const contentEl = document.getElementById('evidenceTabContent');
+        if (!contentEl) return; // panel closed/rebuilt in the meantime
+
+        if (tab === 'raw') {
+            const logText = ci.log || (DEMO_MODE ? generateDemoRawLog(ci) : null);
+            contentEl.innerHTML = `<div class="label">Raw Log Output</div><pre>${logText || 'No evidence available yet.'}</pre>`;
+            return;
+        }
+
+        ci.metricsCache = ci.metricsCache || {};
+
+        if (ci.metricsCache[tab]) {
+            renderEvidenceTab(tab, ci.metricsCache[tab]);
+            return;
+        }
+
+        contentEl.innerHTML = `<div class="panel-empty"><i class="bi bi-hourglass-split"></i>Loading ${tab} metrics…</div>`;
+
+        try {
+            const data = await fetchEvidenceMetric(currentInc.id, ci.id || ci.name, tab);
+            ci.metricsCache[tab] = data;
+            // Guard against a stale response landing after the user switched tab/asset/panel
+            const stillRelevant = currentCi === ci && currentEvidenceTab === tab &&
+                                   document.getElementById('evidenceTabContent');
+            if (stillRelevant) {
+                renderEvidenceTab(tab, data);
+            }
+        } catch (err) {
+            console.error(`${tab} metrics load failed`, err);
+            if (currentCi === ci && currentEvidenceTab === tab && document.getElementById('evidenceTabContent')) {
+                contentEl.innerHTML = `<div class="panel-empty"><i class="bi bi-exclamation-triangle"></i>Failed to load ${tab} metrics.</div>`;
+            }
+        }
+    }
+
+    function renderEvidenceTab(tab, data) {
+        const contentEl = document.getElementById('evidenceTabContent');
+        if (!contentEl) return;
+        contentEl.innerHTML = tab === 'network' ? renderNetworkTab(data) : renderMetricTab(tab, data);
+    }
+
+    function renderMetricTab(tab, data) {
+        const label = tab === 'cpu' ? 'CPU' : tab === 'memory' ? 'Memory' : 'Disk';
+        const histAvg = data.historical_avg != null ? `${data.historical_avg}%` : 'N/A';
+        const curAvg = data.current_avg != null ? `${data.current_avg}%` : 'N/A';
+        const processes = (data.top_processes || data.processes || []).slice(0, 10);
+
+        const rows = processes.map((p, i) => {
+            const pct = p[`${tab}_percent`] ?? p.percent ?? p.value ?? 0;
+            return `
+                <tr>
+                    <td>${i + 1}</td>
+                    <td>${p.process || p.name || 'Unknown'}</td>
+                    <td>${pct}%</td>
+                </tr>`;
+        }).join('');
+
+        const diskDetailsHtml = (tab === 'disk' && data.disk_details) ? `
+            <div class="panel-row" style="margin-top:2px;">
+                <div><div class="label">Total Space</div><div class="val">${data.disk_details.total || 'N/A'}</div></div>
+                <div><div class="label">Used Space</div><div class="val">${data.disk_details.used || 'N/A'}</div></div>
+            </div>
+            <div class="panel-row">
+                <div><div class="label">Free Space</div><div class="val">${data.disk_details.free || 'N/A'}</div></div>
+                <div><div class="label">Disk I/O</div><div class="val">${data.disk_details.io || 'N/A'}</div></div>
+            </div>
+        ` : '';
+
+        const windowNote = data.window_start
+            ? `<div class="text-muted small" style="margin:-8px 0 12px;">Since incident opened${data.window_end ? ` (${data.window_start} – ${data.window_end})` : ` (${data.window_start})`}</div>`
+            : '';
+
+        return `
+            <div class="evidence-stat-row">
+                <div class="evidence-stat"><div class="label">Historical Avg ${label}</div><div class="val">${histAvg}</div></div>
+                <div class="evidence-stat"><div class="label">Current Avg ${label}</div><div class="val">${curAvg}</div></div>
+            </div>
+            ${windowNote}
+            ${diskDetailsHtml}
+            <div class="label" style="margin-top:14px;">Top 10 Processes by ${label} Usage</div>
+            <table class="evidence-table">
+                <thead><tr><th>#</th><th>Process</th><th>${label} %</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="3" class="text-muted small">No process data available.</td></tr>`}</tbody>
+            </table>
+        `;
+    }
+
+    function renderNetworkTab(data) {
+        const interfaces = data.interfaces || data.drivers || data.results || [];
+        const rows = interfaces.map(nic => `
+            <tr>
+                <td>${nic.driver || nic.name || nic.interface || 'Unknown'}</td>
+                <td>${nic.traffic_in || nic.rx || 'N/A'}</td>
+                <td>${nic.traffic_out || nic.tx || 'N/A'}</td>
+                <td>${nic.flow_count != null ? nic.flow_count : (nic.flows != null ? nic.flows : 'N/A')}</td>
+            </tr>
+        `).join('');
+
+        return `
+            <div class="label">Network Drivers &amp; Traffic</div>
+            <table class="evidence-table">
+                <thead><tr><th>Driver / Interface</th><th>Traffic In</th><th>Traffic Out</th><th>Flow Count</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="4" class="text-muted small">No network data available.</td></tr>`}</tbody>
+            </table>
+        `;
     }
 
     function showFixPanel() {
@@ -709,19 +914,22 @@
                                  assignment_group, assigned_to,
                                  risk_assessment, implementation_window,
                                  updated_at, fredai_rag_historical_resolution }],
-                   evidence: [ ... ]   // per-asset entries; empty until an
-                                       // asset match is found
+                   evidence: [{ id, session_id, hostname, asset_details,
+                                 technical_evidence, elastic_query_meta,
+                                 fetched_at }]   // one entry per asset
                  }
                }
                fetchIncidentDetails() unwraps the {status, data} envelope, so
                applyIncidentDetails() receives { session, metadata, evidence }
                directly. Note: session[0].id is the session/run UUID, not the
                incident number. The AI recommendation lives at
-               metadata[0].fredai_rag_historical_resolution. There's no
-               dedicated assets/cis list yet — Asset Inventory rows are
-               derived from unique asset identifiers found in `evidence`
-               entries (asset_id/ci/asset/ci_name), each with its evidence
-               pre-attached. If your backend later adds a real
+               metadata[0].fredai_rag_historical_resolution.
+               `hostname` is the asset identifier, `technical_evidence` is
+               that asset's evidence text — an incident with multiple
+               assets has multiple evidence entries with different
+               hostnames. There's still no dedicated assets/cis list, so
+               Asset Inventory rows are derived from the unique hostnames
+               in `evidence`. If your backend later adds a real
                data.assets/data.cis array, it's picked up automatically and
                takes priority over the evidence-derived list.
                Technical Evidence is asset-specific (an incident can have
@@ -737,6 +945,14 @@
        and the fetch options (auth headers / CSRF) to match your backend.
     ========================================================= */
     const API_BASE = '';               // same-origin by default; set e.g. 'https://api.example.com' if cross-origin
+
+    // PRESENTATION MODE — when true, the CPU/Memory/Disk/Network/Raw Log tabs
+    // return realistic generated data instead of calling the real metrics API,
+    // so the panel is fully demoable without a live backend. The actual fetch
+    // functions (fetchEvidenceMetric etc.) are untouched — this just short-
+    // circuits them. Set to false to go back to real data; no other changes needed.
+    const DEMO_MODE = true;
+
     const STATUS_IN_PROGRESS = ['in process', 'in progress', 'processing'];
     const STATUS_COMPLETED   = ['completed', 'complete', 'success', 'successful'];
     const STATUS_FAILED      = ['failed', 'error'];
@@ -750,6 +966,32 @@
     // top-level evidence map — see applyIncidentDetails() / loadAssetEvidence().
     const ASSET_EVIDENCE_URL = (incId, assetId) =>
         `${API_BASE}/api/triage/evidence/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}`;
+
+    /**
+     * Per-tab system metrics for the Technical Evidence panel (CPU/Memory/
+     * Disk/Network). NOT confirmed against a real response yet — this is a
+     * best-guess shape, so treat it as a starting point and adjust
+     * renderMetricTab()/renderNetworkTab() once you share a real sample.
+     *
+     * No timeframe is sent from the frontend — the backend is expected to
+     * derive the historical window itself from the incident's own opened
+     * time (created_at) through now, and current_avg is just the live/
+     * latest average at request time.
+     *
+     *   GET {API_BASE}/api/triage/evidence/metrics/
+     *       ?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
+     *
+     *   metric=cpu|memory|disk ->
+     *     { historical_avg: number, current_avg: number,
+     *       window_start (optional, e.g. incident's created_at),
+     *       window_end (optional),
+     *       top_processes: [{ process, <metric>_percent }],
+     *       disk_details: { total, used, free, io } }   // disk only, optional
+     *   metric=network ->
+     *     { interfaces: [{ driver, traffic_in, traffic_out, flow_count }] }
+     */
+    const EVIDENCE_METRIC_URL = (incId, assetId, metric) =>
+        `${API_BASE}/api/triage/evidence/metrics/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}&metric=${encodeURIComponent(metric)}`;
 
     function getCookie(name) {
         const match = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
@@ -773,6 +1015,123 @@
         const res = await fetch(ASSET_EVIDENCE_URL(incId, assetId), { credentials: 'same-origin' });
         if (!res.ok) throw new Error(`Evidence fetch failed (HTTP ${res.status})`);
         return res.json();
+    }
+
+    async function fetchEvidenceMetric(incId, assetId, metric) {
+        if (DEMO_MODE) return generateDemoMetric(metric, assetId);
+        const res = await fetch(EVIDENCE_METRIC_URL(incId, assetId, metric), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`${metric} metrics fetch failed (HTTP ${res.status})`);
+        return res.json();
+    }
+
+    /* ---------- DEMO_MODE data generators ----------
+       Presentation-only. Deterministic per asset+metric (seeded PRNG) so the
+       same asset shows the same numbers every time you open it, rather than
+       reshuffling on every click. Delete this whole block (and the DEMO_MODE
+       branches above) once real endpoints are live.
+    ---------------------------------------------------------------------- */
+
+    function seededRandom(seed) {
+        let h = 1779033703 ^ seed.length;
+        for (let i = 0; i < seed.length; i++) {
+            h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+            h = (h << 13) | (h >>> 19);
+        }
+        return function () {
+            h = Math.imul(h ^ (h >>> 16), 2246822507);
+            h = Math.imul(h ^ (h >>> 13), 3266489909);
+            h ^= h >>> 16;
+            return (h >>> 0) / 4294967296;
+        };
+    }
+
+    const DEMO_PROCESSES = [
+        'sqlservr.exe', 'w3wp.exe', 'java.exe', 'node.exe', 'chrome.exe',
+        'svchost.exe', 'python.exe', 'nginx', 'redis-server', 'elasticsearch',
+        'logstash.exe', 'dockerd', 'powershell.exe', 'MsMpEng.exe', 'explorer.exe'
+    ];
+
+    function generateDemoMetric(metric, assetId) {
+        return new Promise(resolve => {
+            setTimeout(() => {
+                const rand = seededRandom(`${assetId}:${metric}`);
+                resolve(metric === 'network' ? generateDemoNetwork(rand) : generateDemoUsageMetric(metric, rand));
+            }, 500);
+        });
+    }
+
+    function generateDemoUsageMetric(metric, rand) {
+        const current = Math.round(35 + rand() * 55);
+        const historical = Math.max(5, Math.round(current - (8 + rand() * 22)));
+
+        const pool = [...DEMO_PROCESSES];
+        for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(rand() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+
+        let base = current * 0.85;
+        const top_processes = pool.slice(0, 10).map((proc, i) => {
+            const pct = Math.max(1, Math.round((base / Math.pow(1.45, i)) * (0.85 + rand() * 0.3)));
+            return { process: proc, [`${metric}_percent`]: pct };
+        });
+
+        const result = {
+            historical_avg: historical,
+            current_avg: current,
+            window_start: (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString(),
+            window_end: 'Now',
+            top_processes
+        };
+
+        if (metric === 'disk') {
+            const totalGb = 500;
+            const usedGb = Math.round(totalGb * (current / 100));
+            result.disk_details = {
+                total: `${totalGb} GB`,
+                used: `${usedGb} GB`,
+                free: `${totalGb - usedGb} GB`,
+                io: `${Math.round(40 + rand() * 120)} MB/s`
+            };
+        }
+        return result;
+    }
+
+    function generateDemoNetwork(rand) {
+        const drivers = ['eth0', 'eth1', 'lo', 'bond0'];
+        const interfaces = drivers.map(d => ({
+            driver: d,
+            traffic_in: `${(Math.round(rand() * 12000) / 10).toFixed(1)} MB`,
+            traffic_out: `${(Math.round(rand() * 9000) / 10).toFixed(1)} MB`,
+            flow_count: Math.round(rand() * 400)
+        }));
+        return { interfaces };
+    }
+
+    function generateDemoRawLog(ci) {
+        const rand = seededRandom(`${ci.id || ci.name}:log`);
+        const levels = ['ERROR', 'WARN'];
+        const messages = [
+            'Connection pool exhausted, waiting for available connection',
+            'High memory usage detected on worker process',
+            'Disk I/O latency exceeded threshold (250ms)',
+            'Failed to reach upstream service after 3 retries',
+            'Certificate expiration warning: 12 days remaining',
+            'Thread pool queue backlog increasing',
+            'GC pause exceeded 500ms',
+            'Read timeout on database query',
+            'Service health check failed, marking node degraded',
+            'Retrying failed request to downstream API'
+        ];
+        const lines = [];
+        let ts = new Date();
+        for (let i = 0; i < 14; i++) {
+            const level = levels[Math.floor(rand() * levels.length)];
+            const msg = messages[Math.floor(rand() * messages.length)];
+            lines.unshift(`[${ts.toISOString()}] ${level}: ${msg}`);
+            ts = new Date(ts.getTime() - Math.round(rand() * 6 * 60000));
+        }
+        return lines.join('\n');
     }
 
     async function lookupIncident(incidentNumber) {
@@ -888,6 +1247,12 @@
 
             let status = (data.status || '').toLowerCase().trim();
             let attempts = 0;
+            let consecutiveMisses = 0;
+            // Right after trigger(), the record can briefly 404 on lookup()
+            // before the backend has fully written/indexed it (eventual
+            // consistency). Tolerate a couple of misses in a row before
+            // treating it as a real failure, instead of bailing on the first.
+            const MAX_CONSECUTIVE_MISSES = 2;
 
             setTriageStatus('Triage in progress…');
             while (!STATUS_COMPLETED.includes(status) && !STATUS_FAILED.includes(status)) {
@@ -896,7 +1261,17 @@
                 }
                 await sleep(POLL_INTERVAL_MS);
                 data = await lookupIncident(query);
-                if (!data) throw new Error('Incident record disappeared while polling for status.');
+
+                if (!data) {
+                    consecutiveMisses++;
+                    if (consecutiveMisses > MAX_CONSECUTIVE_MISSES) {
+                        throw new Error('Incident record disappeared while polling for status.');
+                    }
+                    attempts++;
+                    continue; // still-settling, not a hard failure yet — poll again
+                }
+                consecutiveMisses = 0;
+
                 status = (data.status || '').toLowerCase().trim();
                 attempts++;
             }
