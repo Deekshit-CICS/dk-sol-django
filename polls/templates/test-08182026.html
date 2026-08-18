@@ -36,6 +36,7 @@ actual setup — each is marked with a comment below:
 import logging
 from datetime import timedelta
 
+import requests
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_GET
@@ -43,15 +44,40 @@ from django.views.decorators.http import require_GET
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 1. Elasticsearch client — ADJUST host/auth to your real cluster.
+# 1. Elasticsearch connection — direct REST calls (no elasticsearch-py
+#    client), since that's how this project already talks to ES.
+#    ADJUST host/auth to your real cluster.
 # ---------------------------------------------------------------------------
-from elasticsearch import Elasticsearch
+ES_BASE_URL = "https://your-elastic-host:9200"        # TODO: real ES host
+ES_AUTH = ("elastic_user", "elastic_password")         # TODO: real basic-auth creds
+ES_VERIFY_SSL = True                                    # TODO: only set False for local/self-signed dev certs
+ES_REQUEST_TIMEOUT = 10                                 # seconds — TODO: tune to your cluster's typical latency
 
-es_client = Elasticsearch(
-    hosts=["https://your-elastic-host:9200"],   # TODO: real ES host(s)
-    basic_auth=("elastic_user", "elastic_password"),  # TODO: real credentials, or use api_key=...
-    verify_certs=True,
-)
+# If you use API-key auth instead of basic auth, drop ES_AUTH above and
+# send this header on every request instead:
+#   ES_HEADERS = {"Authorization": "ApiKey <base64-encoded-id:api_key>"}
+
+
+def _es_search(index, query_body):
+    """
+    POSTs a query body to Elasticsearch's REST _search endpoint directly
+    (via `requests`, not the elasticsearch-py client) and returns the
+    parsed JSON response. Raises requests.HTTPError on a non-2xx response,
+    which the callers below catch as part of their broader `except
+    Exception` blocks.
+    """
+    url = f"{ES_BASE_URL}/{index}/_search"
+    response = requests.post(
+        url,
+        json=query_body,
+        auth=ES_AUTH,
+        # headers=ES_HEADERS,  # use this instead of `auth=` if you're on API-key auth
+        verify=ES_VERIFY_SSL,
+        timeout=ES_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    return response.json()
+
 
 # ---------------------------------------------------------------------------
 # 2. Index + field names — ADJUST to match your actual ES mapping.
@@ -133,7 +159,7 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
         },
     }
 
-    response = es_client.search(index=CPU_INDEX_PATTERN, body=query)
+    response = _es_search(CPU_INDEX_PATTERN, query)
     aggs = response.get("aggregations", {})
 
     overall_avg = aggs.get("overall_avg_cpu", {}).get("value")
