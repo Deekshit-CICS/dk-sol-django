@@ -1,7 +1,5 @@
-#view.py
-
 """
-Forensic RCA — Technical Evidence metrics endpoint.
+Forensic RCA — Technical Evidence metrics endpoint (function-based views).
 
 Serves GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
 
@@ -9,6 +7,12 @@ This matches the contract already wired up in forensic-rca-live.html's
 fetchEvidenceMetric()/EVIDENCE_METRIC_URL — no frontend changes are needed
 once this view is live; the CPU tab (with its Historic/Current sub-tabs,
 bar chart, and top-10 table) will start rendering real data immediately.
+
+Structure: `evidence_metrics` is the actual URL-facing view (decorated
+with @require_GET). It delegates to small helper functions — validation,
+then metric-specific builders — rather than one long function, so adding
+memory/disk/network later is just adding a new `_build_<metric>_response`
++ wiring it into the if/elif in `evidence_metrics`.
 
 Currently implements metric=cpu. memory/disk/network are stubbed with a
 501 response — copy the CPU pattern for those once you're ready; the
@@ -34,7 +38,7 @@ from datetime import timedelta
 
 from django.http import JsonResponse
 from django.utils import timezone
-from django.views import View
+from django.views.decorators.http import require_GET
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +152,8 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
     return overall_avg_pct, top_processes
 
 
-class EvidenceMetricsView(View):
+@require_GET
+def evidence_metrics(request):
     """
     GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
 
@@ -160,69 +165,88 @@ class EvidenceMetricsView(View):
                          "top_processes": [{"process": "...", "cpu_percent": <pct>}, ...] }
         }
     """
+    incident_number = request.GET.get('incident_number')
+    asset_id = request.GET.get('asset_id')
+    metric = request.GET.get('metric')
 
-    def get(self, request):
-        incident_number = request.GET.get('incident_number')
-        asset_id = request.GET.get('asset_id')
-        metric = request.GET.get('metric')
+    error_response = _validate_metrics_request(incident_number, asset_id, metric)
+    if error_response:
+        return error_response
 
-        if not incident_number or not asset_id or not metric:
-            return JsonResponse(
-                {"error": "incident_number, asset_id and metric are all required"},
-                status=400,
-            )
+    if metric == 'cpu':
+        return _build_cpu_metrics_response(incident_number, asset_id)
 
-        if metric != 'cpu':
-            # TODO: implement memory/disk/network using the same pattern —
-            # the frontend already expects the identical {historic, current}
-            # shape for all four, just with different top-list field names
-            # (top_mount_points for disk, interfaces for network, etc. —
-            # see the doc comment above EVIDENCE_METRIC_URL in the frontend).
-            return JsonResponse(
-                {"error": f"metric='{metric}' is not implemented yet"},
-                status=501,
-            )
-
-        try:
-            incident_opened_at = get_incident_opened_at(incident_number)
-        except NotImplementedError as e:
-            logger.error(str(e))
-            return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
-
-        if incident_opened_at is None:
-            return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
-
-        # --- Historic: window around when the incident was opened ---
-        hist_start = incident_opened_at - HISTORIC_WINDOW
-        hist_end = incident_opened_at + HISTORIC_WINDOW
-        try:
-            hist_avg, hist_top = _query_top_processes_by_cpu(asset_id, hist_start, hist_end)
-        except Exception:
-            logger.exception("Elasticsearch query failed for historic CPU data (incident=%s, asset=%s)", incident_number, asset_id)
-            return JsonResponse({"error": "Failed to fetch historic CPU data from Elasticsearch"}, status=502)
-
-        # --- Current: trailing window up to now ---
-        now = timezone.now()
-        cur_start = now - CURRENT_WINDOW
-        try:
-            cur_avg, cur_top = _query_top_processes_by_cpu(asset_id, cur_start, now)
-        except Exception:
-            logger.exception("Elasticsearch query failed for current CPU data (incident=%s, asset=%s)", incident_number, asset_id)
-            return JsonResponse({"error": "Failed to fetch current CPU data from Elasticsearch"}, status=502)
-
-        return JsonResponse({
-            "historic": {
-                "avg": hist_avg,
-                "window_start": hist_start.isoformat(),
-                "window_end": hist_end.isoformat(),
-                "top_processes": hist_top,
-            },
-            "current": {
-                "avg": cur_avg,
-                "captured_at": now.isoformat(),
-                "top_processes": cur_top,
-            },
-        })
+    # TODO: implement memory/disk/network using the same pattern as
+    # _build_cpu_metrics_response() — the frontend already expects the
+    # identical {historic, current} envelope for all four, just with
+    # different top-list field names (top_mount_points for disk,
+    # interfaces for network, etc. — see the doc comment above
+    # EVIDENCE_METRIC_URL in the frontend).
+    return JsonResponse({"error": f"metric='{metric}' is not implemented yet"}, status=501)
 
 
-                           
+def _validate_metrics_request(incident_number, asset_id, metric):
+    """Returns a JsonResponse error if the request is invalid, else None."""
+    if not incident_number or not asset_id or not metric:
+        return JsonResponse(
+            {"error": "incident_number, asset_id and metric are all required"},
+            status=400,
+        )
+    return None
+
+
+def _build_cpu_metrics_response(incident_number, asset_id):
+    """Looks up the incident's open time, runs both ES queries, and builds the response."""
+    try:
+        incident_opened_at = get_incident_opened_at(incident_number)
+    except NotImplementedError as e:
+        logger.error(str(e))
+        return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
+
+    if incident_opened_at is None:
+        return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
+
+    historic = _get_historic_cpu_section(asset_id, incident_opened_at)
+    if isinstance(historic, JsonResponse):
+        return historic  # an error response bubbled up
+
+    current = _get_current_cpu_section(asset_id)
+    if isinstance(current, JsonResponse):
+        return current  # an error response bubbled up
+
+    return JsonResponse({"historic": historic, "current": current})
+
+
+def _get_historic_cpu_section(asset_id, incident_opened_at):
+    """Builds the 'historic' section: a window around when the incident opened."""
+    hist_start = incident_opened_at - HISTORIC_WINDOW
+    hist_end = incident_opened_at + HISTORIC_WINDOW
+    try:
+        hist_avg, hist_top = _query_top_processes_by_cpu(asset_id, hist_start, hist_end)
+    except Exception:
+        logger.exception("Elasticsearch query failed for historic CPU data (asset=%s)", asset_id)
+        return JsonResponse({"error": "Failed to fetch historic CPU data from Elasticsearch"}, status=502)
+
+    return {
+        "avg": hist_avg,
+        "window_start": hist_start.isoformat(),
+        "window_end": hist_end.isoformat(),
+        "top_processes": hist_top,
+    }
+
+
+def _get_current_cpu_section(asset_id):
+    """Builds the 'current' section: a trailing live window up to now."""
+    now = timezone.now()
+    cur_start = now - CURRENT_WINDOW
+    try:
+        cur_avg, cur_top = _query_top_processes_by_cpu(asset_id, cur_start, now)
+    except Exception:
+        logger.exception("Elasticsearch query failed for current CPU data (asset=%s)", asset_id)
+        return JsonResponse({"error": "Failed to fetch current CPU data from Elasticsearch"}, status=502)
+
+    return {
+        "avg": cur_avg,
+        "captured_at": now.isoformat(),
+        "top_processes": cur_top,
+    }
