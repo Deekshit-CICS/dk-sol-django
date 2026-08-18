@@ -1,0 +1,228 @@
+#view.py
+
+"""
+Forensic RCA — Technical Evidence metrics endpoint.
+
+Serves GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
+
+This matches the contract already wired up in forensic-rca-live.html's
+fetchEvidenceMetric()/EVIDENCE_METRIC_URL — no frontend changes are needed
+once this view is live; the CPU tab (with its Historic/Current sub-tabs,
+bar chart, and top-10 table) will start rendering real data immediately.
+
+Currently implements metric=cpu. memory/disk/network are stubbed with a
+501 response — copy the CPU pattern for those once you're ready; the
+frontend already expects the same {historic, current} shape for all four.
+
+>>> ADJUST BEFORE USE <<<
+Three things in this file are placeholders you'll need to point at your
+actual setup — each is marked with a comment below:
+  1. The Elasticsearch client connection (host / auth).
+  2. The Elasticsearch index name and field names (host.name,
+     process name field, cpu percent field) — these depend entirely on
+     what's shipping data into your cluster (Metricbeat, a custom agent,
+     etc.) and I can't guess them.
+  3. The Django model/lookup used to find the incident's opened time
+     (created_at) — I've referenced a TriageSession-style model matching
+     the {id, incident_number, status, created_at, triggered_by} shape
+     from your /api/triage/lookup/ response earlier in this project;
+     swap in your real model/import.
+"""
+
+import logging
+from datetime import timedelta
+
+from django.http import JsonResponse
+from django.utils import timezone
+from django.views import View
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 1. Elasticsearch client — ADJUST host/auth to your real cluster.
+# ---------------------------------------------------------------------------
+from elasticsearch import Elasticsearch
+
+es_client = Elasticsearch(
+    hosts=["https://your-elastic-host:9200"],   # TODO: real ES host(s)
+    basic_auth=("elastic_user", "elastic_password"),  # TODO: real credentials, or use api_key=...
+    verify_certs=True,
+)
+
+# ---------------------------------------------------------------------------
+# 2. Index + field names — ADJUST to match your actual ES mapping.
+#    The values below assume a Metricbeat-style system/process module;
+#    change them if your data looks different.
+# ---------------------------------------------------------------------------
+CPU_INDEX_PATTERN = "metricbeat-*"           # TODO: your CPU metrics index/alias
+HOST_FIELD = "host.name"                     # TODO: field that holds the asset/hostname
+PROCESS_NAME_FIELD = "system.process.name"   # TODO: field holding the process name
+PROCESS_CPU_FIELD = "system.process.cpu.total.pct"  # TODO: per-process CPU pct field (0.0-1.0 scale assumed)
+HOST_CPU_FIELD = "system.cpu.total.pct"      # TODO: overall host CPU pct field (0.0-1.0 scale assumed)
+
+# Time windows — tune these to taste.
+HISTORIC_WINDOW = timedelta(minutes=10)  # +/- around incident.created_at
+CURRENT_WINDOW = timedelta(minutes=5)    # trailing window up to "now"
+
+# ---------------------------------------------------------------------------
+# 3. Incident lookup — ADJUST to your real model/import.
+# ---------------------------------------------------------------------------
+# from triage.models import TriageSession  # TODO: your real import
+
+
+def get_incident_opened_at(incident_number):
+    """
+    Returns the incident's opened/triggered timestamp (a timezone-aware
+    datetime), or None if the incident isn't found.
+
+    TODO: replace this with your actual lookup. Example if you have a
+    TriageSession model matching the /api/triage/lookup/ response shape
+    (id, incident_number, status, created_at, triggered_by):
+
+        session = (
+            TriageSession.objects
+            .filter(incident_number=incident_number)
+            .order_by('-created_at')
+            .first()
+        )
+        return session.created_at if session else None
+    """
+    raise NotImplementedError(
+        "Wire get_incident_opened_at() up to your real incident/session model."
+    )
+
+
+def _query_top_processes_by_cpu(asset_id, start, end, size=10):
+    """
+    Runs a terms aggregation over `PROCESS_NAME_FIELD`, ranked by average
+    CPU usage, within [start, end], filtered to the given asset/host.
+    Also returns the overall host-level average CPU for the same window.
+
+    Returns: (overall_avg_pct: float|None, top_processes: list[dict])
+    """
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {HOST_FIELD: asset_id}},
+                    {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                ]
+            }
+        },
+        "aggs": {
+            "overall_avg_cpu": {
+                "avg": {"field": HOST_CPU_FIELD}
+            },
+            "top_processes": {
+                "terms": {
+                    "field": PROCESS_NAME_FIELD,
+                    "size": size,
+                    "order": {"avg_cpu": "desc"},
+                },
+                "aggs": {
+                    "avg_cpu": {
+                        "avg": {"field": PROCESS_CPU_FIELD}
+                    }
+                },
+            },
+        },
+    }
+
+    response = es_client.search(index=CPU_INDEX_PATTERN, body=query)
+    aggs = response.get("aggregations", {})
+
+    overall_avg = aggs.get("overall_avg_cpu", {}).get("value")
+    # Assumes ES stores CPU as a 0.0-1.0 fraction (Metricbeat default) — drop
+    # the *100 below if your field is already a 0-100 percentage.
+    overall_avg_pct = round(overall_avg * 100, 1) if overall_avg is not None else None
+
+    top_processes = []
+    for bucket in aggs.get("top_processes", {}).get("buckets", []):
+        avg_cpu = bucket.get("avg_cpu", {}).get("value")
+        top_processes.append({
+            "process": bucket.get("key"),
+            "cpu_percent": round(avg_cpu * 100, 1) if avg_cpu is not None else 0,
+        })
+
+    return overall_avg_pct, top_processes
+
+
+class EvidenceMetricsView(View):
+    """
+    GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
+
+    Response shape (matches the frontend's fetchEvidenceMetric() exactly):
+        {
+          "historic": { "avg": <pct>, "window_start": "<iso>", "window_end": "<iso>",
+                         "top_processes": [{"process": "...", "cpu_percent": <pct>}, ...] },
+          "current":  { "avg": <pct>, "captured_at": "<iso>",
+                         "top_processes": [{"process": "...", "cpu_percent": <pct>}, ...] }
+        }
+    """
+
+    def get(self, request):
+        incident_number = request.GET.get('incident_number')
+        asset_id = request.GET.get('asset_id')
+        metric = request.GET.get('metric')
+
+        if not incident_number or not asset_id or not metric:
+            return JsonResponse(
+                {"error": "incident_number, asset_id and metric are all required"},
+                status=400,
+            )
+
+        if metric != 'cpu':
+            # TODO: implement memory/disk/network using the same pattern —
+            # the frontend already expects the identical {historic, current}
+            # shape for all four, just with different top-list field names
+            # (top_mount_points for disk, interfaces for network, etc. —
+            # see the doc comment above EVIDENCE_METRIC_URL in the frontend).
+            return JsonResponse(
+                {"error": f"metric='{metric}' is not implemented yet"},
+                status=501,
+            )
+
+        try:
+            incident_opened_at = get_incident_opened_at(incident_number)
+        except NotImplementedError as e:
+            logger.error(str(e))
+            return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
+
+        if incident_opened_at is None:
+            return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
+
+        # --- Historic: window around when the incident was opened ---
+        hist_start = incident_opened_at - HISTORIC_WINDOW
+        hist_end = incident_opened_at + HISTORIC_WINDOW
+        try:
+            hist_avg, hist_top = _query_top_processes_by_cpu(asset_id, hist_start, hist_end)
+        except Exception:
+            logger.exception("Elasticsearch query failed for historic CPU data (incident=%s, asset=%s)", incident_number, asset_id)
+            return JsonResponse({"error": "Failed to fetch historic CPU data from Elasticsearch"}, status=502)
+
+        # --- Current: trailing window up to now ---
+        now = timezone.now()
+        cur_start = now - CURRENT_WINDOW
+        try:
+            cur_avg, cur_top = _query_top_processes_by_cpu(asset_id, cur_start, now)
+        except Exception:
+            logger.exception("Elasticsearch query failed for current CPU data (incident=%s, asset=%s)", incident_number, asset_id)
+            return JsonResponse({"error": "Failed to fetch current CPU data from Elasticsearch"}, status=502)
+
+        return JsonResponse({
+            "historic": {
+                "avg": hist_avg,
+                "window_start": hist_start.isoformat(),
+                "window_end": hist_end.isoformat(),
+                "top_processes": hist_top,
+            },
+            "current": {
+                "avg": cur_avg,
+                "captured_at": now.isoformat(),
+                "top_processes": cur_top,
+            },
+        })
+
+
+                           
