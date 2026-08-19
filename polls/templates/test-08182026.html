@@ -812,3 +812,185 @@ def _get_current_rawlog_section(asset_id):
         "captured_at": now.isoformat(),
         "log": log_text,
     }
+
+
+# ===========================================================================
+# Asset Inventory — backed by ServiceNow CMDB (separate data source from
+# everything above, which talks to Elasticsearch).
+#
+# Serves GET /api/triage/asset/details/?incident_number=<id>&asset_id=<assetId>
+#
+# Matches the contract already wired up in forensic-rca-live.html's
+# fetchAssetDetails()/normalizeAssetDetails() — no frontend changes needed
+# once this view is live.
+#
+# >>> ADJUST BEFORE USE <<<
+#   1. ServiceNow connection (instance URL, auth).
+#   2. SNOW_FIELD_MAP below — this is the biggest unknown. Only a handful
+#      of these are true ServiceNow out-of-box fields (name, manufacturer,
+#      serial_number, ip_address, os, cpu_count, ram, support_group).
+#      Several — environment, region, last_patch_date, os_build,
+#      system_role, retirement_ticket — are commonly custom fields
+#      (u_-prefixed) that vary per instance, or may not exist at all in
+#      yours. Check your actual cmdb_ci_server (or whichever table you
+#      use) field list and adjust every value in the map.
+# ===========================================================================
+
+SNOW_INSTANCE_URL = "https://your-instance.service-now.com"  # TODO: real ServiceNow instance URL
+SNOW_AUTH = ("snow_user", "snow_password")  # TODO: real credentials, or switch to OAuth (see note below)
+SNOW_VERIFY_SSL = True
+SNOW_REQUEST_TIMEOUT = 10  # seconds — TODO: tune to your instance's typical latency
+
+# If your ServiceNow instance uses OAuth instead of basic auth, drop
+# SNOW_AUTH above and send this header on every request instead:
+#   SNOW_HEADERS = {"Authorization": "Bearer <access_token>"}
+
+CMDB_TABLE = "cmdb_ci_server"      # TODO: or cmdb_ci, cmdb_ci_linux_server, cmdb_ci_win_server, etc.
+ASSET_QUERY_FIELD = "name"         # TODO: field to match asset_id against (hostname field, typically "name")
+
+# Output key -> ServiceNow field name. Reference/choice fields (manufacturer,
+# location, support_group, install_status, etc.) come back as
+# {"value": sys_id, "display_value": "human text"} when the request uses
+# sysparm_display_value=true (which _snow_search_ci() does) — handled by
+# _extract_field() below, which unwraps either shape into a plain string.
+SNOW_FIELD_MAP = {
+    "name": "name",
+    "ci_id": "asset_tag",                  # TODO: or "sys_id" if you don't use ServiceNow asset tags
+    "manufacturer": "manufacturer",
+    "model_id": "model_id",
+    "category": "sys_class_name",          # TODO: or a custom "category" field if you have one
+    "location": "location",
+    "environment": "u_environment",        # TODO: rarely OOB — usually a custom field, confirm the real name
+    "description": "short_description",
+    "serial_number": "serial_number",
+    "install_status": "install_status",
+    "region": "u_region",                  # TODO: rarely OOB — usually custom, or derived from location
+    "last_patch_date": "u_last_patch_date",  # TODO: rarely OOB — often comes from a patch/discovery table instead
+    "operating_system": "os",
+    "os_version": "os_version",
+    "os_build": "u_os_build",              # TODO: rarely OOB — usually custom
+    "system_role": "u_system_role",        # TODO: rarely OOB — usually custom
+    "ip_address": "ip_address",
+    "cpu_name": "cpu_type",                # ServiceNow stores the CPU model name in "cpu_type" by default (confusingly)
+    "cpu_type": "u_cpu_architecture",      # TODO: distinct from cpu_name above — rarely OOB, confirm/adjust
+    "cpu_count": "cpu_count",
+    "cpu_core_count": "cpu_core_count",    # TODO: not always present out-of-box
+    "ram": "ram",                          # numeric, typically MB — converted to a readable string below
+    "support_group": "support_group",
+    "retirement_ticket": "u_retirement_ticket",  # TODO: rarely OOB — usually a custom field, may not exist
+}
+
+
+def _snow_search_ci(asset_id):
+    """
+    Queries ServiceNow's Table API for the CMDB record matching asset_id.
+    Uses sysparm_display_value=true so reference/choice fields (manufacturer,
+    location, support_group, install_status, etc.) come back as
+    human-readable text instead of raw sys_ids/choice codes.
+
+    Returns the matching record dict, or None if nothing matched.
+    """
+    url = f"{SNOW_INSTANCE_URL}/api/now/table/{CMDB_TABLE}"
+    params = {
+        "sysparm_query": f"{ASSET_QUERY_FIELD}={asset_id}",
+        "sysparm_limit": 1,
+        "sysparm_display_value": "true",
+    }
+    response = requests.get(
+        url,
+        params=params,
+        auth=SNOW_AUTH,
+        # headers=SNOW_HEADERS,  # use this instead of `auth=` if you're on OAuth
+        headers={"Accept": "application/json"},
+        verify=SNOW_VERIFY_SSL,
+        timeout=SNOW_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    results = response.json().get("result", [])
+    return results[0] if results else None
+
+
+def _extract_field(record, field_name):
+    """
+    ServiceNow fields come back as either a plain value or, for
+    reference/choice fields with sysparm_display_value=true, an object
+    like {"value": "...", "display_value": "..."}. Normalizes either into
+    a plain value.
+    """
+    value = record.get(field_name)
+    if isinstance(value, dict):
+        return value.get("display_value") or value.get("value")
+    return value
+
+
+def _format_ram(raw_ram):
+    """
+    ServiceNow's `ram` field is typically a plain number in MB. Converts
+    it to a human-readable string (e.g. "128 GB") for display.
+    TODO: confirm your instance's actual unit — some customizations store
+    this in GB already, in which case drop the /1024 conversion below.
+    """
+    if not raw_ram:
+        return None
+    try:
+        mb = float(raw_ram)
+    except (TypeError, ValueError):
+        return str(raw_ram)  # already a string like "128 GB"? pass through as-is
+    if mb >= 1024:
+        return f"{mb / 1024:.0f} GB"
+    return f"{mb:.0f} MB"
+
+
+def _derive_retirement_status(record):
+    """
+    ServiceNow has no universal "retirement status" field — most instances
+    encode this inside install_status's choice list (common OOB labels
+    include "Retired", "Absent", "In Use", "In Maintenance", etc.).
+    TODO: this is a keyword heuristic, not a guaranteed-correct mapping —
+    adjust it (or point at a dedicated custom field, if your instance has
+    one) to match your actual install_status choice list values.
+    """
+    install_status = (_extract_field(record, "install_status") or "").lower()
+    if any(keyword in install_status for keyword in ("retire", "absent", "dispos")):
+        return "Retired"
+    return "Active"
+
+
+def _build_asset_details_response(record):
+    """Maps a raw ServiceNow CI record onto the frontend's expected field names."""
+    data = {}
+    for output_key, snow_field in SNOW_FIELD_MAP.items():
+        data[output_key] = _extract_field(record, snow_field)
+
+    data["ram"] = _format_ram(data.get("ram"))
+    data["retirement_status"] = _derive_retirement_status(record)
+
+    return data
+
+
+@require_GET
+def asset_details(request):
+    """
+    GET /api/triage/asset/details/?incident_number=<id>&asset_id=<assetId>
+
+    incident_number isn't actually needed to look up the CMDB record (the
+    asset is found purely by asset_id/hostname) — it's accepted and
+    validated for consistency with the other evidence endpoints, and in
+    case you want to log/audit which incident triggered the lookup.
+    """
+    incident_number = request.GET.get('incident_number')
+    asset_id = request.GET.get('asset_id')
+
+    if not incident_number or not asset_id:
+        return JsonResponse({"error": "incident_number and asset_id are required"}, status=400)
+
+    try:
+        record = _snow_search_ci(asset_id)
+    except Exception:
+        logger.exception("ServiceNow lookup failed for asset=%s", asset_id)
+        return JsonResponse({"error": "Failed to fetch asset details from ServiceNow"}, status=502)
+
+    if record is None:
+        return JsonResponse({"error": f"Asset '{asset_id}' not found in ServiceNow"}, status=404)
+
+    return JsonResponse(_build_asset_details_response(record))
