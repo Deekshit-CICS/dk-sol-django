@@ -845,8 +845,23 @@ SNOW_REQUEST_TIMEOUT = 10  # seconds — TODO: tune to your instance's typical l
 # SNOW_AUTH above and send this header on every request instead:
 #   SNOW_HEADERS = {"Authorization": "Bearer <access_token>"}
 
-CMDB_TABLE = "cmdb_ci_server"      # TODO: or cmdb_ci, cmdb_ci_linux_server, cmdb_ci_win_server, etc.
+CMDB_TABLE = "cmdb_ci_server"      # base server table — has everything except patch data
+CMDB_WIN_TABLE = "cmdb_ci_win_server"      # Windows extension table — has patch data for Windows servers
+CMDB_LINUX_TABLE = "cmdb_ci_linux_server"  # Linux extension table — has patch data for Linux servers
 ASSET_QUERY_FIELD = "name"         # TODO: field to match asset_id against (hostname field, typically "name")
+
+CATEGORY_FIELD = "category"        # the field on cmdb_ci_server used to decide Windows vs Linux
+# TODO: confirm what values your `category` field actually holds (e.g.
+# "Windows Server", "Linux") — _is_windows_category() below does a
+# case-insensitive "windows" substring check, adjust if your values look
+# different (e.g. a class name, a custom choice list, etc.)
+
+# Patch date field names on the OS-specific extension tables — these are
+# separate from CMDB_TABLE's fields since cmdb_ci_server itself doesn't
+# carry patch data. TODO: confirm the actual field names on your instance;
+# these two tables commonly use different field names from each other.
+WIN_LAST_PATCH_FIELD = "u_last_patch_date"    # TODO: confirm real field name on cmdb_ci_win_server
+LINUX_LAST_PATCH_FIELD = "u_last_patch_date"  # TODO: confirm real field name on cmdb_ci_linux_server
 
 # Output key -> ServiceNow field name. Reference/choice fields (manufacturer,
 # location, support_group, install_status, etc.) come back as
@@ -858,14 +873,17 @@ SNOW_FIELD_MAP = {
     "ci_id": "asset_tag",                  # TODO: or "sys_id" if you don't use ServiceNow asset tags
     "manufacturer": "manufacturer",
     "model_id": "model_id",
-    "category": "sys_class_name",          # TODO: or a custom "category" field if you have one
+    "category": CATEGORY_FIELD,
     "location": "location",
     "environment": "u_environment",        # TODO: rarely OOB — usually a custom field, confirm the real name
     "description": "short_description",
     "serial_number": "serial_number",
     "install_status": "install_status",
     "region": "u_region",                  # TODO: rarely OOB — usually custom, or derived from location
-    "last_patch_date": "u_last_patch_date",  # TODO: rarely OOB — often comes from a patch/discovery table instead
+    # last_patch_date is NOT on cmdb_ci_server — left unmapped here on
+    # purpose. It's fetched separately from the OS-specific extension
+    # table (cmdb_ci_win_server / cmdb_ci_linux_server) — see
+    # _snow_fetch_patch_date() and how asset_details() below wires it in.
     "operating_system": "os",
     "os_version": "os_version",
     "os_build": "u_os_build",              # TODO: rarely OOB — usually custom
@@ -968,6 +986,53 @@ def _build_asset_details_response(record):
     return data
 
 
+def _is_windows_category(category_value):
+    """
+    OS-family check based on the CI's category field value.
+    TODO: confirm what your `category` field actually holds — this does a
+    case-insensitive "windows" substring check, adjust if your values look
+    different (e.g. "Win2022", a class name, a custom choice list, etc.)
+    """
+    return "windows" in (category_value or "").lower()
+
+
+def _snow_fetch_patch_date(asset_id, is_windows):
+    """
+    cmdb_ci_server doesn't carry patch data — it lives on the OS-specific
+    extension table instead (cmdb_ci_win_server or cmdb_ci_linux_server,
+    both of which extend cmdb_ci_server in ServiceNow's CMDB class
+    hierarchy). Looks the same asset up there and returns just the patch
+    date field.
+
+    Returns the last_patch_date value, or None if no record/field found.
+    Deliberately narrow (sysparm_fields) since this is a second round trip
+    just to enrich one field.
+    """
+    table = CMDB_WIN_TABLE if is_windows else CMDB_LINUX_TABLE
+    patch_field = WIN_LAST_PATCH_FIELD if is_windows else LINUX_LAST_PATCH_FIELD
+
+    url = f"{SNOW_INSTANCE_URL}/api/now/table/{table}"
+    params = {
+        "sysparm_query": f"{ASSET_QUERY_FIELD}={asset_id}",
+        "sysparm_limit": 1,
+        "sysparm_display_value": "true",
+        "sysparm_fields": f"{ASSET_QUERY_FIELD},{patch_field}",
+    }
+    response = requests.get(
+        url,
+        params=params,
+        auth=SNOW_AUTH,
+        headers={"Accept": "application/json"},
+        verify=SNOW_VERIFY_SSL,
+        timeout=SNOW_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    results = response.json().get("result", [])
+    if not results:
+        return None
+    return _extract_field(results[0], patch_field)
+
+
 @require_GET
 def asset_details(request):
     """
@@ -993,4 +1058,22 @@ def asset_details(request):
     if record is None:
         return JsonResponse({"error": f"Asset '{asset_id}' not found in ServiceNow"}, status=404)
 
-    return JsonResponse(_build_asset_details_response(record))
+    data = _build_asset_details_response(record)
+
+    # cmdb_ci_server has no patch data — fetch it from whichever OS-specific
+    # extension table matches this CI's category. Deliberately non-fatal:
+    # if this second lookup fails, the rest of the asset details still
+    # render fine with last_patch_date left as null rather than the whole
+    # request failing over one supplementary field.
+    is_windows = _is_windows_category(_extract_field(record, CATEGORY_FIELD))
+    try:
+        patch_date = _snow_fetch_patch_date(asset_id, is_windows)
+        if patch_date:
+            data["last_patch_date"] = patch_date
+    except Exception:
+        logger.exception(
+            "ServiceNow patch-date lookup failed for asset=%s (table=%s)",
+            asset_id, CMDB_WIN_TABLE if is_windows else CMDB_LINUX_TABLE,
+        )
+
+    return JsonResponse(data)
