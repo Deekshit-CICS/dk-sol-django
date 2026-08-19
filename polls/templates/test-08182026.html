@@ -1077,3 +1077,185 @@ def asset_details(request):
         )
 
     return JsonResponse(data)
+
+
+# ===========================================================================
+# Linked Changes — also ServiceNow-backed (change_request table), separate
+# concern from the Asset Inventory CMDB lookups above, same instance/auth.
+#
+# Serves GET /api/triage/changes/?incident_number=<id>&app_id=<appId>
+#
+# Matches the "raw" field-name shape the frontend already normalizes in
+# applyIncidentDetails()/mapChangesRaw() (change_number, submitter,
+# affected_ci, change_coordinator, start_time, end_time, status, app_id,
+# impacted_cis[]) — same field names used for the bundled /details/
+# response's changes[], so no new frontend mapping logic was needed, just
+# a new fetch call. See mapChangesRaw() in forensic-rca-live.html.
+#
+# >>> ADJUST BEFORE USE <<<
+#   1. CHANGE_APP_FIELD — how a change ties back to an application/app_id
+#      varies hugely per instance (a custom u_application field, a
+#      Business Service reference, derived from the affected CI's app
+#      relationship, etc.). This is a guess.
+#   2. IMPACTED_CI_TABLE and the suppression fields — ServiceNow's OOB
+#      junction table for "which CIs does this change affect" is
+#      typically task_ci, but the suppression_status/suppression_request
+#      fields are almost certainly custom (Event Management alert
+#      suppression tied to a change) and may not exist at all in your
+#      instance if you don't have that integration.
+# ===========================================================================
+
+CHANGE_REQUEST_TABLE = "change_request"
+CHANGE_APP_FIELD = "u_application"   # TODO: field linking a change to an app/app_id — confirm your instance's real field
+CHANGE_WINDOW_HOURS = 24             # +/- around incident open time, per the "pre/post 24hr" requirement
+
+# Output key -> change_request field name.
+CHANGE_FIELD_MAP = {
+    "change_number": "number",
+    "submitter": "requested_by",                   # TODO: or "sys_created_by"
+    "affected_ci": "cmdb_ci",                       # reference field -> display_value
+    "change_coordinator": "u_change_coordinator",   # TODO: rarely OOB — or "assigned_to"
+    "start_time": "start_date",
+    "end_time": "end_date",
+    "status": "state",                              # choice field -> display_value
+}
+
+IMPACTED_CI_TABLE = "task_ci"                # TODO: confirm — ServiceNow's OOB task<->CI junction table
+IMPACTED_CI_TASK_FIELD = "task"              # reference back to the change_request sys_id
+IMPACTED_CI_FIELD = "ci_item"                # reference to the affected CI
+SUPPRESSION_STATUS_FIELD = "u_suppression_status"            # TODO: almost certainly custom, may not exist
+SUPPRESSION_REQUEST_FIELD = "u_suppression_request_number"   # TODO: almost certainly custom, may not exist
+
+
+def _snow_search_changes(app_id, window_start, window_end):
+    """
+    Queries change_request for changes tied to app_id whose window
+    overlaps [window_start, window_end]. "Overlaps" (not just "starts
+    within") means: the change started before the window ends AND ended
+    after the window starts — this also catches changes that began before
+    the incident but were still running into the +/-24h window, not just
+    ones that started inside it. Adjust to a simpler start_date-only check
+    if you'd rather match your exact wording more literally.
+
+    NOTE: window_start/window_end are Python datetimes (from Django's
+    timezone-aware `now`/incident lookup) formatted as ServiceNow expects
+    for GlideDateTime comparisons ("YYYY-MM-DD HH:MM:SS"). TODO: confirm
+    your ServiceNow instance's configured timezone matches what these
+    datetimes represent — if your instance stores times in a different
+    timezone than Django's incident timestamps, these comparisons will be
+    off by that offset.
+    """
+    url = f"{SNOW_INSTANCE_URL}/api/now/table/{CHANGE_REQUEST_TABLE}"
+    query = (
+        f"{CHANGE_APP_FIELD}={app_id}"
+        f"^start_date<={window_end.strftime('%Y-%m-%d %H:%M:%S')}"
+        f"^end_date>={window_start.strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    params = {
+        "sysparm_query": query,
+        "sysparm_display_value": "true",
+        "sysparm_limit": 50,
+    }
+    response = requests.get(
+        url,
+        params=params,
+        auth=SNOW_AUTH,
+        headers={"Accept": "application/json"},
+        verify=SNOW_VERIFY_SSL,
+        timeout=SNOW_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    return response.json().get("result", [])
+
+
+def _snow_search_impacted_cis(change_sys_id):
+    """
+    Looks up impacted CIs for one change via the task_ci junction table.
+    Non-fatal by design in the caller below — a failed lookup here just
+    means that one change shows an empty impacted-CI list, not a failed
+    request overall.
+    """
+    url = f"{SNOW_INSTANCE_URL}/api/now/table/{IMPACTED_CI_TABLE}"
+    params = {
+        "sysparm_query": f"{IMPACTED_CI_TASK_FIELD}={change_sys_id}",
+        "sysparm_display_value": "true",
+        "sysparm_limit": 50,
+    }
+    response = requests.get(
+        url,
+        params=params,
+        auth=SNOW_AUTH,
+        headers={"Accept": "application/json"},
+        verify=SNOW_VERIFY_SSL,
+        timeout=SNOW_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    results = response.json().get("result", [])
+
+    impacted = []
+    for row in results:
+        impacted.append({
+            "ci_name": _extract_field(row, IMPACTED_CI_FIELD) or "Unknown",
+            "suppression_status": _extract_field(row, SUPPRESSION_STATUS_FIELD) or "Not Suppressed",
+            "suppression_request_number": _extract_field(row, SUPPRESSION_REQUEST_FIELD) or "N/A",
+        })
+    return impacted
+
+
+def _build_change_response(record, app_id):
+    """Maps a raw ServiceNow change_request record onto the frontend's expected field names."""
+    data = {
+        output_key: _extract_field(record, snow_field)
+        for output_key, snow_field in CHANGE_FIELD_MAP.items()
+    }
+    data["app_id"] = app_id
+
+    change_sys_id = record.get("sys_id")  # sys_id is never a reference field, always a plain string
+    try:
+        data["impacted_cis"] = _snow_search_impacted_cis(change_sys_id) if change_sys_id else []
+    except Exception:
+        logger.exception("Impacted-CI lookup failed for change=%s", data.get("change_number"))
+        data["impacted_cis"] = []
+
+    return data
+
+
+@require_GET
+def changes(request):
+    """
+    GET /api/triage/changes/?incident_number=<id>&app_id=<appId>
+
+    Fetches ServiceNow change requests tied to app_id whose window overlaps
+    the +/-24h period around when the incident opened.
+
+    Response: { "changes": [ {change_number, submitter, affected_ci,
+    change_coordinator, start_time, end_time, status, app_id,
+    impacted_cis: [...]}, ... ] }
+    """
+    incident_number = request.GET.get('incident_number')
+    app_id = request.GET.get('app_id')
+
+    if not incident_number or not app_id:
+        return JsonResponse({"error": "incident_number and app_id are required"}, status=400)
+
+    try:
+        incident_opened_at = get_incident_opened_at(incident_number)
+    except NotImplementedError as e:
+        logger.error(str(e))
+        return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
+
+    if incident_opened_at is None:
+        return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
+
+    window_start = incident_opened_at - timedelta(hours=CHANGE_WINDOW_HOURS)
+    window_end = incident_opened_at + timedelta(hours=CHANGE_WINDOW_HOURS)
+
+    try:
+        records = _snow_search_changes(app_id, window_start, window_end)
+    except Exception:
+        logger.exception("ServiceNow change lookup failed for app_id=%s", app_id)
+        return JsonResponse({"error": "Failed to fetch changes from ServiceNow"}, status=502)
+
+    changes_list = [_build_change_response(record, app_id) for record in records]
+
+    return JsonResponse({"changes": changes_list})
