@@ -14,10 +14,11 @@ then metric-specific builders — rather than one long function, so adding
 memory/disk/network later is just adding a new `_build_<metric>_response`
 + wiring it into the if/elif in `evidence_metrics`.
 
-Currently implements metric=cpu, metric=memory, and metric=disk. network
-is still stubbed with a 501 response — copy the CPU/memory/disk pattern
-for it once you're ready; the frontend already expects the same
-{historic, current} shape for all four.
+All four metrics — cpu, memory, disk, network — are implemented below,
+each following the same historic/current pattern. Network is structurally
+different from the other three (no overall "avg", and its flow_count is
+an approximation — see the note above NETWORK_INDEX_PATTERN and inside
+_query_network_interfaces()).
 
 >>> ADJUST BEFORE USE <<<
 Three things in this file are placeholders you'll need to point at your
@@ -100,6 +101,19 @@ DISK_MOUNT_POINT_FIELD = "system.filesystem.mount_point"  # TODO: field holding 
 DISK_USED_PCT_FIELD = "system.filesystem.used.pct"        # TODO: per-mount used pct field (0.0-1.0 scale assumed)
 DISK_USED_BYTES_FIELD = "system.filesystem.used.bytes"    # TODO: per-mount used bytes field
 DISK_TOTAL_BYTES_FIELD = "system.filesystem.total"        # TODO: per-mount total bytes field
+
+NETWORK_INDEX_PATTERN = "metricbeat-*"             # TODO: adjust if network metrics live in a different index
+INTERFACE_NAME_FIELD = "system.network.name"       # TODO: field holding the interface name (eth0, etc.)
+TRAFFIC_IN_BYTES_FIELD = "system.network.in.bytes"   # TODO: per-interface inbound bytes field
+TRAFFIC_OUT_BYTES_FIELD = "system.network.out.bytes" # TODO: per-interface outbound bytes field
+# There's no standard "flow count" field in Metricbeat's network module —
+# it tracks bytes/packets per interface, not discrete flows/sessions.
+# _query_network_interfaces() below approximates flow_count using each
+# bucket's doc_count (i.e. how many metric samples matched), which is NOT
+# a real flow count. If you have actual flow/session data — e.g. Elastic's
+# NetFlow/network-flow integration with a network.community_id or flow.id
+# field — swap in a `cardinality` aggregation on that field instead; see
+# the comment inside _query_network_interfaces().
 
 # Time windows — tune these to taste.
 HISTORIC_WINDOW = timedelta(minutes=10)  # +/- around incident.created_at
@@ -324,6 +338,67 @@ def _query_top_mount_points_by_disk_usage(asset_id, start, end, size=10):
     return overall_avg_pct, top_mount_points
 
 
+def _query_network_interfaces(asset_id, start, end, size=10):
+    """
+    Terms aggregation on the network interface name field, summing
+    inbound/outbound traffic per interface within [start, end], filtered
+    to the given asset/host.
+
+    `flow_count` uses each bucket's doc_count as an approximation (the
+    number of metric samples matched for that interface) — NOT a real
+    flow/session count, since Metricbeat's network module doesn't track
+    that natively. If you have real flow data (e.g. Elastic's NetFlow /
+    network-flow integration with a network.community_id or flow.id
+    field), replace it with something like:
+        "flow_count": {"cardinality": {"field": "network.community_id"}}
+    and read `bucket["flow_count"]["value"]` below instead of `doc_count`.
+
+    Returns: list[dict] of { driver, traffic_in, traffic_out, flow_count }
+    — no overall "avg" here, network doesn't have one (matches what the
+    frontend's Network tab expects: no avg stat card, just the table).
+    """
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {HOST_FIELD: asset_id}},
+                    {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                ]
+            }
+        },
+        "aggs": {
+            "interfaces": {
+                "terms": {
+                    "field": INTERFACE_NAME_FIELD,
+                    "size": size,
+                    "order": {"total_in": "desc"},
+                },
+                "aggs": {
+                    "total_in": {"sum": {"field": TRAFFIC_IN_BYTES_FIELD}},
+                    "total_out": {"sum": {"field": TRAFFIC_OUT_BYTES_FIELD}},
+                },
+            },
+        },
+    }
+
+    response = _es_search(NETWORK_INDEX_PATTERN, query)
+    aggs = response.get("aggregations", {})
+
+    interfaces = []
+    for bucket in aggs.get("interfaces", {}).get("buckets", []):
+        total_in = bucket.get("total_in", {}).get("value")
+        total_out = bucket.get("total_out", {}).get("value")
+        interfaces.append({
+            "driver": bucket.get("key"),
+            "traffic_in": _format_bytes(total_in),
+            "traffic_out": _format_bytes(total_out),
+            "flow_count": bucket.get("doc_count", 0),  # approximation — see docstring above
+        })
+
+    return interfaces
+
+
 @require_GET
 def evidence_metrics(request):
     """
@@ -351,13 +426,12 @@ def evidence_metrics(request):
         return _build_memory_metrics_response(incident_number, asset_id)
     if metric == 'disk':
         return _build_disk_metrics_response(incident_number, asset_id)
+    if metric == 'network':
+        return _build_network_metrics_response(incident_number, asset_id)
 
-    # TODO: implement network using the same pattern as the builders
-    # above — the frontend already expects the identical {historic,
-    # current} envelope, just with an `interfaces` list instead of
-    # top_processes/top_mount_points — see the doc comment above
-    # EVIDENCE_METRIC_URL in the frontend.
-    return JsonResponse({"error": f"metric='{metric}' is not implemented yet"}, status=501)
+    # All four metrics (cpu/memory/disk/network) are implemented above —
+    # anything else is a genuinely bad request, not "not implemented yet".
+    return JsonResponse({"error": f"metric='{metric}' is not a recognized metric"}, status=400)
 
 
 def _validate_metrics_request(incident_number, asset_id, metric):
@@ -538,4 +612,59 @@ def _get_current_disk_section(asset_id):
         "avg": cur_avg,
         "captured_at": now.isoformat(),
         "top_mount_points": cur_top,
+    }
+
+
+def _build_network_metrics_response(incident_number, asset_id):
+    """Looks up the incident's open time, runs both ES queries, and builds the response."""
+    try:
+        incident_opened_at = get_incident_opened_at(incident_number)
+    except NotImplementedError as e:
+        logger.error(str(e))
+        return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
+
+    if incident_opened_at is None:
+        return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
+
+    historic = _get_historic_network_section(asset_id, incident_opened_at)
+    if isinstance(historic, JsonResponse):
+        return historic  # an error response bubbled up
+
+    current = _get_current_network_section(asset_id)
+    if isinstance(current, JsonResponse):
+        return current  # an error response bubbled up
+
+    return JsonResponse({"historic": historic, "current": current})
+
+
+def _get_historic_network_section(asset_id, incident_opened_at):
+    """Builds the 'historic' section: a window around when the incident opened."""
+    hist_start = incident_opened_at - HISTORIC_WINDOW
+    hist_end = incident_opened_at + HISTORIC_WINDOW
+    try:
+        interfaces = _query_network_interfaces(asset_id, hist_start, hist_end)
+    except Exception:
+        logger.exception("Elasticsearch query failed for historic network data (asset=%s)", asset_id)
+        return JsonResponse({"error": "Failed to fetch historic network data from Elasticsearch"}, status=502)
+
+    return {
+        "window_start": hist_start.isoformat(),
+        "window_end": hist_end.isoformat(),
+        "interfaces": interfaces,
+    }
+
+
+def _get_current_network_section(asset_id):
+    """Builds the 'current' section: a trailing live window up to now."""
+    now = timezone.now()
+    cur_start = now - CURRENT_WINDOW
+    try:
+        interfaces = _query_network_interfaces(asset_id, cur_start, now)
+    except Exception:
+        logger.exception("Elasticsearch query failed for current network data (asset=%s)", asset_id)
+        return JsonResponse({"error": "Failed to fetch current network data from Elasticsearch"}, status=502)
+
+    return {
+        "captured_at": now.isoformat(),
+        "interfaces": interfaces,
     }
