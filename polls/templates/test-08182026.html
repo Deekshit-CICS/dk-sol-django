@@ -14,10 +14,10 @@ then metric-specific builders — rather than one long function, so adding
 memory/disk/network later is just adding a new `_build_<metric>_response`
 + wiring it into the if/elif in `evidence_metrics`.
 
-Currently implements metric=cpu and metric=memory. disk/network are still
-stubbed with a 501 response — copy the CPU/memory pattern for those once
-you're ready; the frontend already expects the same {historic, current}
-shape for all four.
+Currently implements metric=cpu, metric=memory, and metric=disk. network
+is still stubbed with a 501 response — copy the CPU/memory/disk pattern
+for it once you're ready; the frontend already expects the same
+{historic, current} shape for all four.
 
 >>> ADJUST BEFORE USE <<<
 Three things in this file are placeholders you'll need to point at your
@@ -94,6 +94,12 @@ HOST_CPU_FIELD = "system.cpu.total.pct"      # TODO: overall host CPU pct field 
 MEMORY_INDEX_PATTERN = "metricbeat-*"        # TODO: adjust if memory metrics live in a different index
 PROCESS_MEMORY_FIELD = "system.process.memory.rss.pct"  # TODO: per-process memory pct field (0.0-1.0 scale assumed)
 HOST_MEMORY_FIELD = "system.memory.actual.used.pct"     # TODO: overall host memory pct field (0.0-1.0 scale assumed)
+
+DISK_INDEX_PATTERN = "metricbeat-*"                # TODO: adjust if filesystem metrics live in a different index
+DISK_MOUNT_POINT_FIELD = "system.filesystem.mount_point"  # TODO: field holding the mount point path
+DISK_USED_PCT_FIELD = "system.filesystem.used.pct"        # TODO: per-mount used pct field (0.0-1.0 scale assumed)
+DISK_USED_BYTES_FIELD = "system.filesystem.used.bytes"    # TODO: per-mount used bytes field
+DISK_TOTAL_BYTES_FIELD = "system.filesystem.total"        # TODO: per-mount total bytes field
 
 # Time windows — tune these to taste.
 HISTORIC_WINDOW = timedelta(minutes=10)  # +/- around incident.created_at
@@ -239,6 +245,85 @@ def _query_top_processes_by_memory(asset_id, start, end, size=10):
     return overall_avg_pct, top_processes
 
 
+def _format_bytes(num_bytes):
+    """
+    Formats a raw byte count as a human-readable string (e.g. '128.4 GB'),
+    since the frontend displays `used`/`total` as plain strings rather
+    than doing its own unit conversion.
+    """
+    if num_bytes is None:
+        return "N/A"
+    size = float(num_bytes)
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size < 1024 or unit == "GB":
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def _query_top_mount_points_by_disk_usage(asset_id, start, end, size=10):
+    """
+    Terms aggregation on the filesystem mount_point field, ranked by used
+    percentage, within [start, end], filtered to the given asset/host.
+    Also returns the overall average disk usage % across all mounts for
+    the same window (used for the top-level 'avg' stat).
+
+    Returns: (overall_avg_pct: float|None, top_mount_points: list[dict])
+    where each dict matches what the frontend's Disk tab expects:
+    { mount_point, used, total, percent_used }.
+    """
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {HOST_FIELD: asset_id}},
+                    {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                ]
+            }
+        },
+        "aggs": {
+            "overall_avg_disk": {
+                "avg": {"field": DISK_USED_PCT_FIELD}
+            },
+            "top_mounts": {
+                "terms": {
+                    "field": DISK_MOUNT_POINT_FIELD,
+                    "size": size,
+                    "order": {"avg_used_pct": "desc"},
+                },
+                "aggs": {
+                    "avg_used_pct": {"avg": {"field": DISK_USED_PCT_FIELD}},
+                    "avg_used_bytes": {"avg": {"field": DISK_USED_BYTES_FIELD}},
+                    "avg_total_bytes": {"avg": {"field": DISK_TOTAL_BYTES_FIELD}},
+                },
+            },
+        },
+    }
+
+    response = _es_search(DISK_INDEX_PATTERN, query)
+    aggs = response.get("aggregations", {})
+
+    overall_avg = aggs.get("overall_avg_disk", {}).get("value")
+    # Assumes ES stores disk usage as a 0.0-1.0 fraction — drop the *100
+    # below if your field is already a 0-100 percentage.
+    overall_avg_pct = round(overall_avg * 100, 1) if overall_avg is not None else None
+
+    top_mount_points = []
+    for bucket in aggs.get("top_mounts", {}).get("buckets", []):
+        pct = bucket.get("avg_used_pct", {}).get("value")
+        used_bytes = bucket.get("avg_used_bytes", {}).get("value")
+        total_bytes = bucket.get("avg_total_bytes", {}).get("value")
+        top_mount_points.append({
+            "mount_point": bucket.get("key"),
+            "used": _format_bytes(used_bytes),
+            "total": _format_bytes(total_bytes),
+            "percent_used": round(pct * 100, 1) if pct is not None else 0,
+        })
+
+    return overall_avg_pct, top_mount_points
+
+
 @require_GET
 def evidence_metrics(request):
     """
@@ -264,13 +349,14 @@ def evidence_metrics(request):
         return _build_cpu_metrics_response(incident_number, asset_id)
     if metric == 'memory':
         return _build_memory_metrics_response(incident_number, asset_id)
+    if metric == 'disk':
+        return _build_disk_metrics_response(incident_number, asset_id)
 
-    # TODO: implement disk/network using the same pattern as
-    # _build_cpu_metrics_response()/_build_memory_metrics_response() — the
-    # frontend already expects the identical {historic, current} envelope
-    # for all four, just with different top-list field names
-    # (top_mount_points for disk, interfaces for network, etc. — see the
-    # doc comment above EVIDENCE_METRIC_URL in the frontend).
+    # TODO: implement network using the same pattern as the builders
+    # above — the frontend already expects the identical {historic,
+    # current} envelope, just with an `interfaces` list instead of
+    # top_processes/top_mount_points — see the doc comment above
+    # EVIDENCE_METRIC_URL in the frontend.
     return JsonResponse({"error": f"metric='{metric}' is not implemented yet"}, status=501)
 
 
@@ -395,4 +481,61 @@ def _get_current_memory_section(asset_id):
         "avg": cur_avg,
         "captured_at": now.isoformat(),
         "top_processes": cur_top,
+    }
+
+
+def _build_disk_metrics_response(incident_number, asset_id):
+    """Looks up the incident's open time, runs both ES queries, and builds the response."""
+    try:
+        incident_opened_at = get_incident_opened_at(incident_number)
+    except NotImplementedError as e:
+        logger.error(str(e))
+        return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
+
+    if incident_opened_at is None:
+        return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
+
+    historic = _get_historic_disk_section(asset_id, incident_opened_at)
+    if isinstance(historic, JsonResponse):
+        return historic  # an error response bubbled up
+
+    current = _get_current_disk_section(asset_id)
+    if isinstance(current, JsonResponse):
+        return current  # an error response bubbled up
+
+    return JsonResponse({"historic": historic, "current": current})
+
+
+def _get_historic_disk_section(asset_id, incident_opened_at):
+    """Builds the 'historic' section: a window around when the incident opened."""
+    hist_start = incident_opened_at - HISTORIC_WINDOW
+    hist_end = incident_opened_at + HISTORIC_WINDOW
+    try:
+        hist_avg, hist_top = _query_top_mount_points_by_disk_usage(asset_id, hist_start, hist_end)
+    except Exception:
+        logger.exception("Elasticsearch query failed for historic disk data (asset=%s)", asset_id)
+        return JsonResponse({"error": "Failed to fetch historic disk data from Elasticsearch"}, status=502)
+
+    return {
+        "avg": hist_avg,
+        "window_start": hist_start.isoformat(),
+        "window_end": hist_end.isoformat(),
+        "top_mount_points": hist_top,
+    }
+
+
+def _get_current_disk_section(asset_id):
+    """Builds the 'current' section: a trailing live window up to now."""
+    now = timezone.now()
+    cur_start = now - CURRENT_WINDOW
+    try:
+        cur_avg, cur_top = _query_top_mount_points_by_disk_usage(asset_id, cur_start, now)
+    except Exception:
+        logger.exception("Elasticsearch query failed for current disk data (asset=%s)", asset_id)
+        return JsonResponse({"error": "Failed to fetch current disk data from Elasticsearch"}, status=502)
+
+    return {
+        "avg": cur_avg,
+        "captured_at": now.isoformat(),
+        "top_mount_points": cur_top,
     }
