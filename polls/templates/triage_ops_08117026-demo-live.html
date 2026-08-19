@@ -125,6 +125,15 @@
         .evidence-stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
         .evidence-stat { background: rgba(0,113,227,0.05); border-radius: 12px; padding: 12px 14px; }
         .evidence-stat .val { font-size: 1.05rem; font-weight: 700; margin-bottom: 0; }
+        .bar-chart { margin: 10px 0 16px; }
+        .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+        .bar-label { width: 120px; flex-shrink: 0; font-size: 0.72rem; color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bar-track { flex: 1; height: 8px; background: rgba(0,0,0,0.06); border-radius: 6px; overflow: hidden; }
+        .bar-fill { height: 100%; border-radius: 6px; transition: width 0.4s ease; }
+        .bar-pct { width: 36px; flex-shrink: 0; text-align: right; font-size: 0.72rem; font-weight: 600; color: var(--text-main); }
+        .metric-subtabs { display: inline-flex; background: rgba(0,0,0,0.05); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
+        .metric-subtab { border: none; background: transparent; padding: 6px 14px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; color: var(--text-sec); cursor: pointer; transition: 0.15s; }
+        .metric-subtab.active { background: #fff; color: var(--text-main); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
         .evidence-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.8rem; }
         .evidence-table th { text-align: left; font-size: 0.63rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-sec); padding: 8px 6px; border-bottom: 1px solid var(--border); }
         .evidence-table td { padding: 8px 6px; border-bottom: 1px solid rgba(0,0,0,0.04); }
@@ -526,6 +535,25 @@
      * asset panel; `elastic_query_meta` (the underlying Elastic query) isn't
      * surfaced in the UI.
      */
+    function mapChangesRaw(changesRaw, inc) {
+        return (changesRaw || []).map(item => ({
+            changeNumber: item.change_number || item.chg || item.number || 'Unknown',
+            submitter: item.submitter || item.submitted_by || item.requested_by,
+            affectedCi: item.affected_ci || item.affected_ci_name || item.ci || item.asset,
+            changeCoordinator: item.change_coordinator || item.coordinator,
+            startTime: item.start_time || item.planned_start || item.start,
+            endTime: item.end_time || item.planned_end || item.end,
+            status: item.status,
+            appId: item.app_id || item.application || (inc && inc.app),
+            impactedCis: (item.impacted_cis || item.impacted_ci_list || item.impacted_configuration_items || []).map(x => ({
+                ciName: x.ci_name || x.name || x.hostname || 'Unknown',
+                suppressionStatus: x.suppression_status || x.suppressed_status ||
+                    (x.suppressed != null ? (x.suppressed ? 'Suppressed' : 'Not Suppressed') : 'N/A'),
+                suppressionRequestNumber: x.suppression_request_number || x.suppression_req || x.suppression_ticket || 'N/A'
+            }))
+        }));
+    }
+
     function applyIncidentDetails(inc, data) {
         const session  = (data.session && data.session[0]) || {};
         const metadata = (data.metadata && data.metadata[0]) || {};
@@ -542,23 +570,10 @@
         // Change(s) — an incident can have zero, one, or multiple linked changes.
         // Supports either data.changes (array) or a single data.change object;
         // falls back to session.change_number alone if that's all the API sends.
+        // This is just the initial state from the bundled /details/ response —
+        // showChgPanel() replaces it with a live ServiceNow fetch on first open.
         const changesRaw = data.changes || (data.change ? [data.change] : (session.change_number ? [{ change_number: session.change_number }] : []));
-        inc.changes = changesRaw.map(item => ({
-            changeNumber: item.change_number || item.chg || item.number || 'Unknown',
-            submitter: item.submitter || item.submitted_by || item.requested_by,
-            affectedCi: item.affected_ci || item.affected_ci_name || item.ci || item.asset,
-            changeCoordinator: item.change_coordinator || item.coordinator,
-            startTime: item.start_time || item.planned_start || item.start,
-            endTime: item.end_time || item.planned_end || item.end,
-            status: item.status,
-            appId: item.app_id || item.application || inc.app,
-            impactedCis: (item.impacted_cis || item.impacted_ci_list || item.impacted_configuration_items || []).map(x => ({
-                ciName: x.ci_name || x.name || x.hostname || 'Unknown',
-                suppressionStatus: x.suppression_status || x.suppressed_status ||
-                    (x.suppressed != null ? (x.suppressed ? 'Suppressed' : 'Not Suppressed') : 'N/A'),
-                suppressionRequestNumber: x.suppression_request_number || x.suppression_req || x.suppression_ticket || 'N/A'
-            }))
-        }));
+        inc.changes = mapChangesRaw(changesRaw, inc);
 
         // Triage run metadata
         inc.triggered_by = session.triggered_by || inc.triggered_by;
@@ -704,7 +719,10 @@
 
     /* ---------- Detail panel logic ---------- */
 
+    let panelToken = 0; // bumped every openPanel() call — lets async completions detect they've been superseded
+
     function openPanel(eyebrow, title, bodyHtml) {
+        panelToken++;
         document.getElementById('panel-eyebrow').innerText = eyebrow;
         document.getElementById('panel-title').innerText = title;
         document.getElementById('panel-body').innerHTML = bodyHtml;
@@ -757,21 +775,72 @@
         `);
     }
 
+    let currentChangePanelInc = null; // tracks which incident's change panel is open, to guard async writes
+
     function showChgPanel() {
-        if(!currentInc) return;
+        if (!currentInc) return;
+        currentChangePanelInc = currentInc;
         const inc = currentInc;
-        const changes = inc.changes || [];
-        if(changes.length === 0) {
-            openPanel('Linked Change', 'No Change Linked', `
-                <div class="panel-empty">
-                    <i class="bi bi-link-45deg"></i>
-                    This incident has no correlated change record.
-                </div>
-            `);
+
+        if (inc.changesLive) {
+            renderChgPanelFromCache(inc, false);
             return;
         }
-        const title = changes.length === 1 ? changes[0].changeNumber : `${changes.length} Linked Changes`;
-        openPanel('Linked Change', title, renderChangesBody(changes));
+
+        // Show whatever came bundled with the incident (if anything) while
+        // the live ServiceNow fetch is in flight, rather than a blank panel.
+        renderChgPanelFromCache(inc, true);
+        loadLiveChanges(inc);
+    }
+
+    function renderChgPanelFromCache(inc, loading) {
+        const changes = inc.changes || [];
+        const title = changes.length === 1 ? changes[0].changeNumber
+            : changes.length > 1 ? `${changes.length} Linked Changes`
+            : 'No Change Linked';
+
+        const loadingNote = loading
+            ? `<div class="text-muted small" style="margin-bottom:12px;"><i class="bi bi-hourglass-split"></i> Refreshing from ServiceNow…</div>`
+            : '';
+
+        const body = changes.length
+            ? renderChangesBody(changes)
+            : `<div class="panel-empty"><i class="bi bi-link-45deg"></i>This incident has no correlated change record.</div>`;
+
+        openPanel('Linked Change', title, loadingNote + body);
+    }
+
+    async function loadLiveChanges(inc) {
+        const myToken = panelToken; // captured after renderChgPanelFromCache's openPanel() bumped it
+        try {
+            const data = await fetchLiveChanges(inc.id, inc.app);
+            inc.changes = mapChangesRaw(data.changes || [], inc);
+            inc.changesLive = true;
+
+            const chgCard = document.getElementById('node-chg');
+            if (inc.changes.length === 0) {
+                document.getElementById('d-chg').innerText = 'N/A';
+                document.getElementById('chg-status-text').innerText = 'No linked change';
+                chgCard.classList.add('node-disabled');
+            } else {
+                document.getElementById('d-chg').innerText = inc.changes.length === 1
+                    ? inc.changes[0].changeNumber
+                    : `${inc.changes.length} Linked Changes`;
+                document.getElementById('chg-status-text').innerText = 'Correlation Status';
+                chgCard.classList.remove('node-disabled');
+            }
+
+            if (currentChangePanelInc === inc && panelToken === myToken) {
+                renderChgPanelFromCache(inc, false);
+            }
+        } catch (err) {
+            console.error('live changes fetch failed', err);
+            if (currentChangePanelInc === inc && panelToken === myToken) {
+                const errorNote = `<div class="panel-empty"><i class="bi bi-exclamation-triangle"></i>Failed to load live change data from ServiceNow.</div>`;
+                const fallback = (inc.changes && inc.changes.length) ? renderChangesBody(inc.changes) : '';
+                document.getElementById('panel-body').innerHTML = errorNote + fallback;
+            }
+        }
     }
 
     function renderChangesBody(changes) {
@@ -839,6 +908,7 @@
     }
 
     async function loadAssetFullDetails(ci) {
+        const myToken = panelToken; // snapshot the panel that was open when this fetch started
         try {
             const data = await fetchAssetDetails(currentInc.id, ci.id || ci.name);
             ci.fullDetails = normalizeAssetDetails(data, ci);
@@ -847,8 +917,9 @@
             console.error('asset details load failed', err);
             ci.fullDetailsError = err.message;
         }
-        // Only repaint if this asset's panel is still the one open
-        if (currentAssetPanelCi === ci && document.getElementById('panel-body')) {
+        // Only repaint if this asset's panel is still the one open — a different
+        // panel (or a redo) opened in the meantime would have bumped panelToken.
+        if (currentAssetPanelCi === ci && panelToken === myToken && document.getElementById('panel-body')) {
             document.getElementById('panel-body').innerHTML = renderAssetDetailsBody(ci);
         }
     }
@@ -1032,26 +1103,21 @@
 
     const EVIDENCE_TAB_LABELS = {
         cpu: 'CPU metrics', memory: 'memory metrics', disk: 'disk metrics',
-        network: 'network data', health: 'health check', sslcerts: 'SSL certificates'
+        network: 'network data', health: 'health check', sslcerts: 'SSL certificates',
+        raw: 'raw log data'
     };
 
     function fetchEvidenceTabData(tab, incId, assetId) {
         switch (tab) {
             case 'health':    return fetchAssetHealthCheck(incId, assetId);
             case 'sslcerts':  return fetchAssetSslCerts(incId, assetId);
-            default:          return fetchEvidenceMetric(incId, assetId, tab); // cpu / memory / disk / network
+            default:          return fetchEvidenceMetric(incId, assetId, tab); // cpu / memory / disk / network / raw
         }
     }
 
     async function loadEvidenceTab(ci, tab) {
         const contentEl = document.getElementById('evidenceTabContent');
         if (!contentEl) return; // panel closed/rebuilt in the meantime
-
-        if (tab === 'raw') {
-            const logText = ci.log || (DEMO_MODE ? generateDemoRawLog(ci) : null);
-            contentEl.innerHTML = `<div class="label">Raw Log Output</div><pre>${logText || 'No evidence available yet.'}</pre>`;
-            return;
-        }
 
         if (tab === 'firewall') {
             // Interactive, on-demand — no auto-fetch. Renders the form (with
@@ -1093,7 +1159,8 @@
         disk: renderDiskTab,
         network: renderNetworkTab,
         health: renderHealthCheckTab,
-        sslcerts: renderSslCertsTab
+        sslcerts: renderSslCertsTab,
+        raw: renderRawLogTab
     };
 
     function renderEvidenceTab(tab, data) {
@@ -1103,11 +1170,72 @@
         contentEl.innerHTML = renderer ? renderer(data) : renderMetricTab(tab, data);
     }
 
+    function renderRawLogTab(data) {
+        lastMetricTabType = 'raw';
+        lastMetricTabData = data;
+
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+
+        return `
+            ${renderMetricSubTabBar()}
+            ${windowNote}
+            <div class="label">Raw Log Output</div>
+            <pre>${section.log || 'No evidence available yet.'}</pre>
+        `;
+    }
+
+    function barColor(pct) {
+        if (pct >= 85) return '#ff3b30';
+        if (pct >= 60) return '#ff9f0a';
+        return 'var(--blue)';
+    }
+
+    function renderBarChart(items) {
+        if (!items.length) return '';
+        const rows = items.map(item => {
+            const pct = Math.min(100, Math.max(0, item.pct));
+            return `
+                <div class="bar-row">
+                    <div class="bar-label" title="${item.label}">${item.label}</div>
+                    <div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${barColor(pct)};"></div></div>
+                    <div class="bar-pct">${item.pct}%</div>
+                </div>`;
+        }).join('');
+        return `<div class="bar-chart">${rows}</div>`;
+    }
+
+    let currentMetricSubTab = 'current'; // shared 'historic' | 'current' toggle for CPU/Memory/Disk/Network
+    let lastMetricTabType = null;        // remembers what to re-render when the sub-tab is switched
+    let lastMetricTabData = null;
+
+    function switchMetricSubTab(sub) {
+        currentMetricSubTab = sub;
+        if (!lastMetricTabType || !lastMetricTabData) return;
+        renderEvidenceTab(lastMetricTabType, lastMetricTabData);
+    }
+
+    function renderMetricSubTabBar() {
+        return `
+            <div class="metric-subtabs">
+                <button class="metric-subtab${currentMetricSubTab === 'current' ? ' active' : ''}" onclick="switchMetricSubTab('current')">Current</button>
+                <button class="metric-subtab${currentMetricSubTab === 'historic' ? ' active' : ''}" onclick="switchMetricSubTab('historic')">Historic</button>
+            </div>
+        `;
+    }
+
     function renderMetricTab(tab, data) {
+        lastMetricTabType = tab;
+        lastMetricTabData = data;
+
         const label = tab === 'cpu' ? 'CPU' : 'Memory';
-        const histAvg = data.historical_avg != null ? `${data.historical_avg}%` : 'N/A';
-        const curAvg = data.current_avg != null ? `${data.current_avg}%` : 'N/A';
-        const processes = (data.top_processes || data.processes || []).slice(0, 10);
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const avg = section.avg != null ? `${section.avg}%` : 'N/A';
+        const processes = (section.top_processes || section.processes || []).slice(0, 10);
 
         const rows = processes.map((p, i) => {
             const pct = p[`${tab}_percent`] ?? p.percent ?? p.value ?? 0;
@@ -1119,17 +1247,23 @@
                 </tr>`;
         }).join('');
 
-        const windowNote = data.window_start
-            ? `<div class="text-muted small" style="margin:-8px 0 12px;">Since incident opened${data.window_end ? ` (${data.window_start} – ${data.window_end})` : ` (${data.window_start})`}</div>`
-            : '';
+        const chartItems = processes.map(p => ({
+            label: p.process || p.name || 'Unknown',
+            pct: p[`${tab}_percent`] ?? p.percent ?? p.value ?? 0
+        }));
+
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
 
         return `
-            <div class="evidence-stat-row">
-                <div class="evidence-stat"><div class="label">Historical Avg ${label}</div><div class="val">${histAvg}</div></div>
-                <div class="evidence-stat"><div class="label">Current Avg ${label}</div><div class="val">${curAvg}</div></div>
+            ${renderMetricSubTabBar()}
+            <div class="evidence-stat-row" style="grid-template-columns:1fr;">
+                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Current'} Avg ${label}</div><div class="val">${avg}</div></div>
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Processes by ${label} Usage</div>
+            ${renderBarChart(chartItems)}
             <table class="evidence-table">
                 <thead><tr><th>#</th><th>Process</th><th>${label} %</th></tr></thead>
                 <tbody>${rows || `<tr><td colspan="3" class="text-muted small">No process data available.</td></tr>`}</tbody>
@@ -1138,13 +1272,18 @@
     }
 
     function renderDiskTab(data) {
-        const histAvg = data.historical_avg != null ? `${data.historical_avg}%` : 'N/A';
-        const curAvg = data.current_avg != null ? `${data.current_avg}%` : 'N/A';
-        const windowNote = data.window_start
-            ? `<div class="text-muted small" style="margin:-8px 0 12px;">Since incident opened${data.window_end ? ` (${data.window_start} – ${data.window_end})` : ` (${data.window_start})`}</div>`
-            : '';
+        lastMetricTabType = 'disk';
+        lastMetricTabData = data;
 
-        const mounts = data.top_mount_points || data.mount_points || data.mounts || [];
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const avg = section.avg != null ? `${section.avg}%` : 'N/A';
+
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+
+        const mounts = section.top_mount_points || section.mount_points || section.mounts || [];
         const sorted = [...mounts]
             .sort((a, b) => (b.percent_used ?? b.used_percent ?? b.percent ?? 0) - (a.percent_used ?? a.used_percent ?? a.percent ?? 0))
             .slice(0, 10);
@@ -1161,13 +1300,19 @@
                 </tr>`;
         }).join('');
 
+        const chartItems = sorted.map(m => ({
+            label: m.mount_point || m.path || m.mount || 'Unknown',
+            pct: m.percent_used ?? m.used_percent ?? m.percent ?? 0
+        }));
+
         return `
-            <div class="evidence-stat-row">
-                <div class="evidence-stat"><div class="label">Historical Avg Disk</div><div class="val">${histAvg}</div></div>
-                <div class="evidence-stat"><div class="label">Current Avg Disk</div><div class="val">${curAvg}</div></div>
+            ${renderMetricSubTabBar()}
+            <div class="evidence-stat-row" style="grid-template-columns:1fr;">
+                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Current'} Avg Disk</div><div class="val">${avg}</div></div>
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Mount Points by Storage Consumed</div>
+            ${renderBarChart(chartItems)}
             <table class="evidence-table">
                 <thead><tr><th>#</th><th>Mount Point</th><th>Used</th><th>Total</th><th>% Used</th></tr></thead>
                 <tbody>${rows || `<tr><td colspan="5" class="text-muted small">No mount point data available.</td></tr>`}</tbody>
@@ -1176,7 +1321,16 @@
     }
 
     function renderNetworkTab(data) {
-        const interfaces = data.interfaces || data.drivers || data.results || [];
+        lastMetricTabType = 'network';
+        lastMetricTabData = data;
+
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+
+        const interfaces = section.interfaces || section.drivers || section.results || [];
         const rows = interfaces.map(nic => `
             <tr>
                 <td>${nic.driver || nic.name || nic.interface || 'Unknown'}</td>
@@ -1187,6 +1341,8 @@
         `).join('');
 
         return `
+            ${renderMetricSubTabBar()}
+            ${windowNote}
             <div class="label">Network Drivers &amp; Traffic</div>
             <table class="evidence-table">
                 <thead><tr><th>Driver / Interface</th><th>Traffic In</th><th>Traffic Out</th><th>Flow Count</th></tr></thead>
@@ -1526,7 +1682,7 @@
             if (includeEvidence && currentCi) {
                 currentCi.metricsCache = currentCi.metricsCache || {};
                 for (const tab of selectedEvidenceTabs) {
-                    if (tab === 'raw' || currentCi.metricsCache[tab]) continue;
+                    if (currentCi.metricsCache[tab]) continue;
                     try {
                         currentCi.metricsCache[tab] = await fetchEvidenceTabData(tab, inc.id, currentCi.id || currentCi.name);
                     } catch (e) {
@@ -1644,7 +1800,11 @@
                 sections.push('TECHNICAL EVIDENCE\nNo asset currently selected.');
             } else {
                 const text = selections.evidenceTabs.map(tab => {
-                    if (tab === 'raw') return `Raw Log:\n${currentCi.log || 'not loaded'}`;
+                    if (tab === 'raw') {
+                        const raw = currentCi.metricsCache && currentCi.metricsCache.raw;
+                        const logText = raw ? (raw.current && raw.current.log) || (raw.historic && raw.historic.log) : null;
+                        return `Raw Log:\n${logText || currentCi.log || 'not loaded'}`;
+                    }
                     const data = currentCi.metricsCache && currentCi.metricsCache[tab];
                     const label = (EVIDENCE_TABS.find(t => t.id === tab) || {}).label || tab;
                     return `${label}:\n${data ? JSON.stringify(data) : 'not loaded'}`;
@@ -1686,87 +1846,88 @@
 '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
 '<title>Ops Console \u2014 Incident Copilot</title>' +
 '<link rel="preconnect" href="https://fonts.googleapis.com">' +
-'<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">' +
+'<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">' +
 '<style>' +
 ':root {' +
-'  --navy-950: #0b1120; --navy-900: #0f1729;' +
-'  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;' +
-'  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-900: #0f172a;' +
-'  --indigo: #4f46e5; --indigo-light: #eef2ff;' +
-'  --red: #b91c1c; --red-bg: #fef2f2; --amber: #b45309; --amber-bg: #fffbeb;' +
-'  --green: #15803d; --green-bg: #f0fdf4; --blue: #1d4ed8; --blue-bg: #eff6ff;' +
-'  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;' +
+'  --apple-bg: #f5f5f7; --glass: rgba(255,255,255,0.9);' +
+'  --blue: #0071e3; --blue-bg: rgba(0,113,227,0.08);' +
+'  --green: #28cd41; --green-bg: rgba(40,205,65,0.08);' +
+'  --red: #ff3b30; --red-bg: rgba(255,59,48,0.08);' +
+'  --amber: #ff9f0a; --amber-bg: rgba(255,159,10,0.08);' +
+'  --text-main: #1d1d1f; --text-sec: #6e6e73;' +
+'  --border: rgba(0,0,0,0.08);' +
+'  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' +
 '  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;' +
 '}' +
 '* { box-sizing: border-box; }' +
-'body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color:var(--slate-900); background:var(--slate-50); font-size:14px; }' +
-'.nav-sidebar { width:212px; background:var(--navy-950); display:flex; flex-direction:column; flex-shrink:0; color:var(--slate-300); }' +
-'.nav-brand { display:flex; align-items:center; gap:10px; padding:18px 18px 14px; border-bottom:1px solid rgba(255,255,255,0.06); }' +
-'.nav-brand-mark { width:26px; height:26px; border-radius:7px; background:linear-gradient(135deg, var(--indigo), #7c3aed); display:flex; align-items:center; justify-content:center; flex-shrink:0; }' +
+'body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color:var(--text-main); background:linear-gradient(135deg, #f5f5f7 0%, #ffffff 100%); font-size:14px; }' +
+'.nav-sidebar { width:212px; background:#fff; border-right:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; color:var(--text-sec); }' +
+'.nav-brand { display:flex; align-items:center; gap:10px; padding:18px 18px 14px; border-bottom:1px solid var(--border); }' +
+'.nav-brand-mark { width:26px; height:26px; border-radius:8px; background:linear-gradient(135deg, var(--blue), #34aadc); display:flex; align-items:center; justify-content:center; flex-shrink:0; }' +
 '.nav-brand-mark svg { width:15px; height:15px; }' +
-'.nav-brand-text { font-size:13px; font-weight:600; color:#fff; line-height:1.3; }' +
-'.nav-brand-sub { font-size:10px; color:var(--slate-500); }' +
-'.nav-section { padding:14px 12px 4px; font-size:9.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:var(--slate-500); }' +
-'.nav-item { display:flex; align-items:center; gap:9px; padding:7px 12px; margin:1px 8px; border-radius:6px; font-size:12.5px; font-weight:500; cursor:default; color:var(--slate-300); }' +
+'.nav-brand-text { font-size:13px; font-weight:600; color:var(--text-main); line-height:1.3; }' +
+'.nav-brand-sub { font-size:10px; color:var(--text-sec); }' +
+'.nav-section { padding:14px 12px 4px; font-size:9.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:var(--text-sec); }' +
+'.nav-item { display:flex; align-items:center; gap:9px; padding:7px 12px; margin:1px 8px; border-radius:8px; font-size:12.5px; font-weight:500; cursor:default; color:var(--text-sec); }' +
 '.nav-item svg { width:14px; height:14px; flex-shrink:0; opacity:0.75; }' +
-'.nav-item.active { background:rgba(79,70,229,0.18); color:#fff; }' +
+'.nav-item.active { background:var(--blue-bg); color:var(--blue); }' +
 '.nav-item.active svg { opacity:1; }' +
 '.nav-spacer { flex:1; }' +
-'.nav-footer { display:flex; align-items:center; gap:10px; padding:13px 15px; border-top:1px solid rgba(255,255,255,0.06); }' +
-'.avatar { width:24px; height:24px; border-radius:50%; background:var(--indigo); color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex-shrink:0; }' +
-'.nav-footer-name { font-size:12px; font-weight:600; color:#fff; }' +
-'.nav-footer-role { font-size:10px; color:var(--slate-500); }' +
+'.nav-footer { display:flex; align-items:center; gap:10px; padding:13px 15px; border-top:1px solid var(--border); }' +
+'.avatar { width:24px; height:24px; border-radius:50%; background:var(--blue); color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex-shrink:0; }' +
+'.nav-footer-name { font-size:12px; font-weight:600; color:var(--text-main); }' +
+'.nav-footer-role { font-size:10px; color:var(--text-sec); }' +
 '.main-workspace { flex:1; display:flex; flex-direction:column; min-width:0; }' +
-'.top-bar { height:52px; padding:0 22px; border-bottom:1px solid var(--slate-200); display:flex; align-items:center; justify-content:space-between; background:#fff; flex-shrink:0; }' +
-'.breadcrumb { font-size:12.5px; color:var(--slate-500); display:flex; align-items:center; gap:6px; }' +
-'.breadcrumb strong { color:var(--slate-900); font-weight:600; }' +
-'.route-indicator { display:flex; align-items:center; gap:7px; font-size:11.5px; font-weight:600; padding:6px 12px; border-radius:6px; border:1px solid var(--slate-200); }' +
-'.route-indicator.mcp { color:var(--blue); background:var(--blue-bg); border-color:#bfdbfe; }' +
-'.route-indicator.langgraph { color:var(--indigo); background:var(--indigo-light); border-color:#c7d2fe; }' +
+'.top-bar { height:52px; padding:0 22px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:#fff; flex-shrink:0; }' +
+'.breadcrumb { font-size:12.5px; color:var(--text-sec); display:flex; align-items:center; gap:6px; }' +
+'.breadcrumb strong { color:var(--text-main); font-weight:600; }' +
+'.route-indicator { display:flex; align-items:center; gap:7px; font-size:11.5px; font-weight:600; padding:6px 12px; border-radius:8px; border:1px solid var(--border); }' +
+'.route-indicator.mcp { color:var(--text-sec); background:rgba(0,0,0,0.03); border-color:var(--border); }' +
+'.route-indicator.langgraph { color:var(--blue); background:var(--blue-bg); border-color:rgba(0,113,227,0.25); }' +
 '.route-dot { width:6px; height:6px; border-radius:50%; background:currentColor; }' +
 '.chat-view { flex:1; padding:24px 7%; overflow-y:auto; }' +
 '.exchange { margin-bottom:28px; max-width:100%; }' +
 '.msg-row { display:flex; margin-bottom:4px; }' +
 '.msg-row.user { justify-content:flex-end; }' +
-'.bubble-user { background:var(--navy-900); color:#fff; border-radius:10px 10px 2px 10px; padding:10px 15px; font-size:13.5px; max-width:80%; white-space:pre-wrap; }' +
-'.msg-meta { font-size:11px; color:var(--slate-400); margin-top:4px; text-align:right; }' +
+'.bubble-user { background:var(--blue); color:#fff; border-radius:16px 16px 4px 16px; padding:10px 15px; font-size:13.5px; max-width:80%; white-space:pre-wrap; }' +
+'.msg-meta { font-size:11px; color:var(--text-sec); margin-top:4px; text-align:right; }' +
 '.assistant-block { margin-top:14px; }' +
 '.assistant-block > * + * { margin-top:12px; }' +
-'.tool-chip { display:inline-flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--slate-200); border-radius:6px; padding:6px 12px; font-size:11.5px; font-family:var(--font-mono); color:var(--slate-500); }' +
+'.tool-chip { display:inline-flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--border); border-radius:10px; padding:6px 12px; font-size:11.5px; font-family:var(--font-mono); color:var(--text-sec); }' +
 '.tool-chip .dot { width:6px; height:6px; border-radius:50%; background:var(--blue); flex-shrink:0; }' +
-'.card { border:1px solid var(--slate-200); border-radius:10px; background:#fff; overflow:hidden; }' +
-'.card-header { padding:13px 16px; border-bottom:1px solid var(--slate-100); display:flex; align-items:center; justify-content:space-between; gap:10px; }' +
-'.card-id { font-family:var(--font-mono); font-size:12px; font-weight:600; color:var(--slate-900); }' +
+'.card { border:1px solid var(--border); border-radius:16px; background:#fff; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.03); }' +
+'.card-header { padding:13px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:10px; }' +
+'.card-id { font-family:var(--font-mono); font-size:12px; font-weight:600; color:var(--text-main); }' +
 '.card-body { padding:15px 16px; }' +
-'.card-desc { font-size:13.5px; margin-bottom:14px; color:var(--slate-900); line-height:1.5; }' +
+'.card-desc { font-size:13.5px; margin-bottom:14px; color:var(--text-main); line-height:1.5; }' +
 '.field-grid { display:grid; grid-template-columns:1fr 1fr; gap:13px 22px; }' +
-'.field-label { font-size:9.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--slate-500); font-weight:700; margin-bottom:4px; }' +
-'.field-value { font-size:12.5px; color:var(--slate-900); font-weight:500; }' +
-'.pill { display:inline-block; font-size:10px; font-weight:700; padding:3px 9px; border-radius:4px; letter-spacing:0.2px; }' +
-'.pill.p1 { background:var(--red-bg); color:var(--red); border:1px solid #fecaca; }' +
-'.pill.p2 { background:var(--amber-bg); color:var(--amber); border:1px solid #fde68a; }' +
-'.pill.progress { background:var(--blue-bg); color:var(--blue); border:1px solid #bfdbfe; }' +
-'.pill.done { background:var(--green-bg); color:var(--green); border:1px solid #bbf7d0; }' +
-'.trace { border:1px solid var(--slate-200); border-radius:10px; background:#fff; overflow:hidden; }' +
-'.trace-step { display:flex; align-items:center; gap:10px; padding:9px 16px; font-size:12px; border-bottom:1px solid var(--slate-100); }' +
+'.field-label { font-size:9.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-sec); font-weight:700; margin-bottom:4px; }' +
+'.field-value { font-size:12.5px; color:var(--text-main); font-weight:500; }' +
+'.pill { display:inline-block; font-size:10px; font-weight:700; padding:3px 9px; border-radius:20px; letter-spacing:0.2px; }' +
+'.pill.p1 { background:var(--red-bg); color:var(--red); border:1px solid rgba(255,59,48,0.25); }' +
+'.pill.p2 { background:var(--amber-bg); color:var(--amber); border:1px solid rgba(255,159,10,0.25); }' +
+'.pill.progress { background:var(--blue-bg); color:var(--blue); border:1px solid rgba(0,113,227,0.25); }' +
+'.pill.done { background:var(--green-bg); color:var(--green); border:1px solid rgba(40,205,65,0.25); }' +
+'.trace { border:1px solid var(--border); border-radius:16px; background:#fff; overflow:hidden; }' +
+'.trace-step { display:flex; align-items:center; gap:10px; padding:9px 16px; font-size:12px; border-bottom:1px solid var(--border); }' +
 '.trace-step:last-child { border-bottom:none; }' +
-'.trace-step .check { width:15px; height:15px; border-radius:50%; background:var(--green-bg); border:1px solid #bbf7d0; display:flex; align-items:center; justify-content:center; flex-shrink:0; }' +
+'.trace-step .check { width:15px; height:15px; border-radius:50%; background:var(--green-bg); border:1px solid rgba(40,205,65,0.3); display:flex; align-items:center; justify-content:center; flex-shrink:0; }' +
 '.trace-step .check svg { width:8px; height:8px; }' +
-'.trace-step .label { font-weight:600; color:var(--slate-900); }' +
-'.thinking-chip { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--slate-500); font-style:italic; }' +
-'.thinking-chip .pulse { width:6px; height:6px; border-radius:50%; background:var(--indigo); animation:pulse 1s infinite ease-in-out; }' +
+'.trace-step .label { font-weight:600; color:var(--text-main); }' +
+'.thinking-chip { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--text-sec); font-style:italic; }' +
+'.thinking-chip .pulse { width:6px; height:6px; border-radius:50%; background:var(--blue); animation:pulse 1s infinite ease-in-out; }' +
 '@keyframes pulse { 0%,100% { opacity:0.3; } 50% { opacity:1; } }' +
 '.suggestion-row { display:flex; gap:8px; margin:0 7% 10px; flex-wrap:wrap; }' +
-'.suggestion-chip { font-size:11.5px; padding:6px 12px; border-radius:6px; border:1px solid var(--slate-200); color:var(--slate-500); cursor:pointer; background:#fff; font-family:var(--font-mono); }' +
-'.suggestion-chip:hover { border-color:var(--indigo); color:var(--indigo); }' +
-'.command-bar { margin:0 7% 20px; border:1px solid var(--slate-300); border-radius:10px; background:#fff; display:flex; align-items:center; padding:4px 6px 4px 14px; box-shadow:0 1px 2px rgba(15,23,42,0.04); }' +
+'.suggestion-chip { font-size:11.5px; padding:6px 12px; border-radius:20px; border:1px solid var(--border); color:var(--text-sec); cursor:pointer; background:#fff; font-family:var(--font-mono); }' +
+'.suggestion-chip:hover { border-color:var(--blue); color:var(--blue); }' +
+'.command-bar { margin:0 7% 20px; border:1px solid var(--border); border-radius:14px; background:#fff; display:flex; align-items:center; padding:4px 6px 4px 14px; box-shadow:0 1px 2px rgba(15,23,42,0.04); }' +
 '.command-bar input { flex:1; border:none; outline:none; font-size:13px; padding:9px 0; font-family:var(--font-sans); }' +
-'.command-bar-send { width:30px; height:30px; border-radius:7px; background:var(--navy-900); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; }' +
+'.command-bar-send { width:30px; height:30px; border-radius:10px; background:var(--blue); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; }' +
 '.command-bar-send:disabled { opacity:0.5; cursor:default; }' +
 '.command-bar-send svg { width:13px; height:13px; color:#fff; }' +
-'.fb-row { display:flex; align-items:center; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--slate-100); }' +
-'.fb-btn { border:none; background:rgba(15,23,42,0.05); width:26px; height:26px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; color:var(--slate-500); transition:0.2s; }' +
-'.fb-btn:hover { background:rgba(15,23,42,0.1); }' +
+'.fb-row { display:flex; align-items:center; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }' +
+'.fb-btn { border:none; background:rgba(0,0,0,0.04); width:26px; height:26px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text-sec); transition:0.2s; }' +
+'.fb-btn:hover { background:rgba(0,0,0,0.08); }' +
 '.fb-btn.active-like { background:var(--green-bg); color:var(--green); }' +
 '.fb-btn.active-dislike { background:var(--red-bg); color:var(--red); }' +
 '</style>' +
@@ -1884,7 +2045,7 @@
 '    var rows = assets.map(function (ci) {' +
 '      var d = ci.fullDetails;' +
 '      var line = d ? (esc(d.name) + " \u2014 " + esc(d.manufacturer || "") + " " + esc(d.modelId || "") + ", " + esc(d.operatingSystem || "N/A")) : esc(ci.name);' +
-'      return \'<div style="padding:8px 0; border-bottom:1px solid var(--slate-100); font-size:12px;">\' + line + \'</div>\';' +
+'      return \'<div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:12px;">\' + line + \'</div>\';' +
 '    }).join("");' +
 '    card.innerHTML = \'<div class="card-header"><span class="card-id">Asset Inventory</span></div><div class="card-body" style="padding-top:4px;">\' + (rows || \'<div class="field-value" style="font-weight:400;">No asset details loaded.</div>\') + \'</div>\';' +
 '    return card;' +
@@ -1959,7 +2120,7 @@
 '      \'<div class="card-body">\' +' +
 '      \'<div class="field-value" style="font-weight:400; line-height:1.7; white-space:pre-wrap;"></div>\' +' +
 '      \'<div class="fb-row">\' +' +
-'        \'<span style="font-size:11px; color:var(--slate-500);">Was this helpful?</span>\' +' +
+'        \'<span style="font-size:11px; color:var(--text-sec);">Was this helpful?</span>\' +' +
 '        \'<button class="fb-btn" data-fb="like" title="Helpful"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M7 22V11M2 13v7a2 2 0 002 2h12.9a2 2 0 002-1.7l1.4-9A2 2 0 0018.3 9H14V4a2 2 0 00-2-2l-3 7v13"/></svg></button>\' +' +
 '        \'<button class="fb-btn" data-fb="dislike" title="Not helpful"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M17 2v11M22 11V4a2 2 0 00-2-2H7.1a2 2 0 00-2 1.7l-1.4 9A2 2 0 005.7 15H10v5a2 2 0 002 2l3-7V2"/></svg></button>\' +' +
 '      \'</div></div>\';' +
@@ -2208,28 +2369,44 @@
      * renderMetricTab()/renderDiskTab()/renderNetworkTab() once you share a
      * real sample.
      *
-     * No timeframe is sent from the frontend — the backend is expected to
-     * derive the historical window itself from the incident's own opened
-     * time (created_at) through now, and current_avg is just the live/
-     * latest average at request time.
+     * Each metric response is split into two full sections — `historic`
+     * (a point-in-time snapshot around when the incident opened, i.e.
+     * incident.created_at) and `current` (the live/latest snapshot at
+     * request time). The UI renders these as a Historic/Current sub-tab
+     * toggle within each tab — no timeframe is sent from the frontend, the
+     * backend is expected to know what "around incident open" means.
      *
      *   GET {API_BASE}/api/triage/evidence/metrics/
      *       ?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
      *
      *   metric=cpu|memory ->
-     *     { historical_avg: number, current_avg: number,
-     *       window_start (optional, e.g. incident's created_at),
-     *       window_end (optional),
-     *       top_processes: [{ process, <metric>_percent }] }
+     *     { historic: { avg, window_start, window_end, top_processes: [{ process, <metric>_percent }] },
+     *       current:  { avg, captured_at, top_processes: [{ process, <metric>_percent }] } }
      *   metric=disk ->
-     *     { historical_avg: number, current_avg: number,
-     *       window_start (optional), window_end (optional),
-     *       top_mount_points: [{ mount_point, used, total, percent_used }] }
+     *     { historic: { avg, window_start, window_end, top_mount_points: [{ mount_point, used, total, percent_used }] },
+     *       current:  { avg, captured_at, top_mount_points: [{ mount_point, used, total, percent_used }] } }
      *   metric=network ->
-     *     { interfaces: [{ driver, traffic_in, traffic_out, flow_count }] }
+     *     { historic: { window_start, window_end, interfaces: [{ driver, traffic_in, traffic_out, flow_count }] },
+     *       current:  { captured_at, interfaces: [{ driver, traffic_in, traffic_out, flow_count }] } }
      */
     const EVIDENCE_METRIC_URL = (incId, assetId, metric) =>
         `${API_BASE}/api/triage/evidence/metrics/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}&metric=${encodeURIComponent(metric)}`;
+
+    /**
+     * Linked Changes — live from ServiceNow, scoped to the incident's app
+     * and a +/-24h window around when the incident opened. Lazily fetched
+     * the first time the "Linked Change" card is clicked (see
+     * showChgPanel()), not on initial incident load — same lazy pattern
+     * as Asset Details.
+     *
+     *   GET {API_BASE}/api/triage/changes/?incident_number=<id>&app_id=<appId>
+     *   -> { changes: [{ change_number, submitter, affected_ci,
+     *        change_coordinator, start_time, end_time, status, app_id,
+     *        impacted_cis: [{ ci_name, suppression_status,
+     *                          suppression_request_number }] }] }
+     */
+    const CHANGES_URL = (incId, appId) =>
+        `${API_BASE}/api/triage/changes/?incident_number=${encodeURIComponent(incId)}&app_id=${encodeURIComponent(appId)}`;
 
     /**
      * Health Check tab data. NOT confirmed against a real response — best
@@ -2335,6 +2512,19 @@
         return res.json();
     }
 
+    async function fetchLiveChanges(incId, appId) {
+        if (DEMO_MODE) {
+            // Reuse whatever changes were already generated as part of this
+            // incident's bundled demo record — keeps demo data internally
+            // consistent rather than building a second, separate generator.
+            const record = getOrCreateDemoIncident(incId);
+            return { changes: record.changes || [] };
+        }
+        const res = await fetch(CHANGES_URL(incId, appId), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`Changes fetch failed (HTTP ${res.status})`);
+        return res.json();
+    }
+
     async function fetchAssetHealthCheck(incId, assetId) {
         if (DEMO_MODE) return generateDemoHealthCheck(assetId);
         const res = await fetch(HEALTHCHECK_URL(incId, assetId), { credentials: 'same-origin' });
@@ -2389,40 +2579,45 @@
                 const rand = seededRandom(`${assetId}:${metric}`);
                 if (metric === 'network') { resolve(generateDemoNetwork(rand)); return; }
                 if (metric === 'disk') { resolve(generateDemoDiskMetric(rand)); return; }
+                if (metric === 'raw') { resolve(generateDemoRawLogSections(rand)); return; }
                 resolve(generateDemoUsageMetric(metric, rand));
             }, 500);
         });
     }
 
-    function generateDemoUsageMetric(metric, rand) {
-        const current = Math.round(35 + rand() * 55);
-        const historical = Math.max(5, Math.round(current - (8 + rand() * 22)));
-
+    function buildUsageSection(rand, metric, isHistoric, minAvg, maxAvg) {
+        const avg = Math.round(minAvg + rand() * (maxAvg - minAvg));
         const pool = [...DEMO_PROCESSES];
         for (let i = pool.length - 1; i > 0; i--) {
             const j = Math.floor(rand() * (i + 1));
             [pool[i], pool[j]] = [pool[j], pool[i]];
         }
-
-        let base = current * 0.85;
+        let base = avg * 0.85;
         const top_processes = pool.slice(0, 10).map((proc, i) => {
             const pct = Math.max(1, Math.round((base / Math.pow(1.45, i)) * (0.85 + rand() * 0.3)));
             return { process: proc, [`${metric}_percent`]: pct };
         });
 
-        return {
-            historical_avg: historical,
-            current_avg: current,
-            window_start: (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString(),
-            window_end: 'Now',
-            top_processes
-        };
+        const section = { avg, top_processes };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start; // point-in-time snapshot around when the incident opened
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
     }
 
-    function generateDemoDiskMetric(rand) {
-        const current = Math.round(35 + rand() * 55);
-        const historical = Math.max(5, Math.round(current - (8 + rand() * 22)));
+    function generateDemoUsageMetric(metric, rand) {
+        // Current runs elevated vs. the historic baseline — tells a believable
+        // "something spiked after the incident opened" story in the demo.
+        const historic = buildUsageSection(rand, metric, true, 15, 50);
+        const current = buildUsageSection(rand, metric, false, 45, 95);
+        return { historic, current };
+    }
 
+    function buildDiskSection(rand, isHistoric, minAvg, maxAvg) {
+        const avg = Math.round(minAvg + rand() * (maxAvg - minAvg));
         const mountPool = ['/', '/var', '/var/log', '/data', '/tmp', '/home', '/opt', '/boot', '/var/lib/docker', '/mnt/backup'];
         const pool = [...mountPool];
         for (let i = pool.length - 1; i > 0; i--) {
@@ -2434,60 +2629,90 @@
 
         const top_mount_points = pool.slice(0, Math.min(mountCount, pool.length)).map((mp, i) => {
             const totalGb = sizes[Math.floor(rand() * sizes.length)];
-            const pct = Math.min(99, Math.max(3, Math.round((current * (1 - i * 0.07)) * (0.7 + rand() * 0.5))));
+            const pct = Math.min(99, Math.max(3, Math.round((avg * (1 - i * 0.07)) * (0.7 + rand() * 0.5))));
             const usedGb = Math.round(totalGb * pct / 100);
-            return {
-                mount_point: mp,
-                used: `${usedGb} GB`,
-                total: `${totalGb} GB`,
-                percent_used: pct
-            };
+            return { mount_point: mp, used: `${usedGb} GB`, total: `${totalGb} GB`, percent_used: pct };
         }).sort((a, b) => b.percent_used - a.percent_used);
 
-        return {
-            historical_avg: historical,
-            current_avg: current,
-            window_start: (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString(),
-            window_end: 'Now',
-            top_mount_points
-        };
+        const section = { avg, top_mount_points };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
     }
 
-    function generateDemoNetwork(rand) {
+    function generateDemoDiskMetric(rand) {
+        const historic = buildDiskSection(rand, true, 15, 50);
+        const current = buildDiskSection(rand, false, 40, 90);
+        return { historic, current };
+    }
+
+    function buildNetworkSection(rand, isHistoric, trafficScale) {
         const drivers = ['eth0', 'eth1', 'lo', 'bond0'];
         const interfaces = drivers.map(d => ({
             driver: d,
-            traffic_in: `${(Math.round(rand() * 12000) / 10).toFixed(1)} MB`,
-            traffic_out: `${(Math.round(rand() * 9000) / 10).toFixed(1)} MB`,
-            flow_count: Math.round(rand() * 400)
+            traffic_in: `${(Math.round(rand() * 12000 * trafficScale) / 10).toFixed(1)} MB`,
+            traffic_out: `${(Math.round(rand() * 9000 * trafficScale) / 10).toFixed(1)} MB`,
+            flow_count: Math.round(rand() * 400 * trafficScale)
         }));
-        return { interfaces };
+        const section = { interfaces };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
     }
 
-    function generateDemoRawLog(ci) {
-        const rand = seededRandom(`${ci.id || ci.name}:log`);
+    function generateDemoNetwork(rand) {
+        const historic = buildNetworkSection(rand, true, 0.6);
+        const current = buildNetworkSection(rand, false, 1.3); // elevated traffic post-incident
+        return { historic, current };
+    }
+
+    const DEMO_LOG_MESSAGES = [
+        'Connection pool exhausted, waiting for available connection',
+        'High memory usage detected on worker process',
+        'Disk I/O latency exceeded threshold (250ms)',
+        'Failed to reach upstream service after 3 retries',
+        'Certificate expiration warning: 12 days remaining',
+        'Thread pool queue backlog increasing',
+        'GC pause exceeded 500ms',
+        'Read timeout on database query',
+        'Service health check failed, marking node degraded',
+        'Retrying failed request to downstream API'
+    ];
+
+    function generateDemoLogSection(rand, isHistoric) {
         const levels = ['ERROR', 'WARN'];
-        const messages = [
-            'Connection pool exhausted, waiting for available connection',
-            'High memory usage detected on worker process',
-            'Disk I/O latency exceeded threshold (250ms)',
-            'Failed to reach upstream service after 3 retries',
-            'Certificate expiration warning: 12 days remaining',
-            'Thread pool queue backlog increasing',
-            'GC pause exceeded 500ms',
-            'Read timeout on database query',
-            'Service health check failed, marking node degraded',
-            'Retrying failed request to downstream API'
-        ];
         const lines = [];
         let ts = new Date();
         for (let i = 0; i < 14; i++) {
             const level = levels[Math.floor(rand() * levels.length)];
-            const msg = messages[Math.floor(rand() * messages.length)];
+            const msg = DEMO_LOG_MESSAGES[Math.floor(rand() * DEMO_LOG_MESSAGES.length)];
             lines.unshift(`[${ts.toISOString()}] ${level}: ${msg}`);
             ts = new Date(ts.getTime() - Math.round(rand() * 6 * 60000));
         }
-        return lines.join('\n');
+
+        const section = { log: lines.join('\n') };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
+    }
+
+    function generateDemoRawLogSections(rand) {
+        return {
+            historic: generateDemoLogSection(rand, true),
+            current: generateDemoLogSection(rand, false)
+        };
     }
 
     function generateDemoHealthCheck(assetId) {
