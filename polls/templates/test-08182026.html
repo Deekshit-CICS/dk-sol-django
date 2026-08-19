@@ -14,11 +14,12 @@ then metric-specific builders — rather than one long function, so adding
 memory/disk/network later is just adding a new `_build_<metric>_response`
 + wiring it into the if/elif in `evidence_metrics`.
 
-All four metrics — cpu, memory, disk, network — are implemented below,
-each following the same historic/current pattern. Network is structurally
-different from the other three (no overall "avg", and its flow_count is
-an approximation — see the note above NETWORK_INDEX_PATTERN and inside
-_query_network_interfaces()).
+All five metrics — cpu, memory, disk, network, raw — are implemented
+below, each following the same historic/current pattern. Network and raw
+are structurally different from cpu/memory/disk (no overall "avg"); raw
+additionally pulls from a separate logs-* index rather than metricbeat-*,
+and detects categories via keyword/phrase matching rather than a numeric
+aggregation — see _build_log_category_should_clauses().
 
 >>> ADJUST BEFORE USE <<<
 Three things in this file are placeholders you'll need to point at your
@@ -114,6 +115,13 @@ TRAFFIC_OUT_BYTES_FIELD = "system.network.out.bytes" # TODO: per-interface outbo
 # NetFlow/network-flow integration with a network.community_id or flow.id
 # field — swap in a `cardinality` aggregation on that field instead; see
 # the comment inside _query_network_interfaces().
+
+LOGS_INDEX_PATTERN = "logs-*"          # ECS-style logs data stream/index
+LOG_MESSAGE_FIELD = "message"          # TODO: field holding the raw log line/message text
+LOG_LEVEL_FIELD = "log.level"          # TODO: field holding the log level (error/warn/info/etc.)
+LOG_TIMESTAMP_FIELD = "@timestamp"     # TODO: adjust if your logs use a different timestamp field
+RAW_LOG_MAX_LINES = 100                # cap on how many matching lines to pull per window
+
 
 # Time windows — tune these to taste.
 HISTORIC_WINDOW = timedelta(minutes=10)  # +/- around incident.created_at
@@ -399,6 +407,85 @@ def _query_network_interfaces(asset_id, start, end, size=10):
     return interfaces
 
 
+def _build_log_category_should_clauses():
+    """
+    Keyword/phrase patterns used to surface the specific categories
+    requested: Kernel Panic, Out of Memory events, Disk Full/I-O errors,
+    Authentication failures, Monitoring/agent issues — plus generic
+    error-level entries. Combined with "should" + minimum_should_match=1
+    below, so a log line matches if it hits ANY of these.
+
+    TODO: tune these phrases to match your actual log message formats —
+    these are common Linux/syslog-style phrasings as a starting point,
+    not guaranteed to match your specific application/OS log format.
+    """
+    return [
+        # Kernel Panic
+        {"match_phrase": {LOG_MESSAGE_FIELD: "kernel panic"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "Oops"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "BUG: unable to handle"}},
+        # Out of Memory
+        {"match_phrase": {LOG_MESSAGE_FIELD: "out of memory"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "oom-killer"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "Killed process"}},
+        # Disk full / I/O errors
+        {"match_phrase": {LOG_MESSAGE_FIELD: "No space left on device"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "I/O error"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "read-only file system"}},
+        # Authentication failures
+        {"match_phrase": {LOG_MESSAGE_FIELD: "authentication failure"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "Failed password"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "invalid user"}},
+        # Monitoring / agent issues
+        {"match_phrase": {LOG_MESSAGE_FIELD: "agent unreachable"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "heartbeat missed"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "monitoring agent"}},
+        {"match_phrase": {LOG_MESSAGE_FIELD: "collector disconnected"}},
+        # Generic errors (level-based, catches anything the phrases above miss)
+        {"term": {LOG_LEVEL_FIELD: "error"}},
+        {"term": {LOG_LEVEL_FIELD: "critical"}},
+    ]
+
+
+def _query_raw_log_events(asset_id, start, end, size=RAW_LOG_MAX_LINES):
+    """
+    Pulls log lines matching the categories above within [start, end] for
+    the given asset, newest-first from ES then reversed so the returned
+    text reads chronologically (oldest first) like a real log file.
+
+    Returns a single newline-joined string — matches what the frontend's
+    Raw Log tab displays inside a <pre> block.
+    """
+    query = {
+        "size": size,
+        "sort": [{LOG_TIMESTAMP_FIELD: {"order": "desc"}}],
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {HOST_FIELD: asset_id}},
+                    {"range": {LOG_TIMESTAMP_FIELD: {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                ],
+                "should": _build_log_category_should_clauses(),
+                "minimum_should_match": 1,
+            }
+        },
+    }
+
+    response = _es_search(LOGS_INDEX_PATTERN, query)
+    hits = response.get("hits", {}).get("hits", [])
+
+    lines = []
+    for hit in hits:
+        source = hit.get("_source", {})
+        ts = source.get(LOG_TIMESTAMP_FIELD, "")
+        level = (source.get(LOG_LEVEL_FIELD) or "LOG").upper()
+        message = source.get(LOG_MESSAGE_FIELD, "")
+        lines.append(f"[{ts}] {level}: {message}")
+
+    lines.reverse()  # ES gave newest-first; flip to chronological order
+    return "\n".join(lines) if lines else "No matching log events found in this window."
+
+
 @require_GET
 def evidence_metrics(request):
     """
@@ -428,8 +515,10 @@ def evidence_metrics(request):
         return _build_disk_metrics_response(incident_number, asset_id)
     if metric == 'network':
         return _build_network_metrics_response(incident_number, asset_id)
+    if metric == 'raw':
+        return _build_rawlog_metrics_response(incident_number, asset_id)
 
-    # All four metrics (cpu/memory/disk/network) are implemented above —
+    # All five metrics (cpu/memory/disk/network/raw) are implemented above —
     # anything else is a genuinely bad request, not "not implemented yet".
     return JsonResponse({"error": f"metric='{metric}' is not a recognized metric"}, status=400)
 
@@ -667,4 +756,59 @@ def _get_current_network_section(asset_id):
     return {
         "captured_at": now.isoformat(),
         "interfaces": interfaces,
+    }
+
+
+def _build_rawlog_metrics_response(incident_number, asset_id):
+    """Looks up the incident's open time, runs both ES queries, and builds the response."""
+    try:
+        incident_opened_at = get_incident_opened_at(incident_number)
+    except NotImplementedError as e:
+        logger.error(str(e))
+        return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
+
+    if incident_opened_at is None:
+        return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
+
+    historic = _get_historic_rawlog_section(asset_id, incident_opened_at)
+    if isinstance(historic, JsonResponse):
+        return historic  # an error response bubbled up
+
+    current = _get_current_rawlog_section(asset_id)
+    if isinstance(current, JsonResponse):
+        return current  # an error response bubbled up
+
+    return JsonResponse({"historic": historic, "current": current})
+
+
+def _get_historic_rawlog_section(asset_id, incident_opened_at):
+    """Builds the 'historic' section: a window around when the incident opened."""
+    hist_start = incident_opened_at - HISTORIC_WINDOW
+    hist_end = incident_opened_at + HISTORIC_WINDOW
+    try:
+        log_text = _query_raw_log_events(asset_id, hist_start, hist_end)
+    except Exception:
+        logger.exception("Elasticsearch query failed for historic log data (asset=%s)", asset_id)
+        return JsonResponse({"error": "Failed to fetch historic log data from Elasticsearch"}, status=502)
+
+    return {
+        "window_start": hist_start.isoformat(),
+        "window_end": hist_end.isoformat(),
+        "log": log_text,
+    }
+
+
+def _get_current_rawlog_section(asset_id):
+    """Builds the 'current' section: a trailing live window up to now."""
+    now = timezone.now()
+    cur_start = now - CURRENT_WINDOW
+    try:
+        log_text = _query_raw_log_events(asset_id, cur_start, now)
+    except Exception:
+        logger.exception("Elasticsearch query failed for current log data (asset=%s)", asset_id)
+        return JsonResponse({"error": "Failed to fetch current log data from Elasticsearch"}, status=502)
+
+    return {
+        "captured_at": now.isoformat(),
+        "log": log_text,
     }
