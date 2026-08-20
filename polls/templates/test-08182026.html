@@ -1120,6 +1120,10 @@ CHANGE_FIELD_MAP = {
     "status": "state",                              # choice field -> display_value
 }
 
+# Holds the list of Service Requests raised for alarm suppression on this
+# change — lives directly on change_request itself, no extra query needed.
+ALARM_SUPPRESSION_FIELD = "u_alarm_suppression"
+
 IMPACTED_CI_TABLE = "task_ci"                # TODO: confirm — ServiceNow's OOB task<->CI junction table
 IMPACTED_CI_TASK_FIELD = "task"              # reference back to the change_request sys_id
 IMPACTED_CI_FIELD = "ci_item"                # reference to the affected CI
@@ -1202,6 +1206,23 @@ def _snow_search_impacted_cis(change_sys_id):
     return impacted
 
 
+def _parse_suppression_list(raw_value):
+    """
+    ServiceNow's u_alarm_suppression field holds the Service Requests
+    raised for alarm suppression on this change. If it's a glide_list
+    field, fetching with sysparm_display_value=true typically returns a
+    single comma-separated display string (e.g. "REQ0012345, REQ0012346")
+    rather than a JSON array — this splits that into a clean list.
+    TODO: if your field is a plain text field with a different separator,
+    or already comes back as a real list, adjust this parsing.
+    """
+    if not raw_value:
+        return []
+    if isinstance(raw_value, list):
+        return [str(v).strip() for v in raw_value if str(v).strip()]
+    return [part.strip() for part in str(raw_value).split(',') if part.strip()]
+
+
 def _build_change_response(record, app_id):
     """Maps a raw ServiceNow change_request record onto the frontend's expected field names."""
     data = {
@@ -1209,6 +1230,9 @@ def _build_change_response(record, app_id):
         for output_key, snow_field in CHANGE_FIELD_MAP.items()
     }
     data["app_id"] = app_id
+    data["alarm_suppression_requests"] = _parse_suppression_list(
+        _extract_field(record, ALARM_SUPPRESSION_FIELD)
+    )
 
     change_sys_id = record.get("sys_id")  # sys_id is never a reference field, always a plain string
     try:
