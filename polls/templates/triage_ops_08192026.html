@@ -131,6 +131,9 @@
         .bar-track { flex: 1; height: 8px; background: rgba(0,0,0,0.06); border-radius: 6px; overflow: hidden; }
         .bar-fill { height: 100%; border-radius: 6px; transition: width 0.4s ease; }
         .bar-pct { width: 36px; flex-shrink: 0; text-align: right; font-size: 0.72rem; font-weight: 600; color: var(--text-main); }
+        .metric-subtabs { display: inline-flex; background: rgba(0,0,0,0.05); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
+        .metric-subtab { border: none; background: transparent; padding: 6px 14px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; color: var(--text-sec); cursor: pointer; transition: 0.15s; }
+        .metric-subtab.active { background: #fff; color: var(--text-main); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
         .evidence-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.8rem; }
         .evidence-table th { text-align: left; font-size: 0.63rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-sec); padding: 8px 6px; border-bottom: 1px solid var(--border); }
         .evidence-table td { padding: 8px 6px; border-bottom: 1px solid rgba(0,0,0,0.04); }
@@ -532,6 +535,26 @@
      * asset panel; `elastic_query_meta` (the underlying Elastic query) isn't
      * surfaced in the UI.
      */
+    function mapChangesRaw(changesRaw, inc) {
+        return (changesRaw || []).map(item => ({
+            changeNumber: item.change_number || item.chg || item.number || 'Unknown',
+            submitter: item.submitter || item.submitted_by || item.requested_by,
+            affectedCi: item.affected_ci || item.affected_ci_name || item.ci || item.asset,
+            changeCoordinator: item.change_coordinator || item.coordinator,
+            startTime: item.start_time || item.planned_start || item.start,
+            endTime: item.end_time || item.planned_end || item.end,
+            status: item.status,
+            appId: item.app_id || item.application || (inc && inc.app),
+            alarmSuppressionRequests: item.alarm_suppression_requests || item.u_alarm_suppression || [],
+            impactedCis: (item.impacted_cis || item.impacted_ci_list || item.impacted_configuration_items || []).map(x => ({
+                ciName: x.ci_name || x.name || x.hostname || 'Unknown',
+                suppressionStatus: x.suppression_status || x.suppressed_status ||
+                    (x.suppressed != null ? (x.suppressed ? 'Suppressed' : 'Not Suppressed') : 'N/A'),
+                suppressionRequestNumber: x.suppression_request_number || x.suppression_req || x.suppression_ticket || 'N/A'
+            }))
+        }));
+    }
+
     function applyIncidentDetails(inc, data) {
         const session  = (data.session && data.session[0]) || {};
         const metadata = (data.metadata && data.metadata[0]) || {};
@@ -548,23 +571,10 @@
         // Change(s) — an incident can have zero, one, or multiple linked changes.
         // Supports either data.changes (array) or a single data.change object;
         // falls back to session.change_number alone if that's all the API sends.
+        // This is just the initial state from the bundled /details/ response —
+        // showChgPanel() replaces it with a live ServiceNow fetch on first open.
         const changesRaw = data.changes || (data.change ? [data.change] : (session.change_number ? [{ change_number: session.change_number }] : []));
-        inc.changes = changesRaw.map(item => ({
-            changeNumber: item.change_number || item.chg || item.number || 'Unknown',
-            submitter: item.submitter || item.submitted_by || item.requested_by,
-            affectedCi: item.affected_ci || item.affected_ci_name || item.ci || item.asset,
-            changeCoordinator: item.change_coordinator || item.coordinator,
-            startTime: item.start_time || item.planned_start || item.start,
-            endTime: item.end_time || item.planned_end || item.end,
-            status: item.status,
-            appId: item.app_id || item.application || inc.app,
-            impactedCis: (item.impacted_cis || item.impacted_ci_list || item.impacted_configuration_items || []).map(x => ({
-                ciName: x.ci_name || x.name || x.hostname || 'Unknown',
-                suppressionStatus: x.suppression_status || x.suppressed_status ||
-                    (x.suppressed != null ? (x.suppressed ? 'Suppressed' : 'Not Suppressed') : 'N/A'),
-                suppressionRequestNumber: x.suppression_request_number || x.suppression_req || x.suppression_ticket || 'N/A'
-            }))
-        }));
+        inc.changes = mapChangesRaw(changesRaw, inc);
 
         // Triage run metadata
         inc.triggered_by = session.triggered_by || inc.triggered_by;
@@ -766,21 +776,72 @@
         `);
     }
 
+    let currentChangePanelInc = null; // tracks which incident's change panel is open, to guard async writes
+
     function showChgPanel() {
-        if(!currentInc) return;
+        if (!currentInc) return;
+        currentChangePanelInc = currentInc;
         const inc = currentInc;
-        const changes = inc.changes || [];
-        if(changes.length === 0) {
-            openPanel('Linked Change', 'No Change Linked', `
-                <div class="panel-empty">
-                    <i class="bi bi-link-45deg"></i>
-                    This incident has no correlated change record.
-                </div>
-            `);
+
+        if (inc.changesLive) {
+            renderChgPanelFromCache(inc, false);
             return;
         }
-        const title = changes.length === 1 ? changes[0].changeNumber : `${changes.length} Linked Changes`;
-        openPanel('Linked Change', title, renderChangesBody(changes));
+
+        // Show whatever came bundled with the incident (if anything) while
+        // the live ServiceNow fetch is in flight, rather than a blank panel.
+        renderChgPanelFromCache(inc, true);
+        loadLiveChanges(inc);
+    }
+
+    function renderChgPanelFromCache(inc, loading) {
+        const changes = inc.changes || [];
+        const title = changes.length === 1 ? changes[0].changeNumber
+            : changes.length > 1 ? `${changes.length} Linked Changes`
+            : 'No Change Linked';
+
+        const loadingNote = loading
+            ? `<div class="text-muted small" style="margin-bottom:12px;"><i class="bi bi-hourglass-split"></i> Refreshing from ServiceNow…</div>`
+            : '';
+
+        const body = changes.length
+            ? renderChangesBody(changes)
+            : `<div class="panel-empty"><i class="bi bi-link-45deg"></i>This incident has no correlated change record.</div>`;
+
+        openPanel('Linked Change', title, loadingNote + body);
+    }
+
+    async function loadLiveChanges(inc) {
+        const myToken = panelToken; // captured after renderChgPanelFromCache's openPanel() bumped it
+        try {
+            const data = await fetchLiveChanges(inc.id, inc.app);
+            inc.changes = mapChangesRaw(data.changes || [], inc);
+            inc.changesLive = true;
+
+            const chgCard = document.getElementById('node-chg');
+            if (inc.changes.length === 0) {
+                document.getElementById('d-chg').innerText = 'N/A';
+                document.getElementById('chg-status-text').innerText = 'No linked change';
+                chgCard.classList.add('node-disabled');
+            } else {
+                document.getElementById('d-chg').innerText = inc.changes.length === 1
+                    ? inc.changes[0].changeNumber
+                    : `${inc.changes.length} Linked Changes`;
+                document.getElementById('chg-status-text').innerText = 'Correlation Status';
+                chgCard.classList.remove('node-disabled');
+            }
+
+            if (currentChangePanelInc === inc && panelToken === myToken) {
+                renderChgPanelFromCache(inc, false);
+            }
+        } catch (err) {
+            console.error('live changes fetch failed', err);
+            if (currentChangePanelInc === inc && panelToken === myToken) {
+                const errorNote = `<div class="panel-empty"><i class="bi bi-exclamation-triangle"></i>Failed to load live change data from ServiceNow.</div>`;
+                const fallback = (inc.changes && inc.changes.length) ? renderChangesBody(inc.changes) : '';
+                document.getElementById('panel-body').innerHTML = errorNote + fallback;
+            }
+        }
     }
 
     function renderChangesBody(changes) {
@@ -828,6 +889,10 @@
                     <div><div class="label">Start Time</div><div class="val">${chg.startTime || 'N/A'}</div></div>
                     <div><div class="label">End Time</div><div class="val">${chg.endTime || 'N/A'}</div></div>
                 </div>
+                <div class="label" style="margin-top:14px;">Alarm Suppression Requests</div>
+                <div class="val">${(chg.alarmSuppressionRequests && chg.alarmSuppressionRequests.length)
+                    ? chg.alarmSuppressionRequests.join(', ')
+                    : '<span class="text-muted">There was no suppression request</span>'}</div>
                 ${impactedTable}
             </div>
         `;
@@ -1043,26 +1108,21 @@
 
     const EVIDENCE_TAB_LABELS = {
         cpu: 'CPU metrics', memory: 'memory metrics', disk: 'disk metrics',
-        network: 'network data', health: 'health check', sslcerts: 'SSL certificates'
+        network: 'network data', health: 'health check', sslcerts: 'SSL certificates',
+        raw: 'raw log data'
     };
 
     function fetchEvidenceTabData(tab, incId, assetId) {
         switch (tab) {
             case 'health':    return fetchAssetHealthCheck(incId, assetId);
             case 'sslcerts':  return fetchAssetSslCerts(incId, assetId);
-            default:          return fetchEvidenceMetric(incId, assetId, tab); // cpu / memory / disk / network
+            default:          return fetchEvidenceMetric(incId, assetId, tab); // cpu / memory / disk / network / raw
         }
     }
 
     async function loadEvidenceTab(ci, tab) {
         const contentEl = document.getElementById('evidenceTabContent');
         if (!contentEl) return; // panel closed/rebuilt in the meantime
-
-        if (tab === 'raw') {
-            const logText = ci.log || (DEMO_MODE ? generateDemoRawLog(ci) : null);
-            contentEl.innerHTML = `<div class="label">Raw Log Output</div><pre>${logText || 'No evidence available yet.'}</pre>`;
-            return;
-        }
 
         if (tab === 'firewall') {
             // Interactive, on-demand — no auto-fetch. Renders the form (with
@@ -1104,7 +1164,8 @@
         disk: renderDiskTab,
         network: renderNetworkTab,
         health: renderHealthCheckTab,
-        sslcerts: renderSslCertsTab
+        sslcerts: renderSslCertsTab,
+        raw: renderRawLogTab
     };
 
     function renderEvidenceTab(tab, data) {
@@ -1112,6 +1173,24 @@
         if (!contentEl) return;
         const renderer = EVIDENCE_TAB_RENDERERS[tab];
         contentEl.innerHTML = renderer ? renderer(data) : renderMetricTab(tab, data);
+    }
+
+    function renderRawLogTab(data) {
+        lastMetricTabType = 'raw';
+        lastMetricTabData = data;
+
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+
+        return `
+            ${renderMetricSubTabBar()}
+            ${windowNote}
+            <div class="label">Raw Log Output</div>
+            <pre>${section.log || 'No evidence available yet.'}</pre>
+        `;
     }
 
     function barColor(pct) {
@@ -1134,11 +1213,34 @@
         return `<div class="bar-chart">${rows}</div>`;
     }
 
+    let currentMetricSubTab = 'current'; // shared 'historic' | 'current' toggle for CPU/Memory/Disk/Network
+    let lastMetricTabType = null;        // remembers what to re-render when the sub-tab is switched
+    let lastMetricTabData = null;
+
+    function switchMetricSubTab(sub) {
+        currentMetricSubTab = sub;
+        if (!lastMetricTabType || !lastMetricTabData) return;
+        renderEvidenceTab(lastMetricTabType, lastMetricTabData);
+    }
+
+    function renderMetricSubTabBar() {
+        return `
+            <div class="metric-subtabs">
+                <button class="metric-subtab${currentMetricSubTab === 'current' ? ' active' : ''}" onclick="switchMetricSubTab('current')">Current</button>
+                <button class="metric-subtab${currentMetricSubTab === 'historic' ? ' active' : ''}" onclick="switchMetricSubTab('historic')">Historic</button>
+            </div>
+        `;
+    }
+
     function renderMetricTab(tab, data) {
+        lastMetricTabType = tab;
+        lastMetricTabData = data;
+
         const label = tab === 'cpu' ? 'CPU' : 'Memory';
-        const histAvg = data.historical_avg != null ? `${data.historical_avg}%` : 'N/A';
-        const curAvg = data.current_avg != null ? `${data.current_avg}%` : 'N/A';
-        const processes = (data.top_processes || data.processes || []).slice(0, 10);
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const avg = section.avg != null ? `${section.avg}%` : 'N/A';
+        const processes = (section.top_processes || section.processes || []).slice(0, 10);
 
         const rows = processes.map((p, i) => {
             const pct = p[`${tab}_percent`] ?? p.percent ?? p.value ?? 0;
@@ -1155,14 +1257,14 @@
             pct: p[`${tab}_percent`] ?? p.percent ?? p.value ?? 0
         }));
 
-        const windowNote = data.window_start
-            ? `<div class="text-muted small" style="margin:-8px 0 12px;">Since incident opened${data.window_end ? ` (${data.window_start} – ${data.window_end})` : ` (${data.window_start})`}</div>`
-            : '';
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
 
         return `
-            <div class="evidence-stat-row">
-                <div class="evidence-stat"><div class="label">Historical Avg ${label}</div><div class="val">${histAvg}</div></div>
-                <div class="evidence-stat"><div class="label">Current Avg ${label}</div><div class="val">${curAvg}</div></div>
+            ${renderMetricSubTabBar()}
+            <div class="evidence-stat-row" style="grid-template-columns:1fr;">
+                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Current'} Avg ${label}</div><div class="val">${avg}</div></div>
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Processes by ${label} Usage</div>
@@ -1175,13 +1277,18 @@
     }
 
     function renderDiskTab(data) {
-        const histAvg = data.historical_avg != null ? `${data.historical_avg}%` : 'N/A';
-        const curAvg = data.current_avg != null ? `${data.current_avg}%` : 'N/A';
-        const windowNote = data.window_start
-            ? `<div class="text-muted small" style="margin:-8px 0 12px;">Since incident opened${data.window_end ? ` (${data.window_start} – ${data.window_end})` : ` (${data.window_start})`}</div>`
-            : '';
+        lastMetricTabType = 'disk';
+        lastMetricTabData = data;
 
-        const mounts = data.top_mount_points || data.mount_points || data.mounts || [];
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const avg = section.avg != null ? `${section.avg}%` : 'N/A';
+
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+
+        const mounts = section.top_mount_points || section.mount_points || section.mounts || [];
         const sorted = [...mounts]
             .sort((a, b) => (b.percent_used ?? b.used_percent ?? b.percent ?? 0) - (a.percent_used ?? a.used_percent ?? a.percent ?? 0))
             .slice(0, 10);
@@ -1204,9 +1311,9 @@
         }));
 
         return `
-            <div class="evidence-stat-row">
-                <div class="evidence-stat"><div class="label">Historical Avg Disk</div><div class="val">${histAvg}</div></div>
-                <div class="evidence-stat"><div class="label">Current Avg Disk</div><div class="val">${curAvg}</div></div>
+            ${renderMetricSubTabBar()}
+            <div class="evidence-stat-row" style="grid-template-columns:1fr;">
+                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Current'} Avg Disk</div><div class="val">${avg}</div></div>
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Mount Points by Storage Consumed</div>
@@ -1219,7 +1326,16 @@
     }
 
     function renderNetworkTab(data) {
-        const interfaces = data.interfaces || data.drivers || data.results || [];
+        lastMetricTabType = 'network';
+        lastMetricTabData = data;
+
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+
+        const interfaces = section.interfaces || section.drivers || section.results || [];
         const rows = interfaces.map(nic => `
             <tr>
                 <td>${nic.driver || nic.name || nic.interface || 'Unknown'}</td>
@@ -1230,6 +1346,8 @@
         `).join('');
 
         return `
+            ${renderMetricSubTabBar()}
+            ${windowNote}
             <div class="label">Network Drivers &amp; Traffic</div>
             <table class="evidence-table">
                 <thead><tr><th>Driver / Interface</th><th>Traffic In</th><th>Traffic Out</th><th>Flow Count</th></tr></thead>
@@ -1569,7 +1687,7 @@
             if (includeEvidence && currentCi) {
                 currentCi.metricsCache = currentCi.metricsCache || {};
                 for (const tab of selectedEvidenceTabs) {
-                    if (tab === 'raw' || currentCi.metricsCache[tab]) continue;
+                    if (currentCi.metricsCache[tab]) continue;
                     try {
                         currentCi.metricsCache[tab] = await fetchEvidenceTabData(tab, inc.id, currentCi.id || currentCi.name);
                     } catch (e) {
@@ -1687,7 +1805,11 @@
                 sections.push('TECHNICAL EVIDENCE\nNo asset currently selected.');
             } else {
                 const text = selections.evidenceTabs.map(tab => {
-                    if (tab === 'raw') return `Raw Log:\n${currentCi.log || 'not loaded'}`;
+                    if (tab === 'raw') {
+                        const raw = currentCi.metricsCache && currentCi.metricsCache.raw;
+                        const logText = raw ? (raw.current && raw.current.log) || (raw.historic && raw.historic.log) : null;
+                        return `Raw Log:\n${logText || currentCi.log || 'not loaded'}`;
+                    }
                     const data = currentCi.metricsCache && currentCi.metricsCache[tab];
                     const label = (EVIDENCE_TABS.find(t => t.id === tab) || {}).label || tab;
                     return `${label}:\n${data ? JSON.stringify(data) : 'not loaded'}`;
@@ -2252,28 +2374,44 @@
      * renderMetricTab()/renderDiskTab()/renderNetworkTab() once you share a
      * real sample.
      *
-     * No timeframe is sent from the frontend — the backend is expected to
-     * derive the historical window itself from the incident's own opened
-     * time (created_at) through now, and current_avg is just the live/
-     * latest average at request time.
+     * Each metric response is split into two full sections — `historic`
+     * (a point-in-time snapshot around when the incident opened, i.e.
+     * incident.created_at) and `current` (the live/latest snapshot at
+     * request time). The UI renders these as a Historic/Current sub-tab
+     * toggle within each tab — no timeframe is sent from the frontend, the
+     * backend is expected to know what "around incident open" means.
      *
      *   GET {API_BASE}/api/triage/evidence/metrics/
      *       ?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
      *
      *   metric=cpu|memory ->
-     *     { historical_avg: number, current_avg: number,
-     *       window_start (optional, e.g. incident's created_at),
-     *       window_end (optional),
-     *       top_processes: [{ process, <metric>_percent }] }
+     *     { historic: { avg, window_start, window_end, top_processes: [{ process, <metric>_percent }] },
+     *       current:  { avg, captured_at, top_processes: [{ process, <metric>_percent }] } }
      *   metric=disk ->
-     *     { historical_avg: number, current_avg: number,
-     *       window_start (optional), window_end (optional),
-     *       top_mount_points: [{ mount_point, used, total, percent_used }] }
+     *     { historic: { avg, window_start, window_end, top_mount_points: [{ mount_point, used, total, percent_used }] },
+     *       current:  { avg, captured_at, top_mount_points: [{ mount_point, used, total, percent_used }] } }
      *   metric=network ->
-     *     { interfaces: [{ driver, traffic_in, traffic_out, flow_count }] }
+     *     { historic: { window_start, window_end, interfaces: [{ driver, traffic_in, traffic_out, flow_count }] },
+     *       current:  { captured_at, interfaces: [{ driver, traffic_in, traffic_out, flow_count }] } }
      */
     const EVIDENCE_METRIC_URL = (incId, assetId, metric) =>
         `${API_BASE}/api/triage/evidence/metrics/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}&metric=${encodeURIComponent(metric)}`;
+
+    /**
+     * Linked Changes — live from ServiceNow, scoped to the incident's app
+     * and a +/-24h window around when the incident opened. Lazily fetched
+     * the first time the "Linked Change" card is clicked (see
+     * showChgPanel()), not on initial incident load — same lazy pattern
+     * as Asset Details.
+     *
+     *   GET {API_BASE}/api/triage/changes/?incident_number=<id>&app_id=<appId>
+     *   -> { changes: [{ change_number, submitter, affected_ci,
+     *        change_coordinator, start_time, end_time, status, app_id,
+     *        impacted_cis: [{ ci_name, suppression_status,
+     *                          suppression_request_number }] }] }
+     */
+    const CHANGES_URL = (incId, appId) =>
+        `${API_BASE}/api/triage/changes/?incident_number=${encodeURIComponent(incId)}&app_id=${encodeURIComponent(appId)}`;
 
     /**
      * Health Check tab data. NOT confirmed against a real response — best
@@ -2379,6 +2517,19 @@
         return res.json();
     }
 
+    async function fetchLiveChanges(incId, appId) {
+        if (DEMO_MODE) {
+            // Reuse whatever changes were already generated as part of this
+            // incident's bundled demo record — keeps demo data internally
+            // consistent rather than building a second, separate generator.
+            const record = getOrCreateDemoIncident(incId);
+            return { changes: record.changes || [] };
+        }
+        const res = await fetch(CHANGES_URL(incId, appId), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`Changes fetch failed (HTTP ${res.status})`);
+        return res.json();
+    }
+
     async function fetchAssetHealthCheck(incId, assetId) {
         if (DEMO_MODE) return generateDemoHealthCheck(assetId);
         const res = await fetch(HEALTHCHECK_URL(incId, assetId), { credentials: 'same-origin' });
@@ -2433,40 +2584,45 @@
                 const rand = seededRandom(`${assetId}:${metric}`);
                 if (metric === 'network') { resolve(generateDemoNetwork(rand)); return; }
                 if (metric === 'disk') { resolve(generateDemoDiskMetric(rand)); return; }
+                if (metric === 'raw') { resolve(generateDemoRawLogSections(rand)); return; }
                 resolve(generateDemoUsageMetric(metric, rand));
             }, 500);
         });
     }
 
-    function generateDemoUsageMetric(metric, rand) {
-        const current = Math.round(35 + rand() * 55);
-        const historical = Math.max(5, Math.round(current - (8 + rand() * 22)));
-
+    function buildUsageSection(rand, metric, isHistoric, minAvg, maxAvg) {
+        const avg = Math.round(minAvg + rand() * (maxAvg - minAvg));
         const pool = [...DEMO_PROCESSES];
         for (let i = pool.length - 1; i > 0; i--) {
             const j = Math.floor(rand() * (i + 1));
             [pool[i], pool[j]] = [pool[j], pool[i]];
         }
-
-        let base = current * 0.85;
+        let base = avg * 0.85;
         const top_processes = pool.slice(0, 10).map((proc, i) => {
             const pct = Math.max(1, Math.round((base / Math.pow(1.45, i)) * (0.85 + rand() * 0.3)));
             return { process: proc, [`${metric}_percent`]: pct };
         });
 
-        return {
-            historical_avg: historical,
-            current_avg: current,
-            window_start: (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString(),
-            window_end: 'Now',
-            top_processes
-        };
+        const section = { avg, top_processes };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start; // point-in-time snapshot around when the incident opened
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
     }
 
-    function generateDemoDiskMetric(rand) {
-        const current = Math.round(35 + rand() * 55);
-        const historical = Math.max(5, Math.round(current - (8 + rand() * 22)));
+    function generateDemoUsageMetric(metric, rand) {
+        // Current runs elevated vs. the historic baseline — tells a believable
+        // "something spiked after the incident opened" story in the demo.
+        const historic = buildUsageSection(rand, metric, true, 15, 50);
+        const current = buildUsageSection(rand, metric, false, 45, 95);
+        return { historic, current };
+    }
 
+    function buildDiskSection(rand, isHistoric, minAvg, maxAvg) {
+        const avg = Math.round(minAvg + rand() * (maxAvg - minAvg));
         const mountPool = ['/', '/var', '/var/log', '/data', '/tmp', '/home', '/opt', '/boot', '/var/lib/docker', '/mnt/backup'];
         const pool = [...mountPool];
         for (let i = pool.length - 1; i > 0; i--) {
@@ -2478,60 +2634,90 @@
 
         const top_mount_points = pool.slice(0, Math.min(mountCount, pool.length)).map((mp, i) => {
             const totalGb = sizes[Math.floor(rand() * sizes.length)];
-            const pct = Math.min(99, Math.max(3, Math.round((current * (1 - i * 0.07)) * (0.7 + rand() * 0.5))));
+            const pct = Math.min(99, Math.max(3, Math.round((avg * (1 - i * 0.07)) * (0.7 + rand() * 0.5))));
             const usedGb = Math.round(totalGb * pct / 100);
-            return {
-                mount_point: mp,
-                used: `${usedGb} GB`,
-                total: `${totalGb} GB`,
-                percent_used: pct
-            };
+            return { mount_point: mp, used: `${usedGb} GB`, total: `${totalGb} GB`, percent_used: pct };
         }).sort((a, b) => b.percent_used - a.percent_used);
 
-        return {
-            historical_avg: historical,
-            current_avg: current,
-            window_start: (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString(),
-            window_end: 'Now',
-            top_mount_points
-        };
+        const section = { avg, top_mount_points };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
     }
 
-    function generateDemoNetwork(rand) {
+    function generateDemoDiskMetric(rand) {
+        const historic = buildDiskSection(rand, true, 15, 50);
+        const current = buildDiskSection(rand, false, 40, 90);
+        return { historic, current };
+    }
+
+    function buildNetworkSection(rand, isHistoric, trafficScale) {
         const drivers = ['eth0', 'eth1', 'lo', 'bond0'];
         const interfaces = drivers.map(d => ({
             driver: d,
-            traffic_in: `${(Math.round(rand() * 12000) / 10).toFixed(1)} MB`,
-            traffic_out: `${(Math.round(rand() * 9000) / 10).toFixed(1)} MB`,
-            flow_count: Math.round(rand() * 400)
+            traffic_in: `${(Math.round(rand() * 12000 * trafficScale) / 10).toFixed(1)} MB`,
+            traffic_out: `${(Math.round(rand() * 9000 * trafficScale) / 10).toFixed(1)} MB`,
+            flow_count: Math.round(rand() * 400 * trafficScale)
         }));
-        return { interfaces };
+        const section = { interfaces };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
     }
 
-    function generateDemoRawLog(ci) {
-        const rand = seededRandom(`${ci.id || ci.name}:log`);
+    function generateDemoNetwork(rand) {
+        const historic = buildNetworkSection(rand, true, 0.6);
+        const current = buildNetworkSection(rand, false, 1.3); // elevated traffic post-incident
+        return { historic, current };
+    }
+
+    const DEMO_LOG_MESSAGES = [
+        'Connection pool exhausted, waiting for available connection',
+        'High memory usage detected on worker process',
+        'Disk I/O latency exceeded threshold (250ms)',
+        'Failed to reach upstream service after 3 retries',
+        'Certificate expiration warning: 12 days remaining',
+        'Thread pool queue backlog increasing',
+        'GC pause exceeded 500ms',
+        'Read timeout on database query',
+        'Service health check failed, marking node degraded',
+        'Retrying failed request to downstream API'
+    ];
+
+    function generateDemoLogSection(rand, isHistoric) {
         const levels = ['ERROR', 'WARN'];
-        const messages = [
-            'Connection pool exhausted, waiting for available connection',
-            'High memory usage detected on worker process',
-            'Disk I/O latency exceeded threshold (250ms)',
-            'Failed to reach upstream service after 3 retries',
-            'Certificate expiration warning: 12 days remaining',
-            'Thread pool queue backlog increasing',
-            'GC pause exceeded 500ms',
-            'Read timeout on database query',
-            'Service health check failed, marking node degraded',
-            'Retrying failed request to downstream API'
-        ];
         const lines = [];
         let ts = new Date();
         for (let i = 0; i < 14; i++) {
             const level = levels[Math.floor(rand() * levels.length)];
-            const msg = messages[Math.floor(rand() * messages.length)];
+            const msg = DEMO_LOG_MESSAGES[Math.floor(rand() * DEMO_LOG_MESSAGES.length)];
             lines.unshift(`[${ts.toISOString()}] ${level}: ${msg}`);
             ts = new Date(ts.getTime() - Math.round(rand() * 6 * 60000));
         }
-        return lines.join('\n');
+
+        const section = { log: lines.join('\n') };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
+    }
+
+    function generateDemoRawLogSections(rand) {
+        return {
+            historic: generateDemoLogSection(rand, true),
+            current: generateDemoLogSection(rand, false)
+        };
     }
 
     function generateDemoHealthCheck(assetId) {
@@ -2742,6 +2928,14 @@
                     suppression_request_number: suppression === 'Not Suppressed' ? 'N/A' : `SUPP${Math.floor(10000 + rand() * 89999)}`
                 });
             }
+            // Change-level alarm suppression Service Requests — separate
+            // from the per-CI suppression above, matches ServiceNow's
+            // u_alarm_suppression list field on change_request itself.
+            const alarmSuppressionCount = rand() > 0.4 ? 0 : 1 + Math.floor(rand() * 2); // ~60% none, else 1-2
+            const alarmSuppressionRequests = [];
+            for (let i = 0; i < alarmSuppressionCount; i++) {
+                alarmSuppressionRequests.push(`REQ${Math.floor(1000000 + rand() * 8999999)}`);
+            }
             changes.push({
                 change_number: changeNumber,
                 submitter: pick(submitters),
@@ -2752,6 +2946,7 @@
                 status: pick(changeStatuses),
                 app_id: app,
                 change_type: pick(changeTypes),
+                alarm_suppression_requests: alarmSuppressionRequests,
                 impacted_cis: impactedCis
             });
         }
