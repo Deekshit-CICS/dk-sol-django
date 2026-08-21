@@ -42,6 +42,7 @@ from datetime import timedelta
 import requests
 from django.http import JsonResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET
 
 logger = logging.getLogger(__name__)
@@ -490,6 +491,14 @@ def _query_raw_log_events(asset_id, start, end, size=RAW_LOG_MAX_LINES):
 def evidence_metrics(request):
     """
     GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
+        &range_start=<iso>&range_end=<iso>   (both optional — see below)
+
+    range_start/range_end come from the frontend's time-range picker on the
+    Live sub-tab (CPU/Memory/Disk/Network only — Raw Log never sends these).
+    When both are present and parse successfully, they replace the default
+    CURRENT_WINDOW trailing window for the "current" section. When absent
+    or unparseable, behavior is unchanged from before this feature — the
+    default trailing window is used, same as always.
 
     Response shape (matches the frontend's fetchEvidenceMetric() exactly):
         {
@@ -507,20 +516,42 @@ def evidence_metrics(request):
     if error_response:
         return error_response
 
+    range_start, range_end = _parse_custom_range(request)
+
     if metric == 'cpu':
-        return _build_cpu_metrics_response(incident_number, asset_id)
+        return _build_cpu_metrics_response(incident_number, asset_id, range_start, range_end)
     if metric == 'memory':
-        return _build_memory_metrics_response(incident_number, asset_id)
+        return _build_memory_metrics_response(incident_number, asset_id, range_start, range_end)
     if metric == 'disk':
-        return _build_disk_metrics_response(incident_number, asset_id)
+        return _build_disk_metrics_response(incident_number, asset_id, range_start, range_end)
     if metric == 'network':
-        return _build_network_metrics_response(incident_number, asset_id)
+        return _build_network_metrics_response(incident_number, asset_id, range_start, range_end)
     if metric == 'raw':
-        return _build_rawlog_metrics_response(incident_number, asset_id)
+        return _build_rawlog_metrics_response(incident_number, asset_id, range_start, range_end)
 
     # All five metrics (cpu/memory/disk/network/raw) are implemented above —
     # anything else is a genuinely bad request, not "not implemented yet".
     return JsonResponse({"error": f"metric='{metric}' is not a recognized metric"}, status=400)
+
+
+def _parse_custom_range(request):
+    """
+    Parses optional range_start/range_end query params — ISO 8601 strings,
+    as produced by the frontend's `new Date().toISOString()` — into
+    timezone-aware datetimes. Returns (start, end), or (None, None) if
+    either is missing or fails to parse. Callers treat (None, None) as
+    "use the default window", so a malformed param degrades gracefully
+    rather than erroring the whole request.
+    """
+    range_start_str = request.GET.get('range_start')
+    range_end_str = request.GET.get('range_end')
+    if not range_start_str or not range_end_str:
+        return None, None
+    start = parse_datetime(range_start_str)
+    end = parse_datetime(range_end_str)
+    if start is None or end is None:
+        return None, None
+    return start, end
 
 
 def _validate_metrics_request(incident_number, asset_id, metric):
@@ -533,7 +564,7 @@ def _validate_metrics_request(incident_number, asset_id, metric):
     return None
 
 
-def _build_cpu_metrics_response(incident_number, asset_id):
+def _build_cpu_metrics_response(incident_number, asset_id, range_start=None, range_end=None):
     """Looks up the incident's open time, runs both ES queries, and builds the response."""
     try:
         incident_opened_at = get_incident_opened_at(incident_number)
@@ -548,7 +579,7 @@ def _build_cpu_metrics_response(incident_number, asset_id):
     if isinstance(historic, JsonResponse):
         return historic  # an error response bubbled up
 
-    current = _get_current_cpu_section(asset_id)
+    current = _get_current_cpu_section(asset_id, range_start, range_end)
     if isinstance(current, JsonResponse):
         return current  # an error response bubbled up
 
@@ -573,10 +604,16 @@ def _get_historic_cpu_section(asset_id, incident_opened_at):
     }
 
 
-def _get_current_cpu_section(asset_id):
-    """Builds the 'current' section: a trailing live window up to now."""
-    now = timezone.now()
-    cur_start = now - CURRENT_WINDOW
+def _get_current_cpu_section(asset_id, range_start=None, range_end=None):
+    """
+    Builds the 'current'/Live section: a custom time range from the
+    frontend's picker if provided, otherwise the default trailing window.
+    """
+    if range_start and range_end:
+        cur_start, now = range_start, range_end
+    else:
+        now = timezone.now()
+        cur_start = now - CURRENT_WINDOW
     try:
         cur_avg, cur_top = _query_top_processes_by_cpu(asset_id, cur_start, now)
     except Exception:
@@ -590,7 +627,7 @@ def _get_current_cpu_section(asset_id):
     }
 
 
-def _build_memory_metrics_response(incident_number, asset_id):
+def _build_memory_metrics_response(incident_number, asset_id, range_start=None, range_end=None):
     """Looks up the incident's open time, runs both ES queries, and builds the response."""
     try:
         incident_opened_at = get_incident_opened_at(incident_number)
@@ -605,7 +642,7 @@ def _build_memory_metrics_response(incident_number, asset_id):
     if isinstance(historic, JsonResponse):
         return historic  # an error response bubbled up
 
-    current = _get_current_memory_section(asset_id)
+    current = _get_current_memory_section(asset_id, range_start, range_end)
     if isinstance(current, JsonResponse):
         return current  # an error response bubbled up
 
@@ -630,10 +667,16 @@ def _get_historic_memory_section(asset_id, incident_opened_at):
     }
 
 
-def _get_current_memory_section(asset_id):
-    """Builds the 'current' section: a trailing live window up to now."""
-    now = timezone.now()
-    cur_start = now - CURRENT_WINDOW
+def _get_current_memory_section(asset_id, range_start=None, range_end=None):
+    """
+    Builds the 'current'/Live section: a custom time range from the
+    frontend's picker if provided, otherwise the default trailing window.
+    """
+    if range_start and range_end:
+        cur_start, now = range_start, range_end
+    else:
+        now = timezone.now()
+        cur_start = now - CURRENT_WINDOW
     try:
         cur_avg, cur_top = _query_top_processes_by_memory(asset_id, cur_start, now)
     except Exception:
@@ -647,7 +690,7 @@ def _get_current_memory_section(asset_id):
     }
 
 
-def _build_disk_metrics_response(incident_number, asset_id):
+def _build_disk_metrics_response(incident_number, asset_id, range_start=None, range_end=None):
     """Looks up the incident's open time, runs both ES queries, and builds the response."""
     try:
         incident_opened_at = get_incident_opened_at(incident_number)
@@ -662,7 +705,7 @@ def _build_disk_metrics_response(incident_number, asset_id):
     if isinstance(historic, JsonResponse):
         return historic  # an error response bubbled up
 
-    current = _get_current_disk_section(asset_id)
+    current = _get_current_disk_section(asset_id, range_start, range_end)
     if isinstance(current, JsonResponse):
         return current  # an error response bubbled up
 
@@ -687,10 +730,16 @@ def _get_historic_disk_section(asset_id, incident_opened_at):
     }
 
 
-def _get_current_disk_section(asset_id):
-    """Builds the 'current' section: a trailing live window up to now."""
-    now = timezone.now()
-    cur_start = now - CURRENT_WINDOW
+def _get_current_disk_section(asset_id, range_start=None, range_end=None):
+    """
+    Builds the 'current'/Live section: a custom time range from the
+    frontend's picker if provided, otherwise the default trailing window.
+    """
+    if range_start and range_end:
+        cur_start, now = range_start, range_end
+    else:
+        now = timezone.now()
+        cur_start = now - CURRENT_WINDOW
     try:
         cur_avg, cur_top = _query_top_mount_points_by_disk_usage(asset_id, cur_start, now)
     except Exception:
@@ -704,7 +753,7 @@ def _get_current_disk_section(asset_id):
     }
 
 
-def _build_network_metrics_response(incident_number, asset_id):
+def _build_network_metrics_response(incident_number, asset_id, range_start=None, range_end=None):
     """Looks up the incident's open time, runs both ES queries, and builds the response."""
     try:
         incident_opened_at = get_incident_opened_at(incident_number)
@@ -719,7 +768,7 @@ def _build_network_metrics_response(incident_number, asset_id):
     if isinstance(historic, JsonResponse):
         return historic  # an error response bubbled up
 
-    current = _get_current_network_section(asset_id)
+    current = _get_current_network_section(asset_id, range_start, range_end)
     if isinstance(current, JsonResponse):
         return current  # an error response bubbled up
 
@@ -743,10 +792,16 @@ def _get_historic_network_section(asset_id, incident_opened_at):
     }
 
 
-def _get_current_network_section(asset_id):
-    """Builds the 'current' section: a trailing live window up to now."""
-    now = timezone.now()
-    cur_start = now - CURRENT_WINDOW
+def _get_current_network_section(asset_id, range_start=None, range_end=None):
+    """
+    Builds the 'current'/Live section: a custom time range from the
+    frontend's picker if provided, otherwise the default trailing window.
+    """
+    if range_start and range_end:
+        cur_start, now = range_start, range_end
+    else:
+        now = timezone.now()
+        cur_start = now - CURRENT_WINDOW
     try:
         interfaces = _query_network_interfaces(asset_id, cur_start, now)
     except Exception:
@@ -759,7 +814,7 @@ def _get_current_network_section(asset_id):
     }
 
 
-def _build_rawlog_metrics_response(incident_number, asset_id):
+def _build_rawlog_metrics_response(incident_number, asset_id, range_start=None, range_end=None):
     """Looks up the incident's open time, runs both ES queries, and builds the response."""
     try:
         incident_opened_at = get_incident_opened_at(incident_number)
@@ -774,7 +829,7 @@ def _build_rawlog_metrics_response(incident_number, asset_id):
     if isinstance(historic, JsonResponse):
         return historic  # an error response bubbled up
 
-    current = _get_current_rawlog_section(asset_id)
+    current = _get_current_rawlog_section(asset_id, range_start, range_end)
     if isinstance(current, JsonResponse):
         return current  # an error response bubbled up
 
@@ -798,10 +853,19 @@ def _get_historic_rawlog_section(asset_id, incident_opened_at):
     }
 
 
-def _get_current_rawlog_section(asset_id):
-    """Builds the 'current' section: a trailing live window up to now."""
-    now = timezone.now()
-    cur_start = now - CURRENT_WINDOW
+def _get_current_rawlog_section(asset_id, range_start=None, range_end=None):
+    """
+    Builds the 'current'/Live section. The frontend's time-range picker
+    doesn't cover Raw Log (only CPU/Memory/Disk/Network per the current
+    feature scope), so range_start/range_end will normally be None here —
+    but the endpoint honors them the same way as the other four if a
+    future frontend change ever adds a picker to this tab too.
+    """
+    if range_start and range_end:
+        cur_start, now = range_start, range_end
+    else:
+        now = timezone.now()
+        cur_start = now - CURRENT_WINDOW
     try:
         log_text = _query_raw_log_events(asset_id, cur_start, now)
     except Exception:
