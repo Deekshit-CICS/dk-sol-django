@@ -1312,11 +1312,22 @@
         }
     });
 
+    function toLocalIsoString(d) {
+        // Formats a Date's LOCAL wall-clock fields (getHours/getMinutes/etc,
+        // not the UTC variants) as an ISO-shaped string with NO 'Z' or
+        // offset suffix — e.g. "2026-08-21T14:30:00". This intentionally
+        // sends the exact time the user selected/sees on screen, not its
+        // UTC equivalent (unlike .toISOString(), which would shift it by
+        // the browser's UTC offset — 4-5 hours for EST/EDT).
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
     function applyQuickRange(minutes, label) {
         const end = new Date();
         const start = new Date(end.getTime() - minutes * 60000);
-        liveRangeStart = start.toISOString();
-        liveRangeEnd = end.toISOString();
+        liveRangeStart = toLocalIsoString(start);
+        liveRangeEnd = toLocalIsoString(end);
         liveRangeLabel = 'Last ' + label;
         document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
         refreshLiveRangeData();
@@ -1332,8 +1343,8 @@
             alert('Please select a valid start and end time (start must be before end).');
             return;
         }
-        liveRangeStart = start.toISOString();
-        liveRangeEnd = end.toISOString();
+        liveRangeStart = toLocalIsoString(start);
+        liveRangeEnd = toLocalIsoString(end);
         liveRangeLabel = formatRangeLabel(start, end);
         document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
         refreshLiveRangeData();
