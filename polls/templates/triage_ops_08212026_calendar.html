@@ -1255,7 +1255,22 @@
         `;
     }
 
+    function toDatetimeLocalValue(isoString) {
+        // Converts a stored ISO/UTC string back into the local-time
+        // "YYYY-MM-DDTHH:mm" format a <input type="datetime-local"> needs
+        // for its value — using local getters (getFullYear/getHours/etc.,
+        // not the UTC variants), so this correctly reflects the value in
+        // whatever timezone the browser is running in (e.g. EST), not UTC.
+        if (!isoString) return '';
+        const d = new Date(isoString);
+        if (isNaN(d.getTime())) return '';
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
     function renderTimeRangePicker() {
+        const startVal = toDatetimeLocalValue(liveRangeStart);
+        const endVal = toDatetimeLocalValue(liveRangeEnd);
         return `
             <div class="time-range-picker">
                 <button class="trp-toggle" onclick="toggleTimeRangeMenu(event)">
@@ -1272,9 +1287,9 @@
                     <div class="trp-divider"></div>
                     <div class="trp-custom">
                         <div class="trp-custom-label">Custom range</div>
-                        <input type="datetime-local" id="trpStart" class="trp-input">
+                        <input type="datetime-local" id="trpStart" class="trp-input" value="${startVal}">
                         <div class="trp-to">to</div>
-                        <input type="datetime-local" id="trpEnd" class="trp-input">
+                        <input type="datetime-local" id="trpEnd" class="trp-input" value="${endVal}">
                         <button class="trp-apply-btn" onclick="applyCustomRange()">Apply</button>
                     </div>
                 </div>
