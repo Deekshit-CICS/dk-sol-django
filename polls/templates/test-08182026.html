@@ -36,6 +36,7 @@ actual setup — each is marked with a comment below:
      swap in your real model/import.
 """
 
+import json
 import logging
 from datetime import timedelta
 
@@ -1407,3 +1408,157 @@ def changes(request):
     changes_list = [_build_change_response(record, app_id) for record in records]
 
     return JsonResponse({"changes": changes_list})
+
+
+# ===========================================================================
+# AI Assistant chat — proxies to your internal Azure OpenAI-compatible
+# endpoint using the enterprise auth pattern from your reference snippet
+# (httpx.Client carrying OAuth + JWT headers, LLMConfig resolving the real
+# base URL/model, openai.OpenAI as the actual client).
+#
+# Serves POST /api/ai-assistant/chat/
+#
+# ARCHITECTURE NOTE — read this before wiring it up:
+# The OAuth token, JWT token, and Azure connection details must NEVER
+# reach the browser. The frontend only ever talks to this Django endpoint;
+# this endpoint is the only thing that ever talks to Azure OpenAI. That's
+# already how forensic-rca-live.html's popup is built (it POSTs to
+# AI_ASSISTANT_CHAT_URL, never to Azure directly) — this view is what
+# makes that real. Tokens are fetched fresh on every request rather than
+# cached at import time, since OAuth tokens expire and you don't want a
+# long-running Django process silently serving stale-token failures.
+#
+# >>> ADJUST BEFORE USE <<<
+# This assumes `auth_token.get_oauth_token()`, `auth_token.get_jwt_token()`,
+# and `llm_config.LLMConfig` exist exactly as in your reference snippet —
+# these are your org's internal modules; point the imports below at their
+# real locations if different from a flat top-level import.
+# ===========================================================================
+
+import httpx
+import openai
+
+from auth_token import get_oauth_token, get_jwt_token  # TODO: adjust import path if not top-level
+from llm_config import LLMConfig                        # TODO: adjust import path if not top-level
+
+from django.http import StreamingHttpResponse
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.http import require_POST
+
+AI_SYSTEM_PROMPT = (
+    "You are an assistant helping a site reliability engineer investigate "
+    "a production incident. Be concise, specific, and actionable."
+)  # TODO: replace with your org's real system prompt
+
+
+def _build_openai_client():
+    """
+    Builds an OpenAI client wired to your internal Azure endpoint, matching
+    the reference pattern exactly: an httpx.Client carrying OAuth + JWT
+    headers, LLMConfig resolving the actual base URL, openai.OpenAI as the
+    client itself. Called fresh per-request (see module docstring above).
+    """
+    http_client = httpx.Client(
+        headers={
+            "Authorization": f"Bearer {get_oauth_token()}",
+            "Content-Type": "application/json",
+            "x-jwt-token": get_jwt_token(),
+        },
+        verify=False,  # TODO: matches your reference snippet, but prefer
+                       # verify=True with your internal CA bundle in
+                       # production if at all possible — only disable
+                       # verification if your internal endpoint genuinely
+                       # can't be verified against a trusted CA.
+    )
+
+    config = LLMConfig("Direct_Azure")  # TODO: confirm "Direct_Azure" is the right config name for chat (vs whatever other configs you may have for other use cases)
+    config.stream = True
+
+    client = openai.OpenAI(
+        api_key=get_oauth_token(),
+        base_url=config.get_url(),
+        http_client=http_client,
+    )
+    return client, config
+
+
+def _build_chat_messages(system_prompt, history, user_message):
+    """
+    Builds the OpenAI messages array: system prompt + prior turns (from
+    the frontend's chatHistory, which already includes the full incident
+    context in the first user turn — see buildAiContextPrompt() in
+    forensic-rca-live.html) + the new message.
+    """
+    messages = [{"role": "system", "content": system_prompt}]
+    for turn in history or []:
+        role = turn.get("role")
+        content = turn.get("content")
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": user_message})
+    return messages
+
+
+def _stream_chat_chunks(client, config, messages):
+    """
+    Generator yielding plain-text chunks as they arrive from the LLM. This
+    is what actually produces the "real-time" typing effect — the
+    frontend's popup reads this via a ReadableStream reader and appends
+    each chunk to the reply card as it arrives (see getAssistantReply() in
+    forensic-rca-live.html).
+    """
+    stream = client.chat.completions.create(
+        model=config.get_model(),
+        messages=messages,
+        stream=config.get_stream_mode() if hasattr(config, "get_stream_mode") else True,
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
+@csrf_protect  # frontend sends X-CSRFToken (see getCookie('csrftoken') in
+               # the popup's fetch call) — matches the pattern already used
+               # for /api/triage/trigger/ elsewhere in this app, rather
+               # than exempting this endpoint from CSRF protection
+@require_POST
+def ai_assistant_chat(request):
+    """
+    POST /api/ai-assistant/chat/
+    Body: { "message": str, "history": [{"role": "user"|"assistant", "content": str}, ...] }
+
+    Streams the assistant's reply back as plain text chunks (NOT JSON) —
+    the frontend reads this progressively, not via a single res.json().
+    """
+    try:
+        payload = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    user_message = payload.get("message")
+    history = payload.get("history", [])
+
+    if not user_message:
+        return JsonResponse({"error": "message is required"}, status=400)
+
+    try:
+        client, config = _build_openai_client()
+        messages = _build_chat_messages(AI_SYSTEM_PROMPT, history, user_message)
+    except Exception:
+        logger.exception("Failed to prepare AI assistant chat request")
+        return JsonResponse({"error": "Failed to initialize AI assistant"}, status=500)
+
+    def stream_or_error():
+        try:
+            yield from _stream_chat_chunks(client, config, messages)
+        except Exception:
+            logger.exception("AI assistant streaming failed mid-response")
+            yield "\n\n[Error: the assistant response was interrupted. Please try again.]"
+
+    response = StreamingHttpResponse(stream_or_error(), content_type="text/plain; charset=utf-8")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"  # disable nginx response buffering, if applicable — without this, some reverse proxies will buffer the whole stream before forwarding it, defeating the point of streaming
+    return response
