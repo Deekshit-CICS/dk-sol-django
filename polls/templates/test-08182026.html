@@ -1,27 +1,26 @@
-Views · PY
 """
 Forensic RCA — Technical Evidence metrics endpoint (function-based views).
- 
+
 Serves GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
- 
+
 This matches the contract already wired up in forensic-rca-live.html's
 fetchEvidenceMetric()/EVIDENCE_METRIC_URL — no frontend changes are needed
 once this view is live; the CPU tab (with its Historic/Current sub-tabs,
 bar chart, and top-10 table) will start rendering real data immediately.
- 
+
 Structure: `evidence_metrics` is the actual URL-facing view (decorated
 with @require_GET). It delegates to small helper functions — validation,
 then metric-specific builders — rather than one long function, so adding
 memory/disk/network later is just adding a new `_build_<metric>_response`
 + wiring it into the if/elif in `evidence_metrics`.
- 
+
 All five metrics — cpu, memory, disk, network, raw — are implemented
 below, each following the same historic/current pattern. Network and raw
 are structurally different from cpu/memory/disk (no overall "avg"); raw
 additionally pulls from a separate logs-* index rather than metricbeat-*,
 and detects categories via keyword/phrase matching rather than a numeric
 aggregation — see _build_log_category_should_clauses().
- 
+
 >>> ADJUST BEFORE USE <<<
 Three things in this file are placeholders you'll need to point at your
 actual setup — each is marked with a comment below:
@@ -36,18 +35,18 @@ actual setup — each is marked with a comment below:
      from your /api/triage/lookup/ response earlier in this project;
      swap in your real model/import.
 """
- 
+
 import logging
 from datetime import timedelta
- 
+
 import requests
 from django.http import JsonResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET
- 
+
 logger = logging.getLogger(__name__)
- 
+
 # ---------------------------------------------------------------------------
 # 1. Elasticsearch connection — direct REST calls (no elasticsearch-py
 #    client), since that's how this project already talks to ES.
@@ -57,12 +56,12 @@ ES_BASE_URL = "https://your-elastic-host:9200"        # TODO: real ES host
 ES_AUTH = ("elastic_user", "elastic_password")         # TODO: real basic-auth creds
 ES_VERIFY_SSL = True                                    # TODO: only set False for local/self-signed dev certs
 ES_REQUEST_TIMEOUT = 10                                 # seconds — TODO: tune to your cluster's typical latency
- 
+
 # If you use API-key auth instead of basic auth, drop ES_AUTH above and
 # send this header on every request instead:
 #   ES_HEADERS = {"Authorization": "ApiKey <base64-encoded-id:api_key>"}
- 
- 
+
+
 def _es_search(index, query_body):
     """
     POSTs a query body to Elasticsearch's REST _search endpoint directly
@@ -82,8 +81,8 @@ def _es_search(index, query_body):
     )
     response.raise_for_status()
     return response.json()
- 
- 
+
+
 # ---------------------------------------------------------------------------
 # 2. Index + field names — ADJUST to match your actual ES mapping.
 #    The values below assume a Metricbeat-style system/process module;
@@ -94,17 +93,24 @@ HOST_FIELD = "host.name"                     # TODO: field that holds the asset/
 PROCESS_NAME_FIELD = "system.process.name"   # TODO: field holding the process name
 PROCESS_CPU_FIELD = "system.process.cpu.total.pct"  # TODO: per-process CPU pct field (0.0-1.0 scale assumed)
 HOST_CPU_FIELD = "system.cpu.total.pct"      # TODO: overall host CPU pct field (0.0-1.0 scale assumed)
- 
+
 MEMORY_INDEX_PATTERN = "metricbeat-*"        # TODO: adjust if memory metrics live in a different index
 PROCESS_MEMORY_FIELD = "system.process.memory.rss.pct"  # TODO: per-process memory pct field (0.0-1.0 scale assumed)
 HOST_MEMORY_FIELD = "system.memory.actual.used.pct"     # TODO: overall host memory pct field (0.0-1.0 scale assumed)
- 
+
+# Shared by both CPU and Memory tables — per-process identifying fields
+# (not aggregatable metrics, so these are pulled via a top_hits
+# sub-aggregation rather than avg/sum — see _get_nested_field() and its
+# use inside _query_top_processes_by_cpu()/_query_top_processes_by_memory()).
+USER_NAME_FIELD = "user.name"
+PROCESS_PID_FIELD = "process.pid"
+
 DISK_INDEX_PATTERN = "metricbeat-*"                # TODO: adjust if filesystem metrics live in a different index
 DISK_MOUNT_POINT_FIELD = "system.filesystem.mount_point"  # TODO: field holding the mount point path
 DISK_USED_PCT_FIELD = "system.filesystem.used.pct"        # TODO: per-mount used pct field (0.0-1.0 scale assumed)
 DISK_USED_BYTES_FIELD = "system.filesystem.used.bytes"    # TODO: per-mount used bytes field
 DISK_TOTAL_BYTES_FIELD = "system.filesystem.total"        # TODO: per-mount total bytes field
- 
+
 NETWORK_INDEX_PATTERN = "metricbeat-*"             # TODO: adjust if network metrics live in a different index
 INTERFACE_NAME_FIELD = "system.network.name"       # TODO: field holding the interface name (eth0, etc.)
 TRAFFIC_IN_BYTES_FIELD = "system.network.in.bytes"   # TODO: per-interface inbound bytes field
@@ -117,33 +123,33 @@ TRAFFIC_OUT_BYTES_FIELD = "system.network.out.bytes" # TODO: per-interface outbo
 # NetFlow/network-flow integration with a network.community_id or flow.id
 # field — swap in a `cardinality` aggregation on that field instead; see
 # the comment inside _query_network_interfaces().
- 
+
 LOGS_INDEX_PATTERN = "logs-*"          # ECS-style logs data stream/index
 LOG_MESSAGE_FIELD = "message"          # TODO: field holding the raw log line/message text
 LOG_LEVEL_FIELD = "log.level"          # TODO: field holding the log level (error/warn/info/etc.)
 LOG_TIMESTAMP_FIELD = "@timestamp"     # TODO: adjust if your logs use a different timestamp field
 RAW_LOG_MAX_LINES = 100                # cap on how many matching lines to pull per window
- 
- 
+
+
 # Time windows — tune these to taste.
 HISTORIC_WINDOW = timedelta(minutes=10)  # +/- around incident.created_at
 CURRENT_WINDOW = timedelta(minutes=5)    # trailing window up to "now"
- 
+
 # ---------------------------------------------------------------------------
 # 3. Incident lookup — ADJUST to your real model/import.
 # ---------------------------------------------------------------------------
 # from triage.models import TriageSession  # TODO: your real import
- 
- 
+
+
 def get_incident_opened_at(incident_number):
     """
     Returns the incident's opened/triggered timestamp (a timezone-aware
     datetime), or None if the incident isn't found.
- 
+
     TODO: replace this with your actual lookup. Example if you have a
     TriageSession model matching the /api/triage/lookup/ response shape
     (id, incident_number, status, created_at, triggered_by):
- 
+
         session = (
             TriageSession.objects
             .filter(incident_number=incident_number)
@@ -155,14 +161,35 @@ def get_incident_opened_at(incident_number):
     raise NotImplementedError(
         "Wire get_incident_opened_at() up to your real incident/session model."
     )
- 
- 
+
+
+def _get_nested_field(source, dotted_field):
+    """
+    Extracts a value from a nested dict using a dotted field path (e.g.
+    "user.name" -> source["user"]["name"]). ECS-style dotted field names
+    like user.name and process.pid are stored as nested JSON objects in
+    an Elasticsearch _source document, not as literal dotted keys, so a
+    plain source.get("user.name") wouldn't work — this walks the path.
+    """
+    value = source
+    for part in dotted_field.split('.'):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
+
+
 def _query_top_processes_by_cpu(asset_id, start, end, size=10):
     """
     Runs a terms aggregation over `PROCESS_NAME_FIELD`, ranked by average
     CPU usage, within [start, end], filtered to the given asset/host.
     Also returns the overall host-level average CPU for the same window.
- 
+
+    user.name and process.pid aren't aggregatable metrics — they're
+    per-process identifying fields — so they're pulled via a `top_hits`
+    sub-aggregation (one sample document per process bucket) rather than
+    avg/sum, and merged into each process's result.
+
     Returns: (overall_avg_pct: float|None, top_processes: list[dict])
     """
     query = {
@@ -188,37 +215,49 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
                 "aggs": {
                     "avg_cpu": {
                         "avg": {"field": PROCESS_CPU_FIELD}
-                    }
+                    },
+                    "sample_doc": {
+                        "top_hits": {
+                            "size": 1,
+                            "_source": [USER_NAME_FIELD, PROCESS_PID_FIELD],
+                        }
+                    },
                 },
             },
         },
     }
- 
+
     response = _es_search(CPU_INDEX_PATTERN, query)
     aggs = response.get("aggregations", {})
- 
+
     overall_avg = aggs.get("overall_avg_cpu", {}).get("value")
     # Assumes ES stores CPU as a 0.0-1.0 fraction (Metricbeat default) — drop
     # the *100 below if your field is already a 0-100 percentage.
     overall_avg_pct = round(overall_avg * 100, 1) if overall_avg is not None else None
- 
+
     top_processes = []
     for bucket in aggs.get("top_processes", {}).get("buckets", []):
         avg_cpu = bucket.get("avg_cpu", {}).get("value")
+        sample_hits = bucket.get("sample_doc", {}).get("hits", {}).get("hits", [])
+        sample_source = sample_hits[0].get("_source", {}) if sample_hits else {}
         top_processes.append({
             "process": bucket.get("key"),
             "cpu_percent": round(avg_cpu * 100, 1) if avg_cpu is not None else 0,
+            "user_name": _get_nested_field(sample_source, USER_NAME_FIELD),
+            "pid": _get_nested_field(sample_source, PROCESS_PID_FIELD),
         })
- 
+
     return overall_avg_pct, top_processes
- 
- 
+
+
 def _query_top_processes_by_memory(asset_id, start, end, size=10):
     """
     Same shape as _query_top_processes_by_cpu(), ranked by memory usage
     instead. Each process dict uses the 'memory_percent' key — matches
     what the frontend reads for the Memory tab (p[`memory_percent`]).
- 
+    Also includes user.name/process.pid via the same top_hits approach as
+    the CPU query — see the comment there for why.
+
     Returns: (overall_avg_pct: float|None, top_processes: list[dict])
     """
     query = {
@@ -244,31 +283,41 @@ def _query_top_processes_by_memory(asset_id, start, end, size=10):
                 "aggs": {
                     "avg_memory": {
                         "avg": {"field": PROCESS_MEMORY_FIELD}
-                    }
+                    },
+                    "sample_doc": {
+                        "top_hits": {
+                            "size": 1,
+                            "_source": [USER_NAME_FIELD, PROCESS_PID_FIELD],
+                        }
+                    },
                 },
             },
         },
     }
- 
+
     response = _es_search(MEMORY_INDEX_PATTERN, query)
     aggs = response.get("aggregations", {})
- 
+
     overall_avg = aggs.get("overall_avg_memory", {}).get("value")
     # Assumes ES stores memory as a 0.0-1.0 fraction — drop the *100 below
     # if your field is already a 0-100 percentage.
     overall_avg_pct = round(overall_avg * 100, 1) if overall_avg is not None else None
- 
+
     top_processes = []
     for bucket in aggs.get("top_processes", {}).get("buckets", []):
         avg_memory = bucket.get("avg_memory", {}).get("value")
+        sample_hits = bucket.get("sample_doc", {}).get("hits", {}).get("hits", [])
+        sample_source = sample_hits[0].get("_source", {}) if sample_hits else {}
         top_processes.append({
             "process": bucket.get("key"),
             "memory_percent": round(avg_memory * 100, 1) if avg_memory is not None else 0,
+            "user_name": _get_nested_field(sample_source, USER_NAME_FIELD),
+            "pid": _get_nested_field(sample_source, PROCESS_PID_FIELD),
         })
- 
+
     return overall_avg_pct, top_processes
- 
- 
+
+
 def _format_bytes(num_bytes):
     """
     Formats a raw byte count as a human-readable string (e.g. '128.4 GB'),
@@ -283,15 +332,15 @@ def _format_bytes(num_bytes):
             return f"{size:.1f} {unit}"
         size /= 1024
     return f"{size:.1f} TB"
- 
- 
+
+
 def _query_top_mount_points_by_disk_usage(asset_id, start, end, size=10):
     """
     Terms aggregation on the filesystem mount_point field, ranked by used
     percentage, within [start, end], filtered to the given asset/host.
     Also returns the overall average disk usage % across all mounts for
     the same window (used for the top-level 'avg' stat).
- 
+
     Returns: (overall_avg_pct: float|None, top_mount_points: list[dict])
     where each dict matches what the frontend's Disk tab expects:
     { mount_point, used, total, percent_used }.
@@ -324,15 +373,15 @@ def _query_top_mount_points_by_disk_usage(asset_id, start, end, size=10):
             },
         },
     }
- 
+
     response = _es_search(DISK_INDEX_PATTERN, query)
     aggs = response.get("aggregations", {})
- 
+
     overall_avg = aggs.get("overall_avg_disk", {}).get("value")
     # Assumes ES stores disk usage as a 0.0-1.0 fraction — drop the *100
     # below if your field is already a 0-100 percentage.
     overall_avg_pct = round(overall_avg * 100, 1) if overall_avg is not None else None
- 
+
     top_mount_points = []
     for bucket in aggs.get("top_mounts", {}).get("buckets", []):
         pct = bucket.get("avg_used_pct", {}).get("value")
@@ -344,16 +393,16 @@ def _query_top_mount_points_by_disk_usage(asset_id, start, end, size=10):
             "total": _format_bytes(total_bytes),
             "percent_used": round(pct * 100, 1) if pct is not None else 0,
         })
- 
+
     return overall_avg_pct, top_mount_points
- 
- 
+
+
 def _query_network_interfaces(asset_id, start, end, size=10):
     """
     Terms aggregation on the network interface name field, summing
     inbound/outbound traffic per interface within [start, end], filtered
     to the given asset/host.
- 
+
     `flow_count` uses each bucket's doc_count as an approximation (the
     number of metric samples matched for that interface) — NOT a real
     flow/session count, since Metricbeat's network module doesn't track
@@ -362,7 +411,7 @@ def _query_network_interfaces(asset_id, start, end, size=10):
     field), replace it with something like:
         "flow_count": {"cardinality": {"field": "network.community_id"}}
     and read `bucket["flow_count"]["value"]` below instead of `doc_count`.
- 
+
     Returns: list[dict] of { driver, traffic_in, traffic_out, flow_count }
     — no overall "avg" here, network doesn't have one (matches what the
     frontend's Network tab expects: no avg stat card, just the table).
@@ -391,10 +440,10 @@ def _query_network_interfaces(asset_id, start, end, size=10):
             },
         },
     }
- 
+
     response = _es_search(NETWORK_INDEX_PATTERN, query)
     aggs = response.get("aggregations", {})
- 
+
     interfaces = []
     for bucket in aggs.get("interfaces", {}).get("buckets", []):
         total_in = bucket.get("total_in", {}).get("value")
@@ -405,10 +454,10 @@ def _query_network_interfaces(asset_id, start, end, size=10):
             "traffic_out": _format_bytes(total_out),
             "flow_count": bucket.get("doc_count", 0),  # approximation — see docstring above
         })
- 
+
     return interfaces
- 
- 
+
+
 def _build_log_category_should_clauses():
     """
     Keyword/phrase patterns used to surface the specific categories
@@ -416,7 +465,7 @@ def _build_log_category_should_clauses():
     Authentication failures, Monitoring/agent issues — plus generic
     error-level entries. Combined with "should" + minimum_should_match=1
     below, so a log line matches if it hits ANY of these.
- 
+
     TODO: tune these phrases to match your actual log message formats —
     these are common Linux/syslog-style phrasings as a starting point,
     not guaranteed to match your specific application/OS log format.
@@ -447,14 +496,14 @@ def _build_log_category_should_clauses():
         {"term": {LOG_LEVEL_FIELD: "error"}},
         {"term": {LOG_LEVEL_FIELD: "critical"}},
     ]
- 
- 
+
+
 def _query_raw_log_events(asset_id, start, end, size=RAW_LOG_MAX_LINES):
     """
     Pulls log lines matching the categories above within [start, end] for
     the given asset, newest-first from ES then reversed so the returned
     text reads chronologically (oldest first) like a real log file.
- 
+
     Returns a single newline-joined string — matches what the frontend's
     Raw Log tab displays inside a <pre> block.
     """
@@ -472,10 +521,10 @@ def _query_raw_log_events(asset_id, start, end, size=RAW_LOG_MAX_LINES):
             }
         },
     }
- 
+
     response = _es_search(LOGS_INDEX_PATTERN, query)
     hits = response.get("hits", {}).get("hits", [])
- 
+
     lines = []
     for hit in hits:
         source = hit.get("_source", {})
@@ -483,24 +532,24 @@ def _query_raw_log_events(asset_id, start, end, size=RAW_LOG_MAX_LINES):
         level = (source.get(LOG_LEVEL_FIELD) or "LOG").upper()
         message = source.get(LOG_MESSAGE_FIELD, "")
         lines.append(f"[{ts}] {level}: {message}")
- 
+
     lines.reverse()  # ES gave newest-first; flip to chronological order
     return "\n".join(lines) if lines else "No matching log events found in this window."
- 
- 
+
+
 @require_GET
 def evidence_metrics(request):
     """
     GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
         &range_start=<iso>&range_end=<iso>   (both optional — see below)
- 
+
     range_start/range_end come from the frontend's time-range picker on the
     Live sub-tab (CPU/Memory/Disk/Network only — Raw Log never sends these).
     When both are present and parse successfully, they replace the default
     CURRENT_WINDOW trailing window for the "current" section. When absent
     or unparseable, behavior is unchanged from before this feature — the
     default trailing window is used, same as always.
- 
+
     Response shape (matches the frontend's fetchEvidenceMetric() exactly):
         {
           "historic": { "avg": <pct>, "window_start": "<iso>", "window_end": "<iso>",
@@ -512,13 +561,13 @@ def evidence_metrics(request):
     incident_number = request.GET.get('incident_number')
     asset_id = request.GET.get('asset_id')
     metric = request.GET.get('metric')
- 
+
     error_response = _validate_metrics_request(incident_number, asset_id, metric)
     if error_response:
         return error_response
- 
+
     range_start, range_end = _parse_custom_range(request)
- 
+
     if metric == 'cpu':
         return _build_cpu_metrics_response(incident_number, asset_id, range_start, range_end)
     if metric == 'memory':
@@ -529,16 +578,16 @@ def evidence_metrics(request):
         return _build_network_metrics_response(incident_number, asset_id, range_start, range_end)
     if metric == 'raw':
         return _build_rawlog_metrics_response(incident_number, asset_id, range_start, range_end)
- 
+
     # All five metrics (cpu/memory/disk/network/raw) are implemented above —
     # anything else is a genuinely bad request, not "not implemented yet".
     return JsonResponse({"error": f"metric='{metric}' is not a recognized metric"}, status=400)
- 
- 
+
+
 def _parse_custom_range(request):
     """
     Parses optional range_start/range_end query params into datetimes.
- 
+
     These arrive as naive, no-timezone-suffix strings (e.g.
     "2026-08-21T14:30:00") representing the exact wall-clock time the user
     picked in the browser — the frontend deliberately does NOT convert to
@@ -548,7 +597,7 @@ def _parse_custom_range(request):
     datetime for a string like this (no tzinfo attached), and that naive
     value is used as-is everywhere below — no shift is applied at any
     point in the pipeline, by design.
- 
+
     Returns (start, end), or (None, None) if either is missing or fails
     to parse. Callers treat (None, None) as "use the default window", so
     a malformed param degrades gracefully rather than erroring the whole
@@ -563,8 +612,8 @@ def _parse_custom_range(request):
     if start is None or end is None:
         return None, None
     return start, end
- 
- 
+
+
 def _validate_metrics_request(incident_number, asset_id, metric):
     """Returns a JsonResponse error if the request is invalid, else None."""
     if not incident_number or not asset_id or not metric:
@@ -573,8 +622,8 @@ def _validate_metrics_request(incident_number, asset_id, metric):
             status=400,
         )
     return None
- 
- 
+
+
 def _build_cpu_metrics_response(incident_number, asset_id, range_start=None, range_end=None):
     """Looks up the incident's open time, runs both ES queries, and builds the response."""
     try:
@@ -582,21 +631,21 @@ def _build_cpu_metrics_response(incident_number, asset_id, range_start=None, ran
     except NotImplementedError as e:
         logger.error(str(e))
         return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
- 
+
     if incident_opened_at is None:
         return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
- 
+
     historic = _get_historic_cpu_section(asset_id, incident_opened_at)
     if isinstance(historic, JsonResponse):
         return historic  # an error response bubbled up
- 
+
     current = _get_current_cpu_section(asset_id, range_start, range_end)
     if isinstance(current, JsonResponse):
         return current  # an error response bubbled up
- 
+
     return JsonResponse({"historic": historic, "current": current})
- 
- 
+
+
 def _get_historic_cpu_section(asset_id, incident_opened_at):
     """Builds the 'historic' section: a window around when the incident opened."""
     hist_start = incident_opened_at - HISTORIC_WINDOW
@@ -606,15 +655,15 @@ def _get_historic_cpu_section(asset_id, incident_opened_at):
     except Exception:
         logger.exception("Elasticsearch query failed for historic CPU data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch historic CPU data from Elasticsearch"}, status=502)
- 
+
     return {
         "avg": hist_avg,
         "window_start": hist_start.isoformat(),
         "window_end": hist_end.isoformat(),
         "top_processes": hist_top,
     }
- 
- 
+
+
 def _get_current_cpu_section(asset_id, range_start=None, range_end=None):
     """
     Builds the 'current'/Live section: a custom time range from the
@@ -630,14 +679,14 @@ def _get_current_cpu_section(asset_id, range_start=None, range_end=None):
     except Exception:
         logger.exception("Elasticsearch query failed for current CPU data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch current CPU data from Elasticsearch"}, status=502)
- 
+
     return {
         "avg": cur_avg,
         "captured_at": now.isoformat(),
         "top_processes": cur_top,
     }
- 
- 
+
+
 def _build_memory_metrics_response(incident_number, asset_id, range_start=None, range_end=None):
     """Looks up the incident's open time, runs both ES queries, and builds the response."""
     try:
@@ -645,21 +694,21 @@ def _build_memory_metrics_response(incident_number, asset_id, range_start=None, 
     except NotImplementedError as e:
         logger.error(str(e))
         return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
- 
+
     if incident_opened_at is None:
         return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
- 
+
     historic = _get_historic_memory_section(asset_id, incident_opened_at)
     if isinstance(historic, JsonResponse):
         return historic  # an error response bubbled up
- 
+
     current = _get_current_memory_section(asset_id, range_start, range_end)
     if isinstance(current, JsonResponse):
         return current  # an error response bubbled up
- 
+
     return JsonResponse({"historic": historic, "current": current})
- 
- 
+
+
 def _get_historic_memory_section(asset_id, incident_opened_at):
     """Builds the 'historic' section: a window around when the incident opened."""
     hist_start = incident_opened_at - HISTORIC_WINDOW
@@ -669,15 +718,15 @@ def _get_historic_memory_section(asset_id, incident_opened_at):
     except Exception:
         logger.exception("Elasticsearch query failed for historic memory data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch historic memory data from Elasticsearch"}, status=502)
- 
+
     return {
         "avg": hist_avg,
         "window_start": hist_start.isoformat(),
         "window_end": hist_end.isoformat(),
         "top_processes": hist_top,
     }
- 
- 
+
+
 def _get_current_memory_section(asset_id, range_start=None, range_end=None):
     """
     Builds the 'current'/Live section: a custom time range from the
@@ -693,14 +742,14 @@ def _get_current_memory_section(asset_id, range_start=None, range_end=None):
     except Exception:
         logger.exception("Elasticsearch query failed for current memory data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch current memory data from Elasticsearch"}, status=502)
- 
+
     return {
         "avg": cur_avg,
         "captured_at": now.isoformat(),
         "top_processes": cur_top,
     }
- 
- 
+
+
 def _build_disk_metrics_response(incident_number, asset_id, range_start=None, range_end=None):
     """Looks up the incident's open time, runs both ES queries, and builds the response."""
     try:
@@ -708,21 +757,21 @@ def _build_disk_metrics_response(incident_number, asset_id, range_start=None, ra
     except NotImplementedError as e:
         logger.error(str(e))
         return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
- 
+
     if incident_opened_at is None:
         return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
- 
+
     historic = _get_historic_disk_section(asset_id, incident_opened_at)
     if isinstance(historic, JsonResponse):
         return historic  # an error response bubbled up
- 
+
     current = _get_current_disk_section(asset_id, range_start, range_end)
     if isinstance(current, JsonResponse):
         return current  # an error response bubbled up
- 
+
     return JsonResponse({"historic": historic, "current": current})
- 
- 
+
+
 def _get_historic_disk_section(asset_id, incident_opened_at):
     """Builds the 'historic' section: a window around when the incident opened."""
     hist_start = incident_opened_at - HISTORIC_WINDOW
@@ -732,15 +781,15 @@ def _get_historic_disk_section(asset_id, incident_opened_at):
     except Exception:
         logger.exception("Elasticsearch query failed for historic disk data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch historic disk data from Elasticsearch"}, status=502)
- 
+
     return {
         "avg": hist_avg,
         "window_start": hist_start.isoformat(),
         "window_end": hist_end.isoformat(),
         "top_mount_points": hist_top,
     }
- 
- 
+
+
 def _get_current_disk_section(asset_id, range_start=None, range_end=None):
     """
     Builds the 'current'/Live section: a custom time range from the
@@ -756,14 +805,14 @@ def _get_current_disk_section(asset_id, range_start=None, range_end=None):
     except Exception:
         logger.exception("Elasticsearch query failed for current disk data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch current disk data from Elasticsearch"}, status=502)
- 
+
     return {
         "avg": cur_avg,
         "captured_at": now.isoformat(),
         "top_mount_points": cur_top,
     }
- 
- 
+
+
 def _build_network_metrics_response(incident_number, asset_id, range_start=None, range_end=None):
     """Looks up the incident's open time, runs both ES queries, and builds the response."""
     try:
@@ -771,21 +820,21 @@ def _build_network_metrics_response(incident_number, asset_id, range_start=None,
     except NotImplementedError as e:
         logger.error(str(e))
         return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
- 
+
     if incident_opened_at is None:
         return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
- 
+
     historic = _get_historic_network_section(asset_id, incident_opened_at)
     if isinstance(historic, JsonResponse):
         return historic  # an error response bubbled up
- 
+
     current = _get_current_network_section(asset_id, range_start, range_end)
     if isinstance(current, JsonResponse):
         return current  # an error response bubbled up
- 
+
     return JsonResponse({"historic": historic, "current": current})
- 
- 
+
+
 def _get_historic_network_section(asset_id, incident_opened_at):
     """Builds the 'historic' section: a window around when the incident opened."""
     hist_start = incident_opened_at - HISTORIC_WINDOW
@@ -795,14 +844,14 @@ def _get_historic_network_section(asset_id, incident_opened_at):
     except Exception:
         logger.exception("Elasticsearch query failed for historic network data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch historic network data from Elasticsearch"}, status=502)
- 
+
     return {
         "window_start": hist_start.isoformat(),
         "window_end": hist_end.isoformat(),
         "interfaces": interfaces,
     }
- 
- 
+
+
 def _get_current_network_section(asset_id, range_start=None, range_end=None):
     """
     Builds the 'current'/Live section: a custom time range from the
@@ -818,13 +867,13 @@ def _get_current_network_section(asset_id, range_start=None, range_end=None):
     except Exception:
         logger.exception("Elasticsearch query failed for current network data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch current network data from Elasticsearch"}, status=502)
- 
+
     return {
         "captured_at": now.isoformat(),
         "interfaces": interfaces,
     }
- 
- 
+
+
 def _build_rawlog_metrics_response(incident_number, asset_id, range_start=None, range_end=None):
     """Looks up the incident's open time, runs both ES queries, and builds the response."""
     try:
@@ -832,21 +881,21 @@ def _build_rawlog_metrics_response(incident_number, asset_id, range_start=None, 
     except NotImplementedError as e:
         logger.error(str(e))
         return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
- 
+
     if incident_opened_at is None:
         return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
- 
+
     historic = _get_historic_rawlog_section(asset_id, incident_opened_at)
     if isinstance(historic, JsonResponse):
         return historic  # an error response bubbled up
- 
+
     current = _get_current_rawlog_section(asset_id, range_start, range_end)
     if isinstance(current, JsonResponse):
         return current  # an error response bubbled up
- 
+
     return JsonResponse({"historic": historic, "current": current})
- 
- 
+
+
 def _get_historic_rawlog_section(asset_id, incident_opened_at):
     """Builds the 'historic' section: a window around when the incident opened."""
     hist_start = incident_opened_at - HISTORIC_WINDOW
@@ -856,14 +905,14 @@ def _get_historic_rawlog_section(asset_id, incident_opened_at):
     except Exception:
         logger.exception("Elasticsearch query failed for historic log data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch historic log data from Elasticsearch"}, status=502)
- 
+
     return {
         "window_start": hist_start.isoformat(),
         "window_end": hist_end.isoformat(),
         "log": log_text,
     }
- 
- 
+
+
 def _get_current_rawlog_section(asset_id, range_start=None, range_end=None):
     """
     Builds the 'current'/Live section. The frontend's time-range picker
@@ -882,13 +931,13 @@ def _get_current_rawlog_section(asset_id, range_start=None, range_end=None):
     except Exception:
         logger.exception("Elasticsearch query failed for current log data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch current log data from Elasticsearch"}, status=502)
- 
+
     return {
         "captured_at": now.isoformat(),
         "log": log_text,
     }
- 
- 
+
+
 # ===========================================================================
 # Asset Inventory — backed by ServiceNow CMDB (separate data source from
 # everything above, which talks to Elasticsearch).
@@ -910,34 +959,34 @@ def _get_current_rawlog_section(asset_id, range_start=None, range_end=None):
 #      yours. Check your actual cmdb_ci_server (or whichever table you
 #      use) field list and adjust every value in the map.
 # ===========================================================================
- 
+
 SNOW_INSTANCE_URL = "https://your-instance.service-now.com"  # TODO: real ServiceNow instance URL
 SNOW_AUTH = ("snow_user", "snow_password")  # TODO: real credentials, or switch to OAuth (see note below)
 SNOW_VERIFY_SSL = True
 SNOW_REQUEST_TIMEOUT = 10  # seconds — TODO: tune to your instance's typical latency
- 
+
 # If your ServiceNow instance uses OAuth instead of basic auth, drop
 # SNOW_AUTH above and send this header on every request instead:
 #   SNOW_HEADERS = {"Authorization": "Bearer <access_token>"}
- 
+
 CMDB_TABLE = "cmdb_ci_server"      # base server table — has everything except patch data
 CMDB_WIN_TABLE = "cmdb_ci_win_server"      # Windows extension table — has patch data for Windows servers
 CMDB_LINUX_TABLE = "cmdb_ci_linux_server"  # Linux extension table — has patch data for Linux servers
 ASSET_QUERY_FIELD = "name"         # TODO: field to match asset_id against (hostname field, typically "name")
- 
+
 CATEGORY_FIELD = "category"        # the field on cmdb_ci_server used to decide Windows vs Linux
 # TODO: confirm what values your `category` field actually holds (e.g.
 # "Windows Server", "Linux") — _is_windows_category() below does a
 # case-insensitive "windows" substring check, adjust if your values look
 # different (e.g. a class name, a custom choice list, etc.)
- 
+
 # Patch date field names on the OS-specific extension tables — these are
 # separate from CMDB_TABLE's fields since cmdb_ci_server itself doesn't
 # carry patch data. TODO: confirm the actual field names on your instance;
 # these two tables commonly use different field names from each other.
 WIN_LAST_PATCH_FIELD = "u_last_patch_date"    # TODO: confirm real field name on cmdb_ci_win_server
 LINUX_LAST_PATCH_FIELD = "u_last_patch_date"  # TODO: confirm real field name on cmdb_ci_linux_server
- 
+
 # Output key -> ServiceNow field name. Reference/choice fields (manufacturer,
 # location, support_group, install_status, etc.) come back as
 # {"value": sys_id, "display_value": "human text"} when the request uses
@@ -972,15 +1021,15 @@ SNOW_FIELD_MAP = {
     "support_group": "support_group",
     "retirement_ticket": "u_retirement_ticket",  # TODO: rarely OOB — usually a custom field, may not exist
 }
- 
- 
+
+
 def _snow_search_ci(asset_id):
     """
     Queries ServiceNow's Table API for the CMDB record matching asset_id.
     Uses sysparm_display_value=true so reference/choice fields (manufacturer,
     location, support_group, install_status, etc.) come back as
     human-readable text instead of raw sys_ids/choice codes.
- 
+
     Returns the matching record dict, or None if nothing matched.
     """
     url = f"{SNOW_INSTANCE_URL}/api/now/table/{CMDB_TABLE}"
@@ -1001,8 +1050,8 @@ def _snow_search_ci(asset_id):
     response.raise_for_status()
     results = response.json().get("result", [])
     return results[0] if results else None
- 
- 
+
+
 def _extract_field(record, field_name):
     """
     ServiceNow fields come back as either a plain value or, for
@@ -1014,8 +1063,8 @@ def _extract_field(record, field_name):
     if isinstance(value, dict):
         return value.get("display_value") or value.get("value")
     return value
- 
- 
+
+
 def _format_ram(raw_ram):
     """
     ServiceNow's `ram` field is typically a plain number in MB. Converts
@@ -1032,8 +1081,8 @@ def _format_ram(raw_ram):
     if mb >= 1024:
         return f"{mb / 1024:.0f} GB"
     return f"{mb:.0f} MB"
- 
- 
+
+
 def _derive_retirement_status(record):
     """
     ServiceNow has no universal "retirement status" field — most instances
@@ -1047,20 +1096,20 @@ def _derive_retirement_status(record):
     if any(keyword in install_status for keyword in ("retire", "absent", "dispos")):
         return "Retired"
     return "Active"
- 
- 
+
+
 def _build_asset_details_response(record):
     """Maps a raw ServiceNow CI record onto the frontend's expected field names."""
     data = {}
     for output_key, snow_field in SNOW_FIELD_MAP.items():
         data[output_key] = _extract_field(record, snow_field)
- 
+
     data["ram"] = _format_ram(data.get("ram"))
     data["retirement_status"] = _derive_retirement_status(record)
- 
+
     return data
- 
- 
+
+
 def _is_windows_category(category_value):
     """
     OS-family check based on the CI's category field value.
@@ -1069,8 +1118,8 @@ def _is_windows_category(category_value):
     different (e.g. "Win2022", a class name, a custom choice list, etc.)
     """
     return "windows" in (category_value or "").lower()
- 
- 
+
+
 def _snow_fetch_patch_date(asset_id, is_windows):
     """
     cmdb_ci_server doesn't carry patch data — it lives on the OS-specific
@@ -1078,14 +1127,14 @@ def _snow_fetch_patch_date(asset_id, is_windows):
     both of which extend cmdb_ci_server in ServiceNow's CMDB class
     hierarchy). Looks the same asset up there and returns just the patch
     date field.
- 
+
     Returns the last_patch_date value, or None if no record/field found.
     Deliberately narrow (sysparm_fields) since this is a second round trip
     just to enrich one field.
     """
     table = CMDB_WIN_TABLE if is_windows else CMDB_LINUX_TABLE
     patch_field = WIN_LAST_PATCH_FIELD if is_windows else LINUX_LAST_PATCH_FIELD
- 
+
     url = f"{SNOW_INSTANCE_URL}/api/now/table/{table}"
     params = {
         "sysparm_query": f"{ASSET_QUERY_FIELD}={asset_id}",
@@ -1106,13 +1155,13 @@ def _snow_fetch_patch_date(asset_id, is_windows):
     if not results:
         return None
     return _extract_field(results[0], patch_field)
- 
- 
+
+
 @require_GET
 def asset_details(request):
     """
     GET /api/triage/asset/details/?incident_number=<id>&asset_id=<assetId>
- 
+
     incident_number isn't actually needed to look up the CMDB record (the
     asset is found purely by asset_id/hostname) — it's accepted and
     validated for consistency with the other evidence endpoints, and in
@@ -1120,21 +1169,21 @@ def asset_details(request):
     """
     incident_number = request.GET.get('incident_number')
     asset_id = request.GET.get('asset_id')
- 
+
     if not incident_number or not asset_id:
         return JsonResponse({"error": "incident_number and asset_id are required"}, status=400)
- 
+
     try:
         record = _snow_search_ci(asset_id)
     except Exception:
         logger.exception("ServiceNow lookup failed for asset=%s", asset_id)
         return JsonResponse({"error": "Failed to fetch asset details from ServiceNow"}, status=502)
- 
+
     if record is None:
         return JsonResponse({"error": f"Asset '{asset_id}' not found in ServiceNow"}, status=404)
- 
+
     data = _build_asset_details_response(record)
- 
+
     # cmdb_ci_server has no patch data — fetch it from whichever OS-specific
     # extension table matches this CI's category. Deliberately non-fatal:
     # if this second lookup fails, the rest of the asset details still
@@ -1150,10 +1199,10 @@ def asset_details(request):
             "ServiceNow patch-date lookup failed for asset=%s (table=%s)",
             asset_id, CMDB_WIN_TABLE if is_windows else CMDB_LINUX_TABLE,
         )
- 
+
     return JsonResponse(data)
- 
- 
+
+
 # ===========================================================================
 # Linked Changes — also ServiceNow-backed (change_request table), separate
 # concern from the Asset Inventory CMDB lookups above, same instance/auth.
@@ -1179,11 +1228,11 @@ def asset_details(request):
 #      suppression tied to a change) and may not exist at all in your
 #      instance if you don't have that integration.
 # ===========================================================================
- 
+
 CHANGE_REQUEST_TABLE = "change_request"
 CHANGE_APP_FIELD = "u_application"   # TODO: field linking a change to an app/app_id — confirm your instance's real field
 CHANGE_WINDOW_HOURS = 24             # +/- around incident open time, per the "pre/post 24hr" requirement
- 
+
 # Output key -> change_request field name.
 CHANGE_FIELD_MAP = {
     "change_number": "number",
@@ -1194,18 +1243,18 @@ CHANGE_FIELD_MAP = {
     "end_time": "end_date",
     "status": "state",                              # choice field -> display_value
 }
- 
+
 # Holds the list of Service Requests raised for alarm suppression on this
 # change — lives directly on change_request itself, no extra query needed.
 ALARM_SUPPRESSION_FIELD = "u_alarm_suppression"
- 
+
 IMPACTED_CI_TABLE = "task_ci"                # TODO: confirm — ServiceNow's OOB task<->CI junction table
 IMPACTED_CI_TASK_FIELD = "task"              # reference back to the change_request sys_id
 IMPACTED_CI_FIELD = "ci_item"                # reference to the affected CI
 SUPPRESSION_STATUS_FIELD = "u_suppression_status"            # TODO: almost certainly custom, may not exist
 SUPPRESSION_REQUEST_FIELD = "u_suppression_request_number"   # TODO: almost certainly custom, may not exist
- 
- 
+
+
 def _snow_search_changes(app_id, window_start, window_end):
     """
     Queries change_request for changes tied to app_id whose window
@@ -1215,7 +1264,7 @@ def _snow_search_changes(app_id, window_start, window_end):
     the incident but were still running into the +/-24h window, not just
     ones that started inside it. Adjust to a simpler start_date-only check
     if you'd rather match your exact wording more literally.
- 
+
     NOTE: window_start/window_end are Python datetimes (from Django's
     timezone-aware `now`/incident lookup) formatted as ServiceNow expects
     for GlideDateTime comparisons ("YYYY-MM-DD HH:MM:SS"). TODO: confirm
@@ -1245,8 +1294,8 @@ def _snow_search_changes(app_id, window_start, window_end):
     )
     response.raise_for_status()
     return response.json().get("result", [])
- 
- 
+
+
 def _snow_search_impacted_cis(change_sys_id):
     """
     Looks up impacted CIs for one change via the task_ci junction table.
@@ -1270,7 +1319,7 @@ def _snow_search_impacted_cis(change_sys_id):
     )
     response.raise_for_status()
     results = response.json().get("result", [])
- 
+
     impacted = []
     for row in results:
         impacted.append({
@@ -1279,8 +1328,8 @@ def _snow_search_impacted_cis(change_sys_id):
             "suppression_request_number": _extract_field(row, SUPPRESSION_REQUEST_FIELD) or "N/A",
         })
     return impacted
- 
- 
+
+
 def _parse_suppression_list(raw_value):
     """
     ServiceNow's u_alarm_suppression field holds the Service Requests
@@ -1296,8 +1345,8 @@ def _parse_suppression_list(raw_value):
     if isinstance(raw_value, list):
         return [str(v).strip() for v in raw_value if str(v).strip()]
     return [part.strip() for part in str(raw_value).split(',') if part.strip()]
- 
- 
+
+
 def _build_change_response(record, app_id):
     """Maps a raw ServiceNow change_request record onto the frontend's expected field names."""
     data = {
@@ -1308,61 +1357,53 @@ def _build_change_response(record, app_id):
     data["alarm_suppression_requests"] = _parse_suppression_list(
         _extract_field(record, ALARM_SUPPRESSION_FIELD)
     )
- 
+
     change_sys_id = record.get("sys_id")  # sys_id is never a reference field, always a plain string
     try:
         data["impacted_cis"] = _snow_search_impacted_cis(change_sys_id) if change_sys_id else []
     except Exception:
         logger.exception("Impacted-CI lookup failed for change=%s", data.get("change_number"))
         data["impacted_cis"] = []
- 
+
     return data
- 
- 
+
+
 @require_GET
 def changes(request):
     """
     GET /api/triage/changes/?incident_number=<id>&app_id=<appId>
- 
+
     Fetches ServiceNow change requests tied to app_id whose window overlaps
     the +/-24h period around when the incident opened.
- 
+
     Response: { "changes": [ {change_number, submitter, affected_ci,
     change_coordinator, start_time, end_time, status, app_id,
     impacted_cis: [...]}, ... ] }
     """
     incident_number = request.GET.get('incident_number')
     app_id = request.GET.get('app_id')
- 
+
     if not incident_number or not app_id:
         return JsonResponse({"error": "incident_number and app_id are required"}, status=400)
- 
+
     try:
         incident_opened_at = get_incident_opened_at(incident_number)
     except NotImplementedError as e:
         logger.error(str(e))
         return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
- 
+
     if incident_opened_at is None:
         return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
- 
+
     window_start = incident_opened_at - timedelta(hours=CHANGE_WINDOW_HOURS)
     window_end = incident_opened_at + timedelta(hours=CHANGE_WINDOW_HOURS)
- 
+
     try:
         records = _snow_search_changes(app_id, window_start, window_end)
     except Exception:
         logger.exception("ServiceNow change lookup failed for app_id=%s", app_id)
         return JsonResponse({"error": "Failed to fetch changes from ServiceNow"}, status=502)
- 
+
     changes_list = [_build_change_response(record, app_id) for record in records]
- 
+
     return JsonResponse({"changes": changes_list})
- 
-
-
-
-
-MCP my-django-calculator: Server disconnected. For troubleshooting guidance, please visit our debugging documentation
-
-
