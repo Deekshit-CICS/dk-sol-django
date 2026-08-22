@@ -134,6 +134,22 @@
         .metric-subtabs { display: inline-flex; background: rgba(0,0,0,0.05); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
         .metric-subtab { border: none; background: transparent; padding: 6px 14px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; color: var(--text-sec); cursor: pointer; transition: 0.15s; }
         .metric-subtab.active { background: #fff; color: var(--text-main); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .metric-subtabs-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+        .metric-subtabs-row .metric-subtabs { margin-bottom: 0; }
+        .time-range-picker { position: relative; }
+        .trp-toggle { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; color: var(--text-main); cursor: pointer; }
+        .trp-toggle:hover { border-color: var(--blue); color: var(--blue); }
+        .trp-menu { display: none; position: absolute; right: 0; top: calc(100% + 6px); background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 10px; z-index: 50; width: 260px; }
+        .trp-menu.open { display: block; }
+        .trp-quick-options { display: flex; flex-direction: column; gap: 2px; }
+        .trp-quick-options button { text-align: left; background: none; border: none; padding: 7px 8px; border-radius: 6px; font-size: 0.78rem; color: var(--text-main); cursor: pointer; width: 100%; }
+        .trp-quick-options button:hover { background: rgba(0,113,227,0.08); color: var(--blue); }
+        .trp-divider { height: 1px; background: var(--border); margin: 8px 0; }
+        .trp-custom-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-sec); font-weight: 700; margin-bottom: 6px; }
+        .trp-input { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 0.75rem; margin-bottom: 6px; font-family: inherit; }
+        .trp-to { font-size: 0.68rem; color: var(--text-sec); text-align: center; margin: -2px 0 6px; }
+        .trp-apply-btn { width: 100%; background: var(--blue); color: #fff; border: none; border-radius: 6px; padding: 7px; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
+        .trp-apply-btn:hover { opacity: 0.9; }
         .evidence-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.8rem; }
         .evidence-table th { text-align: left; font-size: 0.63rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-sec); padding: 8px 6px; border-bottom: 1px solid var(--border); }
         .evidence-table td { padding: 8px 6px; border-bottom: 1px solid rgba(0,0,0,0.04); }
@@ -1181,7 +1197,7 @@
             : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
 
         return `
-            ${renderMetricSubTabBar()}
+            ${renderMetricSubTabBar(false)}
             ${windowNote}
             <div class="label">Raw Log Output</div>
             <pre>${section.log || 'No evidence available yet.'}</pre>
@@ -1212,19 +1228,156 @@
     let lastMetricTabType = null;        // remembers what to re-render when the sub-tab is switched
     let lastMetricTabData = null;
 
+    // Time-range picker state for the Live sub-tab (CPU/Memory/Disk/Network
+    // only — Raw Log keeps the fixed trailing window). Shared/global, same
+    // pattern as currentMetricSubTab above. null start/end = use the
+    // backend's own default trailing window, same as before this feature.
+    let liveRangeStart = null;
+    let liveRangeEnd = null;
+    let liveRangeLabel = 'Live';
+
     function switchMetricSubTab(sub) {
         currentMetricSubTab = sub;
         if (!lastMetricTabType || !lastMetricTabData) return;
         renderEvidenceTab(lastMetricTabType, lastMetricTabData);
     }
 
-    function renderMetricSubTabBar() {
+    function renderMetricSubTabBar(showRangePicker) {
+        const pickerHtml = (showRangePicker && currentMetricSubTab === 'current') ? renderTimeRangePicker() : '';
         return `
-            <div class="metric-subtabs">
-                <button class="metric-subtab${currentMetricSubTab === 'current' ? ' active' : ''}" onclick="switchMetricSubTab('current')">Current</button>
-                <button class="metric-subtab${currentMetricSubTab === 'historic' ? ' active' : ''}" onclick="switchMetricSubTab('historic')">Historic</button>
+            <div class="metric-subtabs-row">
+                <div class="metric-subtabs">
+                    <button class="metric-subtab${currentMetricSubTab === 'current' ? ' active' : ''}" onclick="switchMetricSubTab('current')">Live</button>
+                    <button class="metric-subtab${currentMetricSubTab === 'historic' ? ' active' : ''}" onclick="switchMetricSubTab('historic')">Historic</button>
+                </div>
+                ${pickerHtml}
             </div>
         `;
+    }
+
+    function toDatetimeLocalValue(isoString) {
+        // Converts a stored ISO/UTC string back into the local-time
+        // "YYYY-MM-DDTHH:mm" format a <input type="datetime-local"> needs
+        // for its value — using local getters (getFullYear/getHours/etc.,
+        // not the UTC variants), so this correctly reflects the value in
+        // whatever timezone the browser is running in (e.g. EST), not UTC.
+        if (!isoString) return '';
+        const d = new Date(isoString);
+        if (isNaN(d.getTime())) return '';
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function renderTimeRangePicker() {
+        const startVal = toDatetimeLocalValue(liveRangeStart);
+        const endVal = toDatetimeLocalValue(liveRangeEnd);
+        return `
+            <div class="time-range-picker">
+                <button class="trp-toggle" onclick="toggleTimeRangeMenu(event)">
+                    <i class="bi bi-calendar3"></i> ${liveRangeLabel} <i class="bi bi-chevron-down" style="font-size:0.6rem;"></i>
+                </button>
+                <div class="trp-menu" id="trpMenu">
+                    <div class="trp-quick-options">
+                        <button onclick="applyQuickRange(5, '5 minutes')">Last 5 minutes</button>
+                        <button onclick="applyQuickRange(15, '15 minutes')">Last 15 minutes</button>
+                        <button onclick="applyQuickRange(60, '1 hour')">Last 1 hour</button>
+                        <button onclick="applyQuickRange(240, '4 hours')">Last 4 hours</button>
+                        <button onclick="applyQuickRange(1440, '24 hours')">Last 24 hours</button>
+                    </div>
+                    <div class="trp-divider"></div>
+                    <div class="trp-custom">
+                        <div class="trp-custom-label">Custom range</div>
+                        <input type="datetime-local" id="trpStart" class="trp-input" value="${startVal}">
+                        <div class="trp-to">to</div>
+                        <input type="datetime-local" id="trpEnd" class="trp-input" value="${endVal}">
+                        <button class="trp-apply-btn" onclick="applyCustomRange()">Apply</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function toggleTimeRangeMenu(e) {
+        if (e) e.stopPropagation();
+        const menu = document.getElementById('trpMenu');
+        if (!menu) return;
+        const isOpen = menu.classList.contains('open');
+        document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        if (!isOpen) menu.classList.add('open');
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.time-range-picker')) {
+            document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        }
+    });
+
+    function toLocalIsoString(d) {
+        // Formats a Date's LOCAL wall-clock fields (getHours/getMinutes/etc,
+        // not the UTC variants) as an ISO-shaped string with NO 'Z' or
+        // offset suffix — e.g. "2026-08-21T14:30:00". This intentionally
+        // sends the exact time the user selected/sees on screen, not its
+        // UTC equivalent (unlike .toISOString(), which would shift it by
+        // the browser's UTC offset — 4-5 hours for EST/EDT).
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function applyQuickRange(minutes, label) {
+        const end = new Date();
+        const start = new Date(end.getTime() - minutes * 60000);
+        liveRangeStart = toLocalIsoString(start);
+        liveRangeEnd = toLocalIsoString(end);
+        liveRangeLabel = 'Last ' + label;
+        document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        refreshLiveRangeData();
+    }
+
+    function applyCustomRange() {
+        const startInput = document.getElementById('trpStart');
+        const endInput = document.getElementById('trpEnd');
+        if (!startInput.value || !endInput.value) return;
+        const start = new Date(startInput.value);
+        const end = new Date(endInput.value);
+        if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+            alert('Please select a valid start and end time (start must be before end).');
+            return;
+        }
+        liveRangeStart = toLocalIsoString(start);
+        liveRangeEnd = toLocalIsoString(end);
+        liveRangeLabel = formatRangeLabel(start, end);
+        document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        refreshLiveRangeData();
+    }
+
+    function formatRangeLabel(start, end) {
+        const fmt = (d) => d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        return `${fmt(start)} – ${fmt(end)}`;
+    }
+
+    function refreshLiveRangeData() {
+        if (!currentCi) return;
+        ['cpu', 'memory', 'disk', 'network'].forEach(t => {
+            if (currentCi.metricsCache) delete currentCi.metricsCache[t];
+        });
+        if (['cpu', 'memory', 'disk', 'network'].includes(currentEvidenceTab)) {
+            loadEvidenceTab(currentCi, currentEvidenceTab);
+        }
+    }
+
+    function getLiveRangeParams() {
+        if (!['cpu', 'memory', 'disk', 'network'].includes(currentEvidenceTab)) return null;
+        if (liveRangeStart && liveRangeEnd) return { start: liveRangeStart, end: liveRangeEnd };
+        return null;
+    }
+
+    function renderLiveWindowNote(section) {
+        if (liveRangeStart && liveRangeEnd) {
+            return `<div class="text-muted small" style="margin:-4px 0 12px;">${liveRangeLabel}</div>`;
+        }
+        return section.captured_at
+            ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>`
+            : '';
     }
 
     function renderMetricTab(tab, data) {
@@ -1239,10 +1392,14 @@
 
         const rows = processes.map((p, i) => {
             const pct = p[`${tab}_percent`] ?? p.percent ?? p.value ?? 0;
+            const user = p.user_name || p.user || p['user.name'] || 'N/A';
+            const pid = (p.pid != null) ? p.pid : ((p.process_pid != null) ? p.process_pid : 'N/A');
             return `
                 <tr>
                     <td>${i + 1}</td>
                     <td>${p.process || p.name || 'Unknown'}</td>
+                    <td>${user}</td>
+                    <td>${pid}</td>
                     <td>${pct}%</td>
                 </tr>`;
         }).join('');
@@ -1254,19 +1411,19 @@
 
         const windowNote = isHistoric
             ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
-            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+            : renderLiveWindowNote(section);
 
         return `
-            ${renderMetricSubTabBar()}
+            ${renderMetricSubTabBar(true)}
             <div class="evidence-stat-row" style="grid-template-columns:1fr;">
-                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Current'} Avg ${label}</div><div class="val">${avg}</div></div>
+                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Live'} Avg ${label}</div><div class="val">${avg}</div></div>
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Processes by ${label} Usage</div>
             ${renderBarChart(chartItems)}
             <table class="evidence-table">
-                <thead><tr><th>#</th><th>Process</th><th>${label} %</th></tr></thead>
-                <tbody>${rows || `<tr><td colspan="3" class="text-muted small">No process data available.</td></tr>`}</tbody>
+                <thead><tr><th>#</th><th>Process</th><th>User</th><th>PID</th><th>${label} %</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="5" class="text-muted small">No process data available.</td></tr>`}</tbody>
             </table>
         `;
     }
@@ -1281,7 +1438,7 @@
 
         const windowNote = isHistoric
             ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
-            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+            : renderLiveWindowNote(section);
 
         const mounts = section.top_mount_points || section.mount_points || section.mounts || [];
         const sorted = [...mounts]
@@ -1306,9 +1463,9 @@
         }));
 
         return `
-            ${renderMetricSubTabBar()}
+            ${renderMetricSubTabBar(true)}
             <div class="evidence-stat-row" style="grid-template-columns:1fr;">
-                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Current'} Avg Disk</div><div class="val">${avg}</div></div>
+                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Live'} Avg Disk</div><div class="val">${avg}</div></div>
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Mount Points by Storage Consumed</div>
@@ -1328,7 +1485,7 @@
         const section = data[currentMetricSubTab] || {};
         const windowNote = isHistoric
             ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
-            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+            : renderLiveWindowNote(section);
 
         const interfaces = section.interfaces || section.drivers || section.results || [];
         const rows = interfaces.map(nic => `
@@ -1341,7 +1498,7 @@
         `).join('');
 
         return `
-            ${renderMetricSubTabBar()}
+            ${renderMetricSubTabBar(true)}
             ${windowNote}
             <div class="label">Network Drivers &amp; Traffic</div>
             <table class="evidence-table">
@@ -2112,7 +2269,12 @@
 '      body: JSON.stringify({ message_id: msgId, feedback: feedback, message: text })' +
 '    }).catch(function (e) { console.error("feedback submit failed", e); });' +
 '  }' +
-'  function addReplyCard(block, text) {' +
+'  function getCookie(name) {' +
+'    var match = document.cookie.match("(^|;\\\\s*)" + name + "=([^;]*)");' +
+'    return match ? decodeURIComponent(match[2]) : null;' +
+'  }' +
+
+'  function addStreamingReplyCard(block) {' +
 '    var card = document.createElement("div");' +
 '    card.className = "card";' +
 '    var msgId = "msg-" + (feedbackCounter++);' +
@@ -2124,7 +2286,8 @@
 '        \'<button class="fb-btn" data-fb="like" title="Helpful"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M7 22V11M2 13v7a2 2 0 002 2h12.9a2 2 0 002-1.7l1.4-9A2 2 0 0018.3 9H14V4a2 2 0 00-2-2l-3 7v13"/></svg></button>\' +' +
 '        \'<button class="fb-btn" data-fb="dislike" title="Not helpful"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M17 2v11M22 11V4a2 2 0 00-2-2H7.1a2 2 0 00-2 1.7l-1.4 9A2 2 0 005.7 15H10v5a2 2 0 002 2l3-7V2"/></svg></button>\' +' +
 '      \'</div></div>\';' +
-'    card.querySelector(".field-value").textContent = text;' +
+'    var textEl = card.querySelector(".field-value");' +
+'    var latestText = "";' +
 '    var likeBtn = card.querySelector(\'[data-fb="like"]\');' +
 '    var dislikeBtn = card.querySelector(\'[data-fb="dislike"]\');' +
 '    var current = null;' +
@@ -2132,10 +2295,13 @@
 '      likeBtn.className = "fb-btn" + (current === "like" ? " active-like" : "");' +
 '      dislikeBtn.className = "fb-btn" + (current === "dislike" ? " active-dislike" : "");' +
 '    }' +
-'    likeBtn.addEventListener("click", function () { current = current === "like" ? null : "like"; applyState(); submitFeedback(msgId, current, text); });' +
-'    dislikeBtn.addEventListener("click", function () { current = current === "dislike" ? null : "dislike"; applyState(); submitFeedback(msgId, current, text); });' +
+'    likeBtn.addEventListener("click", function () { current = current === "like" ? null : "like"; applyState(); submitFeedback(msgId, current, latestText); });' +
+'    dislikeBtn.addEventListener("click", function () { current = current === "dislike" ? null : "dislike"; applyState(); submitFeedback(msgId, current, latestText); });' +
 '    block.appendChild(card);' +
 '    logEl.scrollTop = logEl.scrollHeight;' +
+'    return {' +
+'      update: function (text) { latestText = text; textEl.textContent = text; logEl.scrollTop = logEl.scrollHeight; }' +
+'    };' +
 '  }' +
 
 '  var DEMO_REPLIES = [' +
@@ -2147,27 +2313,36 @@
 '  ];' +
 '  var demoReplyIndex = 0;' +
 
-'  function getAssistantReply(userText) {' +
+'  async function getAssistantReply(userText, onChunk) {' +
 '    if (DEMO_MODE || !CHAT_URL) {' +
-'      return new Promise(function (resolve) {' +
-'        setTimeout(function () {' +
-'          var reply = DEMO_REPLIES[demoReplyIndex % DEMO_REPLIES.length];' +
-'          demoReplyIndex++;' +
-'          resolve(reply);' +
-'        }, 700);' +
-'      });' +
+'      var reply = DEMO_REPLIES[demoReplyIndex % DEMO_REPLIES.length];' +
+'      demoReplyIndex++;' +
+'      var words = reply.split(" ");' +
+'      var acc = "";' +
+'      for (var i = 0; i < words.length; i++) {' +
+'        await new Promise(function (r) { setTimeout(r, 35); });' +
+'        acc += (i > 0 ? " " : "") + words[i];' +
+'        onChunk(acc);' +
+'      }' +
+'      return reply;' +
 '    }' +
-'    return fetch(CHAT_URL, {' +
+'    var res = await fetch(CHAT_URL, {' +
 '      method: "POST",' +
 '      credentials: "same-origin",' +
-'      headers: { "Content-Type": "application/json" },' +
+'      headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },' +
 '      body: JSON.stringify({ message: userText, history: chatHistory })' +
-'    }).then(function (res) {' +
-'      if (!res.ok) throw new Error("Assistant request failed (HTTP " + res.status + ")");' +
-'      return res.json();' +
-'    }).then(function (data) {' +
-'      return data.reply || data.message || "No response received.";' +
 '    });' +
+'    if (!res.ok || !res.body) throw new Error("Assistant request failed (HTTP " + res.status + ")");' +
+'    var reader = res.body.getReader();' +
+'    var decoder = new TextDecoder();' +
+'    var acc2 = "";' +
+'    while (true) {' +
+'      var chunk = await reader.read();' +
+'      if (chunk.done) break;' +
+'      acc2 += decoder.decode(chunk.value, { stream: true });' +
+'      onChunk(acc2);' +
+'    }' +
+'    return acc2 || "No response received.";' +
 '  }' +
 
 '  function renderInitialExchange() {' +
@@ -2197,15 +2372,18 @@
 
 '    setRoute(true);' +
 '    var thinking = addThinkingChip(block);' +
-'    getAssistantReply(initialPrompt).then(function (reply) {' +
-'      thinking.remove();' +
-'      addReplyCard(block, reply);' +
+'    var replyCard = null;' +
+'    getAssistantReply(initialPrompt, function (partial) {' +
+'      if (!replyCard) { thinking.remove(); replyCard = addStreamingReplyCard(block); }' +
+'      replyCard.update(partial);' +
+'    }).then(function (reply) {' +
 '      chatHistory.push({ role: "user", content: initialPrompt });' +
 '      chatHistory.push({ role: "assistant", content: reply });' +
 '      setRoute(false);' +
 '    }).catch(function (err) {' +
 '      thinking.remove();' +
-'      addReplyCard(block, "Failed to reach the AI assistant: " + err.message);' +
+'      if (!replyCard) replyCard = addStreamingReplyCard(block);' +
+'      replyCard.update("Failed to reach the AI assistant: " + err.message);' +
 '      setRoute(false);' +
 '    });' +
 '  }' +
@@ -2214,15 +2392,18 @@
 '    var block = addExchangeShell(text);' +
 '    setRoute(true);' +
 '    var thinking = addThinkingChip(block);' +
-'    getAssistantReply(text).then(function (reply) {' +
-'      thinking.remove();' +
-'      addReplyCard(block, reply);' +
+'    var replyCard = null;' +
+'    getAssistantReply(text, function (partial) {' +
+'      if (!replyCard) { thinking.remove(); replyCard = addStreamingReplyCard(block); }' +
+'      replyCard.update(partial);' +
+'    }).then(function (reply) {' +
 '      chatHistory.push({ role: "user", content: text });' +
 '      chatHistory.push({ role: "assistant", content: reply });' +
 '      setRoute(false);' +
 '    }).catch(function (err) {' +
 '      thinking.remove();' +
-'      addReplyCard(block, "Failed to reach the AI assistant: " + err.message);' +
+'      if (!replyCard) replyCard = addStreamingReplyCard(block);' +
+'      replyCard.update("Failed to reach the AI assistant: " + err.message);' +
 '      setRoute(false);' +
 '    });' +
 '  }' +
@@ -2389,8 +2570,13 @@
      *     { historic: { window_start, window_end, interfaces: [{ driver, traffic_in, traffic_out, flow_count }] },
      *       current:  { captured_at, interfaces: [{ driver, traffic_in, traffic_out, flow_count }] } }
      */
-    const EVIDENCE_METRIC_URL = (incId, assetId, metric) =>
-        `${API_BASE}/api/triage/evidence/metrics/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}&metric=${encodeURIComponent(metric)}`;
+    const EVIDENCE_METRIC_URL = (incId, assetId, metric, rangeParams) => {
+        let url = `${API_BASE}/api/triage/evidence/metrics/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}&metric=${encodeURIComponent(metric)}`;
+        if (rangeParams && rangeParams.start && rangeParams.end) {
+            url += `&range_start=${encodeURIComponent(rangeParams.start)}&range_end=${encodeURIComponent(rangeParams.end)}`;
+        }
+        return url;
+    };
 
     /**
      * Linked Changes — live from ServiceNow, scoped to the incident's app
@@ -2506,8 +2692,9 @@
     }
 
     async function fetchEvidenceMetric(incId, assetId, metric) {
-        if (DEMO_MODE) return generateDemoMetric(metric, assetId);
-        const res = await fetch(EVIDENCE_METRIC_URL(incId, assetId, metric), { credentials: 'same-origin' });
+        const rangeParams = getLiveRangeParams();
+        if (DEMO_MODE) return generateDemoMetric(metric, assetId, rangeParams);
+        const res = await fetch(EVIDENCE_METRIC_URL(incId, assetId, metric, rangeParams), { credentials: 'same-origin' });
         if (!res.ok) throw new Error(`${metric} metrics fetch failed (HTTP ${res.status})`);
         return res.json();
     }
@@ -2573,10 +2760,11 @@
         'logstash.exe', 'dockerd', 'powershell.exe', 'MsMpEng.exe', 'explorer.exe'
     ];
 
-    function generateDemoMetric(metric, assetId) {
+    function generateDemoMetric(metric, assetId, rangeParams) {
         return new Promise(resolve => {
             setTimeout(() => {
-                const rand = seededRandom(`${assetId}:${metric}`);
+                const seedSuffix = rangeParams ? `:${rangeParams.start}:${rangeParams.end}` : '';
+                const rand = seededRandom(`${assetId}:${metric}${seedSuffix}`);
                 if (metric === 'network') { resolve(generateDemoNetwork(rand)); return; }
                 if (metric === 'disk') { resolve(generateDemoDiskMetric(rand)); return; }
                 if (metric === 'raw') { resolve(generateDemoRawLogSections(rand)); return; }
@@ -2584,6 +2772,8 @@
             }, 500);
         });
     }
+
+    const DEMO_USERS = ['root', 'svc_app', 'svc_sql', 'www-data', 'SYSTEM', 'app_svc', 'postgres'];
 
     function buildUsageSection(rand, metric, isHistoric, minAvg, maxAvg) {
         const avg = Math.round(minAvg + rand() * (maxAvg - minAvg));
@@ -2595,7 +2785,12 @@
         let base = avg * 0.85;
         const top_processes = pool.slice(0, 10).map((proc, i) => {
             const pct = Math.max(1, Math.round((base / Math.pow(1.45, i)) * (0.85 + rand() * 0.3)));
-            return { process: proc, [`${metric}_percent`]: pct };
+            return {
+                process: proc,
+                [`${metric}_percent`]: pct,
+                user_name: DEMO_USERS[Math.floor(rand() * DEMO_USERS.length)],
+                pid: 1000 + Math.floor(rand() * 30000)
+            };
         });
 
         const section = { avg, top_processes };
