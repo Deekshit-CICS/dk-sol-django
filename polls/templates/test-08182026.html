@@ -1428,6 +1428,11 @@ def changes(request):
 # cached at import time, since OAuth tokens expire and you don't want a
 # long-running Django process silently serving stale-token failures.
 #
+# CSRF: this view is @csrf_exempt (explicit decision, see the decorator
+# below). The frontend still sends an X-CSRFToken header defensively
+# (harmless — Django just ignores it on an exempted view), so nothing
+# needs to change there if CSRF protection is ever turned back on here.
+#
 # >>> ADJUST BEFORE USE <<<
 # This assumes `auth_token.get_oauth_token()`, `auth_token.get_jwt_token()`,
 # and `llm_config.LLMConfig` exist exactly as in your reference snippet —
@@ -1442,7 +1447,7 @@ from auth_token import get_oauth_token, get_jwt_token  # TODO: adjust import pat
 from llm_config import LLMConfig                        # TODO: adjust import path if not top-level
 
 from django.http import StreamingHttpResponse
-from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 AI_SYSTEM_PROMPT = (
@@ -1520,10 +1525,13 @@ def _stream_chat_chunks(client, config, messages):
             yield delta
 
 
-@csrf_protect  # frontend sends X-CSRFToken (see getCookie('csrftoken') in
-               # the popup's fetch call) — matches the pattern already used
-               # for /api/triage/trigger/ elsewhere in this app, rather
-               # than exempting this endpoint from CSRF protection
+@csrf_exempt  # exempted per explicit decision — this bypasses Django's CSRF
+              # check entirely for this endpoint, so any authenticated
+              # user's browser can be made to POST here from another site
+              # without their knowledge. If this view later does anything
+              # beyond returning an LLM's text (e.g. writes to a DB, takes
+              # an action, reads sensitive account data), reconsider — see
+              # the note in the module docstring below.
 @require_POST
 def ai_assistant_chat(request):
     """
@@ -1562,3 +1570,77 @@ def ai_assistant_chat(request):
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"  # disable nginx response buffering, if applicable — without this, some reverse proxies will buffer the whole stream before forwarding it, defeating the point of streaming
     return response
+
+
+# ===========================================================================
+# CSRF bootstrap — fixes the "X-Csrftoken HTTP header has incorrect
+# length" error.
+#
+# Root cause: Django only sets the csrftoken cookie when something on the
+# page actually triggers it (a {% csrf_token %} template tag, or a view
+# decorated with @ensure_csrf_cookie). If forensic-rca-live.html is served
+# as a static file — or by any view that never touches CSRF — the browser
+# never receives that cookie at all. Every getCookie('csrftoken') call in
+# the frontend then returns null, and fetch's Headers API silently
+# stringifies that null into the literal 4-character text "null" when
+# building the request — which is exactly what Django rejects as
+# "incorrect length" (it expects a real 32/64-character token, not the
+# 4-character string "null").
+#
+# Fix: this endpoint does nothing except force Django to set the cookie.
+# The frontend calls it once, before any POST that needs X-CSRFToken —
+# see ensureCsrfCookie() in forensic-rca-live.html.
+# ===========================================================================
+
+from django.views.decorators.csrf import ensure_csrf_cookie
+
+
+@ensure_csrf_cookie
+@require_GET
+def csrf_bootstrap(request):
+    """GET /api/csrf/ — call once on page load to guarantee the csrftoken cookie is set."""
+    return JsonResponse({"ok": True})
+
+
+# ===========================================================================
+# AI Assistant popup template — serves ai-assistant-popup.html's contents
+# through Django directly, rather than relying on it being reachable as a
+# bare static file next to the dashboard (which 404s unless your web
+# server happens to serve arbitrary sibling files — most Django
+# deployments don't do this by default, which is exactly the 404 this
+# fixes: GET https://.../goc_rca/ai-assistant-popup.html).
+#
+# Serves GET /api/ai-assistant/popup-template/
+#
+# >>> ADJUST BEFORE USE <<<
+# POPUP_TEMPLATE_PATH below assumes ai-assistant-popup.html sits in the
+# same directory as this views.py file. Move the file to wherever makes
+# sense in your project layout and update the path — e.g. if you put it
+# under a `templates/` folder: os.path.join(settings.BASE_DIR, 'templates', 'ai-assistant-popup.html')
+# ===========================================================================
+
+import os
+
+from django.http import HttpResponse, HttpResponseServerError
+
+POPUP_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), 'ai-assistant-popup.html')  # TODO: adjust path — e.g. os.path.join(settings.BASE_DIR, 'templates', 'ai-assistant-popup.html') if you move it under templates/
+
+
+@require_GET
+def ai_assistant_popup_template(request):
+    """
+    GET /api/ai-assistant/popup-template/
+    Returns ai-assistant-popup.html's raw contents as text/html. The
+    frontend fetches this (see AI_ASSISTANT_POPUP_TEMPLATE_URL in
+    forensic-rca-live.html), substitutes its own placeholders into it, and
+    writes the result into the popup window.
+    """
+    try:
+        with open(POPUP_TEMPLATE_PATH, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except FileNotFoundError:
+        logger.error("AI Assistant popup template not found at %s", POPUP_TEMPLATE_PATH)
+        return HttpResponseServerError(
+            "AI Assistant popup template file is missing on the server."
+        )
+    return HttpResponse(content, content_type='text/html; charset=utf-8')
