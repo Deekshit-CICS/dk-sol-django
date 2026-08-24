@@ -536,12 +536,12 @@
      * below once you share a real sample with multiple changes.
      *
      * `evidence` is one entry per asset — `hostname` is the asset identifier
-     * and `technical_evidence` is that asset's log text. An incident with
-     * multiple assets simply has multiple evidence entries with different
-     * hostnames. There's still no dedicated "assets"/"cis" list in this API,
-     * so Asset Inventory rows are built from the unique hostnames in
-     * `evidence` (if your backend later adds a real data.assets/data.cis
-     * array, it's picked up automatically and takes priority instead).
+     * and `technical_evidence` is that asset's log text. Only kept as a
+     * lookup table now (evidenceByAsset) for cross-referencing a server's
+     * log text once Asset Inventory is populated — Asset Inventory itself
+     * is exclusively ServiceNow-sourced (see applySnowServerListToAssetInventory()),
+     * deliberately NOT built from this array or from data.assets/data.cis/
+     * data.configuration_items even if your backend later adds one.
      * `asset_details` and `fetched_at` are carried through and shown in the
      * asset panel; `elastic_query_meta` (the underlying Elastic query) isn't
      * surfaced in the UI.
@@ -613,52 +613,58 @@
         inc.action = inc.action || 'Review Manually'; // no explicit action field in this response
         document.getElementById('m-fix').innerText = inc.fix;
 
-        // Asset Inventory + per-asset evidence, derived from the `evidence`
-        // array — CONFIRMED real shape, one entry per asset:
-        //   { id, session_id, hostname, asset_details, technical_evidence,
-        //     elastic_query_meta, fetched_at }
-        // `hostname` is the asset identifier and `technical_evidence` is the
-        // actual log/evidence text. There's still no separate assets/cis
-        // list in this API, so Asset Inventory rows come straight from the
-        // unique hostnames seen here — one incident can (and does) have
-        // multiple assets, each with its own technical_evidence.
+        // Per-asset evidence text, still derived from the `evidence` array
+        // — CONFIRMED real shape: { id, session_id, hostname, asset_details,
+        // technical_evidence, elastic_query_meta, fetched_at }. Kept purely
+        // as a lookup table (hostname -> log text) for cross-referencing
+        // once Asset Inventory is populated from ServiceNow below — this is
+        // NOT used to build the asset list itself anymore (see note below).
         inc.evidenceByAsset = {};
-        const assetsFromEvidence = [];
         evidenceArr.forEach(e => {
             if (typeof e === 'string') return; // no asset identifier to key off
             const assetKey = (e.hostname || e.asset_id || e.ci || e.asset || e.ci_name || e.name || '').toString();
             const logText = e.technical_evidence || e.log || e.evidence || e.description || JSON.stringify(e);
             if (!assetKey) return;
             inc.evidenceByAsset[assetKey.toLowerCase()] = logText;
-            assetsFromEvidence.push({
-                id: assetKey,
-                name: assetKey,               // hostname doubles as the display name
-                crit: e.criticality || e.crit || 'N/A',   // not present in this API — stays N/A unless a real assets list supplies it
-                patch: e.last_patch || e.patch || 'N/A',  // same as above
-                details: e.asset_details || '',
-                fetchedAt: e.fetched_at || null,
-                log: logText
-            });
         });
 
-        const assetsRaw = data.assets || data.cis || data.configuration_items || assetsFromEvidence;
-        inc.cis = assetsRaw.map(item => ({
-            id: item.sys_id || item.asset_id || item.hostname || item.id || item.name || item.ci_name,
-            name: item.hostname || item.name || item.ci_name || item.display_value || item.sys_id || 'Unknown Asset',
-            crit: item.criticality || item.crit || 'N/A',
-            patch: item.last_patch || item.patch || item.sys_updated_on || 'N/A',
-            details: item.asset_details || item.details || '',
-            fetchedAt: item.fetched_at || item.fetchedAt || null,
-            log: item.log || item.evidence || item.technical_evidence || null,
-            metricsCache: {} // populated lazily per tab — see loadEvidenceTab()
-        }));
-
+        // Asset Inventory is exclusively ServiceNow-sourced now — see
+        // applySnowServerListToAssetInventory(), triggered by the parallel
+        // fetch started in runTriage(). Deliberately NOT populated from
+        // data.assets/data.cis/data.configuration_items/evidence hostnames
+        // here (that was the old behavior — removed on purpose). This call
+        // just makes sure the list reflects the ServiceNow fetch's current
+        // state immediately (covers the race where that fetch already
+        // resolved before this function ran); renderCiList() itself shows
+        // a loading/error state correctly if it hasn't resolved yet.
+        applySnowServerListToAssetInventory(inc, inc.id.toUpperCase());
         renderCiList(inc);
+
+        // Linked Changes — now that inc.app is known, fetch live from
+        // ServiceNow automatically rather than waiting for the user to
+        // click the Linked Change card. Always refetches (no "already
+        // loaded" skip), so a Force Retriage reload gets fresh data too.
+        if (inc.app && inc.app !== 'N/A') {
+            loadLiveChanges(inc);
+        }
+
         setTimeout(draw, 50);
     }
 
     function renderCiList(inc) {
         const list = document.getElementById('ci-list');
+        const key = (inc.id || '').toUpperCase();
+        const cached = snowIncidentCache[key];
+
+        if (!cached || cached.loading) {
+            list.innerHTML = '<div class="text-muted small"><i class="bi bi-hourglass-split"></i> Loading assets from ServiceNow…</div>';
+            return;
+        }
+        if (cached.error) {
+            list.innerHTML = `<div class="text-muted small"><i class="bi bi-exclamation-triangle"></i> Failed to load assets: ${cached.error}</div>`;
+            return;
+        }
+
         list.innerHTML = '';
         if (!inc.cis.length) {
             list.innerHTML = '<div class="text-muted small">No assets found for this incident.</div>';
@@ -794,7 +800,6 @@
         const cached = snowIncidentCache[key];
         if (!cached || cached.loading || cached.error || !cached.data) return;
         const servers = cached.data.servers || [];
-        if (!servers.length) return;
 
         inc.cis = servers.map(name => ({
             id: name,
@@ -2190,11 +2195,9 @@
                `hostname` is the asset identifier, `technical_evidence` is
                that asset's evidence text — an incident with multiple
                assets has multiple evidence entries with different
-               hostnames. There's still no dedicated assets/cis list, so
-               Asset Inventory rows are derived from the unique hostnames
-               in `evidence`. If your backend later adds a real
-               data.assets/data.cis array, it's picked up automatically and
-               takes priority over the evidence-derived list.
+               hostnames. Only used as a log-text lookup now; Asset
+               Inventory itself is exclusively ServiceNow-sourced (see
+               applySnowServerListToAssetInventory()), not built from this.
                Technical Evidence is asset-specific (an incident can have
                multiple CIs/assets), so it's NOT auto-populated on row
                select — it only fills in once an asset is clicked.
@@ -3170,7 +3173,7 @@
             assignedTo: apiData.assigned_to || (existing && existing.assignedTo) || '',
             prio: apiData.priority || apiData.prio || (existing && existing.prio) || 'N/A',
             state: apiData.status || (existing && existing.state) || 'N/A',
-            cis: apiData.cis || apiData.configuration_items || (existing && existing.cis) || [],
+            cis: (existing && existing.cis) || [], // Asset Inventory is ServiceNow-only now — never populated from the lookup/trigger response
             // Real triage metadata straight from the API
             triggered_by: apiData.triggered_by || (existing && existing.triggered_by) || null,
             created_at: apiData.created_at || (existing && existing.created_at) || null,
