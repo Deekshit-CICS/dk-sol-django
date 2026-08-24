@@ -2253,12 +2253,14 @@
      * template file (fetched at runtime by renderAiAssistantWindow(),
      * placeholders substituted, then written into the popup window).
      *
-     * Assumes it's hosted as a sibling static file next to this dashboard
-     * (same directory, fetched via a plain relative path) — adjust this
-     * if you host it somewhere else (e.g. behind a Django static/ URL, a
-     * CDN, etc).
+     * Served through Django (see ai_assistant_popup_template() in
+     * views.py) rather than fetched as a bare relative static file —
+     * most Django deployments don't serve arbitrary sibling files next
+     * to this dashboard by default, so a relative fetch like
+     * 'ai-assistant-popup.html' would 404 unless static serving happens
+     * to be configured for exactly that path.
      */
-    const AI_ASSISTANT_POPUP_TEMPLATE_URL = 'ai-assistant-popup.html';
+    const AI_ASSISTANT_POPUP_TEMPLATE_URL = `${API_BASE}/api/ai-assistant/popup-template/`;
 
     /**
      * Chat endpoint for continuing the conversation inside the AI Assistant
