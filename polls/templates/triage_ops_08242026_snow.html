@@ -780,6 +780,33 @@
         if (currentIncPanelInc && currentIncPanelInc.id.toUpperCase() === key) {
             showIncPanel();
         }
+        // Refresh Asset Inventory with the ServiceNow-derived server list,
+        // if this is still the currently-selected incident. Doesn't wipe
+        // the existing (evidence-derived) list if ServiceNow returned zero
+        // servers — keeps whatever was already showing rather than going
+        // blank.
+        if (currentInc && currentInc.id.toUpperCase() === key) {
+            applySnowServerListToAssetInventory(currentInc, key);
+        }
+    }
+
+    function applySnowServerListToAssetInventory(inc, key) {
+        const cached = snowIncidentCache[key];
+        if (!cached || cached.loading || cached.error || !cached.data) return;
+        const servers = cached.data.servers || [];
+        if (!servers.length) return;
+
+        inc.cis = servers.map(name => ({
+            id: name,
+            name: name,
+            crit: 'N/A',
+            patch: 'N/A',
+            details: '',
+            fetchedAt: null,
+            log: (inc.evidenceByAsset && inc.evidenceByAsset[name.toLowerCase()]) || null,
+            metricsCache: {}
+        }));
+        renderCiList(inc);
     }
 
     function escAttr(s) {
@@ -2455,6 +2482,17 @@
         return res.json();
     }
 
+    function generateDemoServerName(rand) {
+        // Matches the real naming convention: 3-char prefix (he2/he3/or1/or2)
+        // + 11 more chars = 14 total.
+        const prefixes = ['he2', 'he3', 'or1', 'or2'];
+        const prefix = prefixes[Math.floor(rand() * prefixes.length)];
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        let suffix = '';
+        for (let i = 0; i < 11; i++) suffix += chars[Math.floor(rand() * chars.length)];
+        return prefix + suffix;
+    }
+
     function generateDemoSnowIncidentDetails(incId) {
         const rand = seededRandom(`${incId}:snow-incident`);
         const pick = (arr) => arr[Math.floor(rand() * arr.length)];
@@ -2465,16 +2503,32 @@
         const statuses = ['New', 'In Progress', 'On Hold', 'Resolved', 'Closed'];
         const groups = ['App-Support-L2', 'Network-Ops', 'DBA-Team', 'GOC_SIT'];
         const assignees = ['a.chen', 'k.brown', 's.patel', null]; // null -> shows as Unassigned
+
+        // Generate 1-2 real-looking server names — one becomes the main CI
+        // field, and (about half the time) a second gets mentioned only in
+        // the description, mirroring how a real incident's free text might
+        // reference an additional affected host.
+        const primaryServer = generateDemoServerName(rand);
+        const hasSecondServer = rand() > 0.5;
+        const secondaryServer = hasSecondServer ? generateDemoServerName(rand) : null;
+
         const summaries = [
-            'CPU utilization exceeded threshold on production database server',
-            'Application pool exhaustion causing intermittent 502 errors',
-            'Disk space critically low on primary log volume'
+            `CPU utilization exceeded threshold on ${primaryServer}`,
+            `Application pool exhaustion on ${primaryServer} causing intermittent 502 errors`,
+            `Disk space critically low on ${primaryServer}`
         ];
-        const app = `${incId.toLowerCase()}-app01`;
         const longDescriptions = [
-            `Alert triggered by monitoring: CPU utilization on ${app} has exceeded 95% for a sustained period of over 15 minutes. Initial triage suggests this may be correlated with a recent deployment to the same host group. The on-call engineer has been paged. Historical data shows this host has had similar spikes in the past 30 days, typically resolving within 20-30 minutes without intervention, but this occurrence has persisted longer than the usual pattern and is now impacting downstream services that depend on this application, including the checkout and payment processing pipelines. Customer-facing latency has increased by approximately 3x during this window.`,
-            `Users reported intermittent failures when submitting forms through the customer portal. Investigation shows the application connection pool on ${app} reached its configured maximum and began rejecting new connections, returning HTTP 502 errors to the load balancer. This appears to coincide with a spike in traffic following a marketing campaign that went live earlier today. The team is evaluating whether to temporarily increase the pool size or throttle incoming traffic while root cause analysis continues.`
+            `Alert triggered by monitoring: CPU utilization on ${primaryServer} has exceeded 95% for a sustained period of over 15 minutes.${secondaryServer ? ` ${secondaryServer} in the same cluster is also showing elevated load.` : ''} Initial triage suggests this may be correlated with a recent deployment to the same host group. The on-call engineer has been paged. Historical data shows this host has had similar spikes in the past 30 days, typically resolving within 20-30 minutes without intervention, but this occurrence has persisted longer than the usual pattern and is now impacting downstream services that depend on this application, including the checkout and payment processing pipelines. Customer-facing latency has increased by approximately 3x during this window.`,
+            `Users reported intermittent failures when submitting forms through the customer portal. Investigation shows the application connection pool on ${primaryServer} reached its configured maximum and began rejecting new connections, returning HTTP 502 errors to the load balancer.${secondaryServer ? ` ${secondaryServer} was checked as a possible secondary cause but appears unaffected.` : ''} This appears to coincide with a spike in traffic following a marketing campaign that went live earlier today.`
         ];
+
+        const summary = pick(summaries);
+        const description = pick(longDescriptions);
+
+        // Mirrors what the real backend's regex extraction + dedup would
+        // find across cmdb_ci + summary + description.
+        const servers = secondaryServer ? [primaryServer, secondaryServer] : [primaryServer];
+
         return new Promise(resolve => {
             setTimeout(() => {
                 resolve({
@@ -2485,12 +2539,13 @@
                     status: pick(statuses),
                     environment: pick(environments),
                     category: pick(categories),
-                    impacted_ci: `${incId.toLowerCase()}-app0${1 + Math.floor(rand() * 4)}`,
+                    impacted_ci: primaryServer,
                     priority: pick(priorities),
                     assignment_group: pick(groups),
                     assigned_to: pick(assignees),
-                    summary: pick(summaries),
-                    description: pick(longDescriptions)
+                    summary,
+                    description,
+                    servers
                 });
             }, 300);
         });
