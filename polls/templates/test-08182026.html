@@ -38,6 +38,7 @@ actual setup — each is marked with a comment below:
 
 import json
 import logging
+import re
 from datetime import timedelta
 
 import requests
@@ -1682,6 +1683,71 @@ INCIDENT_FIELD_MAP = {
     "description": "description",       # ServiceNow's full description field — can be long, frontend truncates with a hover tooltip for the full text
 }
 
+# ---------------------------------------------------------------------------
+# Server-name extraction for Asset Inventory — pulled from four possible
+# sources on the SAME incident record already fetched above (no extra
+# ServiceNow round-trip): the main CI field, two other CI-shaped fields,
+# and free-text pattern matching within Summary/Description.
+#
+# >>> ADJUST BEFORE USE <<<
+# ASSET_INFO_CI_FIELD reuses cmdb_ci (the same field already mapped as
+# impacted_ci above — ServiceNow's incident table only has ONE standard CI
+# reference field, so "Asset Info (CI)" and "Impacted CI" may genuinely be
+# the same field in your instance). AFFECTED_CI_FIELD and
+# EXTRA_IMPACTED_CI_FIELD are guesses at additional custom fields your org
+# might have for this — confirm the real field names, or remove whichever
+# don't apply.
+# ---------------------------------------------------------------------------
+
+ASSET_INFO_CI_FIELD = "cmdb_ci"           # "Asset Info (CI)" — same field as impacted_ci above
+AFFECTED_CI_FIELD = "u_affected_ci"       # TODO: confirm real field name — likely custom
+EXTRA_IMPACTED_CI_FIELD = "u_impacted_ci"  # TODO: confirm real field name — likely custom; distinct from cmdb_ci if your instance tracks it separately
+
+# Server naming convention: exactly 14 characters, starting with one of
+# these four 3-character prefixes (case-insensitive). Non-capturing group
+# so re.findall() returns the full match, not just the prefix.
+SERVER_NAME_PATTERN = re.compile(r'\b(?:he2|he3|or1|or2)[a-zA-Z0-9]{11}\b', re.IGNORECASE)
+
+
+def _extract_server_names(text):
+    """
+    Finds every server-name-shaped token in free text (or a single CI
+    field's value — works the same either way) matching the naming
+    convention: 14 characters total, starting with he2/he3/or1/or2.
+    Returns lowercased matches (hostnames are conventionally lowercase).
+    """
+    if not text:
+        return []
+    return [m.lower() for m in SERVER_NAME_PATTERN.findall(str(text))]
+
+
+def _collect_server_names_from_incident(record):
+    """
+    Collects candidate server names from all four requested sources on
+    the incident record, then dedupes case-insensitively while preserving
+    first-seen order:
+      1. Asset Info (CI) — cmdb_ci
+      2. Affected CI — a separate field, if your instance has one
+      3. Impacted CI — another separate field, if your instance has one
+      4. Summary + Description — free-text pattern matching (can surface
+         multiple server names mentioned in the incident text, e.g.
+         "Host: he3ilxvdmid445 -- ...")
+    """
+    candidates = []
+    candidates.extend(_extract_server_names(_extract_field(record, ASSET_INFO_CI_FIELD)))
+    candidates.extend(_extract_server_names(_extract_field(record, AFFECTED_CI_FIELD)))
+    candidates.extend(_extract_server_names(_extract_field(record, EXTRA_IMPACTED_CI_FIELD)))
+    candidates.extend(_extract_server_names(_extract_field(record, "short_description")))
+    candidates.extend(_extract_server_names(_extract_field(record, "description")))
+
+    seen = set()
+    deduped = []
+    for name in candidates:
+        if name not in seen:
+            seen.add(name)
+            deduped.append(name)
+    return deduped
+
 
 def _snow_search_incident(incident_number):
     """
@@ -1713,10 +1779,12 @@ def _snow_search_incident(incident_number):
 
 def _build_incident_details_response(record):
     """Maps a raw ServiceNow incident record onto the frontend's expected field names."""
-    return {
+    data = {
         output_key: _extract_field(record, snow_field)
         for output_key, snow_field in INCIDENT_FIELD_MAP.items()
     }
+    data["servers"] = _collect_server_names_from_incident(record)
+    return data
 
 
 @require_GET
