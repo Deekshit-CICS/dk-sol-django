@@ -125,6 +125,31 @@
         .evidence-stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
         .evidence-stat { background: rgba(0,113,227,0.05); border-radius: 12px; padding: 12px 14px; }
         .evidence-stat .val { font-size: 1.05rem; font-weight: 700; margin-bottom: 0; }
+        .bar-chart { margin: 10px 0 16px; }
+        .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+        .bar-label { width: 120px; flex-shrink: 0; font-size: 0.72rem; color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bar-track { flex: 1; height: 8px; background: rgba(0,0,0,0.06); border-radius: 6px; overflow: hidden; }
+        .bar-fill { height: 100%; border-radius: 6px; transition: width 0.4s ease; }
+        .bar-pct { width: 36px; flex-shrink: 0; text-align: right; font-size: 0.72rem; font-weight: 600; color: var(--text-main); }
+        .metric-subtabs { display: inline-flex; background: rgba(0,0,0,0.05); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
+        .metric-subtab { border: none; background: transparent; padding: 6px 14px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; color: var(--text-sec); cursor: pointer; transition: 0.15s; }
+        .metric-subtab.active { background: #fff; color: var(--text-main); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .metric-subtabs-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+        .metric-subtabs-row .metric-subtabs { margin-bottom: 0; }
+        .time-range-picker { position: relative; }
+        .trp-toggle { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; color: var(--text-main); cursor: pointer; }
+        .trp-toggle:hover { border-color: var(--blue); color: var(--blue); }
+        .trp-menu { display: none; position: absolute; right: 0; top: calc(100% + 6px); background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 10px; z-index: 50; width: 260px; }
+        .trp-menu.open { display: block; }
+        .trp-quick-options { display: flex; flex-direction: column; gap: 2px; }
+        .trp-quick-options button { text-align: left; background: none; border: none; padding: 7px 8px; border-radius: 6px; font-size: 0.78rem; color: var(--text-main); cursor: pointer; width: 100%; }
+        .trp-quick-options button:hover { background: rgba(0,113,227,0.08); color: var(--blue); }
+        .trp-divider { height: 1px; background: var(--border); margin: 8px 0; }
+        .trp-custom-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-sec); font-weight: 700; margin-bottom: 6px; }
+        .trp-input { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 0.75rem; margin-bottom: 6px; font-family: inherit; }
+        .trp-to { font-size: 0.68rem; color: var(--text-sec); text-align: center; margin: -2px 0 6px; }
+        .trp-apply-btn { width: 100%; background: var(--blue); color: #fff; border: none; border-radius: 6px; padding: 7px; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
+        .trp-apply-btn:hover { opacity: 0.9; }
         .evidence-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.8rem; }
         .evidence-table th { text-align: left; font-size: 0.63rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-sec); padding: 8px 6px; border-bottom: 1px solid var(--border); }
         .evidence-table td { padding: 8px 6px; border-bottom: 1px solid rgba(0,0,0,0.04); }
@@ -201,6 +226,10 @@
                 <div class="search-container" style="margin:0; width:100%;">
                     <i class="bi bi-search" style="position: absolute; left: 15px; top: 12px; color: var(--text-sec);"></i>
                     <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch(event)">
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;" title="When checked, pressing Enter always starts a fresh triage — even if this incident was already triaged successfully. When unchecked, an existing successful triage is reused automatically.">
+                    <input type="checkbox" id="forceRetriageCheckbox" style="cursor:pointer; margin:0;">
+                    <label for="forceRetriageCheckbox" class="small text-muted" style="cursor:pointer; white-space:nowrap; margin:0;">Force Retriage</label>
                 </div>
                 <button id="tryDemoBtn" class="btn-fw-check" style="white-space:nowrap; flex-shrink:0;" onclick="tryDemoData()">
                     <i class="bi bi-magic"></i> Try Demo Data
@@ -325,15 +354,6 @@
             <div class="fw-bold mb-1" id="resultTitle" style="font-size:1.15rem;">Triage Successful</div>
             <div class="text-muted small mb-2" id="resultDetail">Incident correlated successfully.</div>
             <button class="btn-triage-done" style="width:100%;" onclick="closeTriage()">Done</button>
-        </div>
-        <div id="triageConfirm" style="display:none;">
-            <div class="confirm-icon-wrap"><i class="bi bi-arrow-repeat" style="font-size:1.6rem; color:#ff9f0a;"></i></div>
-            <div class="fw-bold mb-1" style="font-size:1.1rem;">Already Triaged</div>
-            <div class="text-muted small mb-3">Incident <b id="confirmIncidentId">—</b> has already been triaged. Redo the triage?</div>
-            <div class="triage-btn-row">
-                <button class="btn-triage-secondary" onclick="keepTriageSuccessful()">Keep Successful</button>
-                <button class="btn-triage-done" style="margin-top:0;" onclick="confirmRedoTriage()">Redo Triage</button>
-            </div>
         </div>
         <div id="triageInfo" style="display:none;">
             <div class="confirm-icon-wrap" style="background: rgba(0,113,227,0.12);">
@@ -526,6 +546,26 @@
      * asset panel; `elastic_query_meta` (the underlying Elastic query) isn't
      * surfaced in the UI.
      */
+    function mapChangesRaw(changesRaw, inc) {
+        return (changesRaw || []).map(item => ({
+            changeNumber: item.change_number || item.chg || item.number || 'Unknown',
+            submitter: item.submitter || item.submitted_by || item.requested_by,
+            affectedCi: item.affected_ci || item.affected_ci_name || item.ci || item.asset,
+            changeCoordinator: item.change_coordinator || item.coordinator,
+            startTime: item.start_time || item.planned_start || item.start,
+            endTime: item.end_time || item.planned_end || item.end,
+            status: item.status,
+            appId: item.app_id || item.application || (inc && inc.app),
+            alarmSuppressionRequests: item.alarm_suppression_requests || item.u_alarm_suppression || [],
+            impactedCis: (item.impacted_cis || item.impacted_ci_list || item.impacted_configuration_items || []).map(x => ({
+                ciName: x.ci_name || x.name || x.hostname || 'Unknown',
+                suppressionStatus: x.suppression_status || x.suppressed_status ||
+                    (x.suppressed != null ? (x.suppressed ? 'Suppressed' : 'Not Suppressed') : 'N/A'),
+                suppressionRequestNumber: x.suppression_request_number || x.suppression_req || x.suppression_ticket || 'N/A'
+            }))
+        }));
+    }
+
     function applyIncidentDetails(inc, data) {
         const session  = (data.session && data.session[0]) || {};
         const metadata = (data.metadata && data.metadata[0]) || {};
@@ -542,23 +582,10 @@
         // Change(s) — an incident can have zero, one, or multiple linked changes.
         // Supports either data.changes (array) or a single data.change object;
         // falls back to session.change_number alone if that's all the API sends.
+        // This is just the initial state from the bundled /details/ response —
+        // showChgPanel() replaces it with a live ServiceNow fetch on first open.
         const changesRaw = data.changes || (data.change ? [data.change] : (session.change_number ? [{ change_number: session.change_number }] : []));
-        inc.changes = changesRaw.map(item => ({
-            changeNumber: item.change_number || item.chg || item.number || 'Unknown',
-            submitter: item.submitter || item.submitted_by || item.requested_by,
-            affectedCi: item.affected_ci || item.affected_ci_name || item.ci || item.asset,
-            changeCoordinator: item.change_coordinator || item.coordinator,
-            startTime: item.start_time || item.planned_start || item.start,
-            endTime: item.end_time || item.planned_end || item.end,
-            status: item.status,
-            appId: item.app_id || item.application || inc.app,
-            impactedCis: (item.impacted_cis || item.impacted_ci_list || item.impacted_configuration_items || []).map(x => ({
-                ciName: x.ci_name || x.name || x.hostname || 'Unknown',
-                suppressionStatus: x.suppression_status || x.suppressed_status ||
-                    (x.suppressed != null ? (x.suppressed ? 'Suppressed' : 'Not Suppressed') : 'N/A'),
-                suppressionRequestNumber: x.suppression_request_number || x.suppression_req || x.suppression_ticket || 'N/A'
-            }))
-        }));
+        inc.changes = mapChangesRaw(changesRaw, inc);
 
         // Triage run metadata
         inc.triggered_by = session.triggered_by || inc.triggered_by;
@@ -704,7 +731,10 @@
 
     /* ---------- Detail panel logic ---------- */
 
+    let panelToken = 0; // bumped every openPanel() call — lets async completions detect they've been superseded
+
     function openPanel(eyebrow, title, bodyHtml) {
+        panelToken++;
         document.getElementById('panel-eyebrow').innerText = eyebrow;
         document.getElementById('panel-title').innerText = title;
         document.getElementById('panel-body').innerHTML = bodyHtml;
@@ -757,21 +787,72 @@
         `);
     }
 
+    let currentChangePanelInc = null; // tracks which incident's change panel is open, to guard async writes
+
     function showChgPanel() {
-        if(!currentInc) return;
+        if (!currentInc) return;
+        currentChangePanelInc = currentInc;
         const inc = currentInc;
-        const changes = inc.changes || [];
-        if(changes.length === 0) {
-            openPanel('Linked Change', 'No Change Linked', `
-                <div class="panel-empty">
-                    <i class="bi bi-link-45deg"></i>
-                    This incident has no correlated change record.
-                </div>
-            `);
+
+        if (inc.changesLive) {
+            renderChgPanelFromCache(inc, false);
             return;
         }
-        const title = changes.length === 1 ? changes[0].changeNumber : `${changes.length} Linked Changes`;
-        openPanel('Linked Change', title, renderChangesBody(changes));
+
+        // Show whatever came bundled with the incident (if anything) while
+        // the live ServiceNow fetch is in flight, rather than a blank panel.
+        renderChgPanelFromCache(inc, true);
+        loadLiveChanges(inc);
+    }
+
+    function renderChgPanelFromCache(inc, loading) {
+        const changes = inc.changes || [];
+        const title = changes.length === 1 ? changes[0].changeNumber
+            : changes.length > 1 ? `${changes.length} Linked Changes`
+            : 'No Change Linked';
+
+        const loadingNote = loading
+            ? `<div class="text-muted small" style="margin-bottom:12px;"><i class="bi bi-hourglass-split"></i> Refreshing from ServiceNow…</div>`
+            : '';
+
+        const body = changes.length
+            ? renderChangesBody(changes)
+            : `<div class="panel-empty"><i class="bi bi-link-45deg"></i>This incident has no correlated change record.</div>`;
+
+        openPanel('Linked Change', title, loadingNote + body);
+    }
+
+    async function loadLiveChanges(inc) {
+        const myToken = panelToken; // captured after renderChgPanelFromCache's openPanel() bumped it
+        try {
+            const data = await fetchLiveChanges(inc.id, inc.app);
+            inc.changes = mapChangesRaw(data.changes || [], inc);
+            inc.changesLive = true;
+
+            const chgCard = document.getElementById('node-chg');
+            if (inc.changes.length === 0) {
+                document.getElementById('d-chg').innerText = 'N/A';
+                document.getElementById('chg-status-text').innerText = 'No linked change';
+                chgCard.classList.add('node-disabled');
+            } else {
+                document.getElementById('d-chg').innerText = inc.changes.length === 1
+                    ? inc.changes[0].changeNumber
+                    : `${inc.changes.length} Linked Changes`;
+                document.getElementById('chg-status-text').innerText = 'Correlation Status';
+                chgCard.classList.remove('node-disabled');
+            }
+
+            if (currentChangePanelInc === inc && panelToken === myToken) {
+                renderChgPanelFromCache(inc, false);
+            }
+        } catch (err) {
+            console.error('live changes fetch failed', err);
+            if (currentChangePanelInc === inc && panelToken === myToken) {
+                const errorNote = `<div class="panel-empty"><i class="bi bi-exclamation-triangle"></i>Failed to load live change data from ServiceNow.</div>`;
+                const fallback = (inc.changes && inc.changes.length) ? renderChangesBody(inc.changes) : '';
+                document.getElementById('panel-body').innerHTML = errorNote + fallback;
+            }
+        }
     }
 
     function renderChangesBody(changes) {
@@ -819,6 +900,10 @@
                     <div><div class="label">Start Time</div><div class="val">${chg.startTime || 'N/A'}</div></div>
                     <div><div class="label">End Time</div><div class="val">${chg.endTime || 'N/A'}</div></div>
                 </div>
+                <div class="label" style="margin-top:14px;">Alarm Suppression Requests</div>
+                <div class="val">${(chg.alarmSuppressionRequests && chg.alarmSuppressionRequests.length)
+                    ? chg.alarmSuppressionRequests.join(', ')
+                    : '<span class="text-muted">There was no suppression request</span>'}</div>
                 ${impactedTable}
             </div>
         `;
@@ -839,6 +924,7 @@
     }
 
     async function loadAssetFullDetails(ci) {
+        const myToken = panelToken; // snapshot the panel that was open when this fetch started
         try {
             const data = await fetchAssetDetails(currentInc.id, ci.id || ci.name);
             ci.fullDetails = normalizeAssetDetails(data, ci);
@@ -847,8 +933,9 @@
             console.error('asset details load failed', err);
             ci.fullDetailsError = err.message;
         }
-        // Only repaint if this asset's panel is still the one open
-        if (currentAssetPanelCi === ci && document.getElementById('panel-body')) {
+        // Only repaint if this asset's panel is still the one open — a different
+        // panel (or a redo) opened in the meantime would have bumped panelToken.
+        if (currentAssetPanelCi === ci && panelToken === myToken && document.getElementById('panel-body')) {
             document.getElementById('panel-body').innerHTML = renderAssetDetailsBody(ci);
         }
     }
@@ -1032,26 +1119,21 @@
 
     const EVIDENCE_TAB_LABELS = {
         cpu: 'CPU metrics', memory: 'memory metrics', disk: 'disk metrics',
-        network: 'network data', health: 'health check', sslcerts: 'SSL certificates'
+        network: 'network data', health: 'health check', sslcerts: 'SSL certificates',
+        raw: 'raw log data'
     };
 
     function fetchEvidenceTabData(tab, incId, assetId) {
         switch (tab) {
             case 'health':    return fetchAssetHealthCheck(incId, assetId);
             case 'sslcerts':  return fetchAssetSslCerts(incId, assetId);
-            default:          return fetchEvidenceMetric(incId, assetId, tab); // cpu / memory / disk / network
+            default:          return fetchEvidenceMetric(incId, assetId, tab); // cpu / memory / disk / network / raw
         }
     }
 
     async function loadEvidenceTab(ci, tab) {
         const contentEl = document.getElementById('evidenceTabContent');
         if (!contentEl) return; // panel closed/rebuilt in the meantime
-
-        if (tab === 'raw') {
-            const logText = ci.log || (DEMO_MODE ? generateDemoRawLog(ci) : null);
-            contentEl.innerHTML = `<div class="label">Raw Log Output</div><pre>${logText || 'No evidence available yet.'}</pre>`;
-            return;
-        }
 
         if (tab === 'firewall') {
             // Interactive, on-demand — no auto-fetch. Renders the form (with
@@ -1093,7 +1175,8 @@
         disk: renderDiskTab,
         network: renderNetworkTab,
         health: renderHealthCheckTab,
-        sslcerts: renderSslCertsTab
+        sslcerts: renderSslCertsTab,
+        raw: renderRawLogTab
     };
 
     function renderEvidenceTab(tab, data) {
@@ -1103,48 +1186,261 @@
         contentEl.innerHTML = renderer ? renderer(data) : renderMetricTab(tab, data);
     }
 
+    function renderRawLogTab(data) {
+        lastMetricTabType = 'raw';
+        lastMetricTabData = data;
+
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+
+        return `
+            ${renderMetricSubTabBar(false)}
+            ${windowNote}
+            <div class="label">Raw Log Output</div>
+            <pre>${section.log || 'No evidence available yet.'}</pre>
+        `;
+    }
+
+    function barColor(pct) {
+        if (pct >= 85) return '#ff3b30';
+        if (pct >= 60) return '#ff9f0a';
+        return 'var(--blue)';
+    }
+
+    function renderBarChart(items) {
+        if (!items.length) return '';
+        const rows = items.map(item => {
+            const pct = Math.min(100, Math.max(0, item.pct));
+            return `
+                <div class="bar-row">
+                    <div class="bar-label" title="${item.label}">${item.label}</div>
+                    <div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${barColor(pct)};"></div></div>
+                    <div class="bar-pct">${item.pct}%</div>
+                </div>`;
+        }).join('');
+        return `<div class="bar-chart">${rows}</div>`;
+    }
+
+    let currentMetricSubTab = 'current'; // shared 'historic' | 'current' toggle for CPU/Memory/Disk/Network
+    let lastMetricTabType = null;        // remembers what to re-render when the sub-tab is switched
+    let lastMetricTabData = null;
+
+    // Time-range picker state for the Live sub-tab (CPU/Memory/Disk/Network
+    // only — Raw Log keeps the fixed trailing window). Shared/global, same
+    // pattern as currentMetricSubTab above. null start/end = use the
+    // backend's own default trailing window, same as before this feature.
+    let liveRangeStart = null;
+    let liveRangeEnd = null;
+    let liveRangeLabel = 'Live';
+
+    function switchMetricSubTab(sub) {
+        currentMetricSubTab = sub;
+        if (!lastMetricTabType || !lastMetricTabData) return;
+        renderEvidenceTab(lastMetricTabType, lastMetricTabData);
+    }
+
+    function renderMetricSubTabBar(showRangePicker) {
+        const pickerHtml = (showRangePicker && currentMetricSubTab === 'current') ? renderTimeRangePicker() : '';
+        return `
+            <div class="metric-subtabs-row">
+                <div class="metric-subtabs">
+                    <button class="metric-subtab${currentMetricSubTab === 'current' ? ' active' : ''}" onclick="switchMetricSubTab('current')">Live</button>
+                    <button class="metric-subtab${currentMetricSubTab === 'historic' ? ' active' : ''}" onclick="switchMetricSubTab('historic')">Historic</button>
+                </div>
+                ${pickerHtml}
+            </div>
+        `;
+    }
+
+    function toDatetimeLocalValue(isoString) {
+        // Converts a stored ISO/UTC string back into the local-time
+        // "YYYY-MM-DDTHH:mm" format a <input type="datetime-local"> needs
+        // for its value — using local getters (getFullYear/getHours/etc.,
+        // not the UTC variants), so this correctly reflects the value in
+        // whatever timezone the browser is running in (e.g. EST), not UTC.
+        if (!isoString) return '';
+        const d = new Date(isoString);
+        if (isNaN(d.getTime())) return '';
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function renderTimeRangePicker() {
+        const startVal = toDatetimeLocalValue(liveRangeStart);
+        const endVal = toDatetimeLocalValue(liveRangeEnd);
+        return `
+            <div class="time-range-picker">
+                <button class="trp-toggle" onclick="toggleTimeRangeMenu(event)">
+                    <i class="bi bi-calendar3"></i> ${liveRangeLabel} <i class="bi bi-chevron-down" style="font-size:0.6rem;"></i>
+                </button>
+                <div class="trp-menu" id="trpMenu">
+                    <div class="trp-quick-options">
+                        <button onclick="applyQuickRange(5, '5 minutes')">Last 5 minutes</button>
+                        <button onclick="applyQuickRange(15, '15 minutes')">Last 15 minutes</button>
+                        <button onclick="applyQuickRange(60, '1 hour')">Last 1 hour</button>
+                        <button onclick="applyQuickRange(240, '4 hours')">Last 4 hours</button>
+                        <button onclick="applyQuickRange(1440, '24 hours')">Last 24 hours</button>
+                    </div>
+                    <div class="trp-divider"></div>
+                    <div class="trp-custom">
+                        <div class="trp-custom-label">Custom range</div>
+                        <input type="datetime-local" id="trpStart" class="trp-input" value="${startVal}">
+                        <div class="trp-to">to</div>
+                        <input type="datetime-local" id="trpEnd" class="trp-input" value="${endVal}">
+                        <button class="trp-apply-btn" onclick="applyCustomRange()">Apply</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function toggleTimeRangeMenu(e) {
+        if (e) e.stopPropagation();
+        const menu = document.getElementById('trpMenu');
+        if (!menu) return;
+        const isOpen = menu.classList.contains('open');
+        document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        if (!isOpen) menu.classList.add('open');
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.time-range-picker')) {
+            document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        }
+    });
+
+    function toLocalIsoString(d) {
+        // Formats a Date's LOCAL wall-clock fields (getHours/getMinutes/etc,
+        // not the UTC variants) as an ISO-shaped string with NO 'Z' or
+        // offset suffix — e.g. "2026-08-21T14:30:00". This intentionally
+        // sends the exact time the user selected/sees on screen, not its
+        // UTC equivalent (unlike .toISOString(), which would shift it by
+        // the browser's UTC offset — 4-5 hours for EST/EDT).
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function applyQuickRange(minutes, label) {
+        const end = new Date();
+        const start = new Date(end.getTime() - minutes * 60000);
+        liveRangeStart = toLocalIsoString(start);
+        liveRangeEnd = toLocalIsoString(end);
+        liveRangeLabel = 'Last ' + label;
+        document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        refreshLiveRangeData();
+    }
+
+    function applyCustomRange() {
+        const startInput = document.getElementById('trpStart');
+        const endInput = document.getElementById('trpEnd');
+        if (!startInput.value || !endInput.value) return;
+        const start = new Date(startInput.value);
+        const end = new Date(endInput.value);
+        if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+            alert('Please select a valid start and end time (start must be before end).');
+            return;
+        }
+        liveRangeStart = toLocalIsoString(start);
+        liveRangeEnd = toLocalIsoString(end);
+        liveRangeLabel = formatRangeLabel(start, end);
+        document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        refreshLiveRangeData();
+    }
+
+    function formatRangeLabel(start, end) {
+        const fmt = (d) => d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        return `${fmt(start)} – ${fmt(end)}`;
+    }
+
+    function refreshLiveRangeData() {
+        if (!currentCi) return;
+        ['cpu', 'memory', 'disk', 'network'].forEach(t => {
+            if (currentCi.metricsCache) delete currentCi.metricsCache[t];
+        });
+        if (['cpu', 'memory', 'disk', 'network'].includes(currentEvidenceTab)) {
+            loadEvidenceTab(currentCi, currentEvidenceTab);
+        }
+    }
+
+    function getLiveRangeParams() {
+        if (!['cpu', 'memory', 'disk', 'network'].includes(currentEvidenceTab)) return null;
+        if (liveRangeStart && liveRangeEnd) return { start: liveRangeStart, end: liveRangeEnd };
+        return null;
+    }
+
+    function renderLiveWindowNote(section) {
+        if (liveRangeStart && liveRangeEnd) {
+            return `<div class="text-muted small" style="margin:-4px 0 12px;">${liveRangeLabel}</div>`;
+        }
+        return section.captured_at
+            ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>`
+            : '';
+    }
+
     function renderMetricTab(tab, data) {
+        lastMetricTabType = tab;
+        lastMetricTabData = data;
+
         const label = tab === 'cpu' ? 'CPU' : 'Memory';
-        const histAvg = data.historical_avg != null ? `${data.historical_avg}%` : 'N/A';
-        const curAvg = data.current_avg != null ? `${data.current_avg}%` : 'N/A';
-        const processes = (data.top_processes || data.processes || []).slice(0, 10);
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const avg = section.avg != null ? `${section.avg}%` : 'N/A';
+        const processes = (section.top_processes || section.processes || []).slice(0, 10);
 
         const rows = processes.map((p, i) => {
             const pct = p[`${tab}_percent`] ?? p.percent ?? p.value ?? 0;
+            const user = p.user_name || p.user || p['user.name'] || 'N/A';
+            const pid = (p.pid != null) ? p.pid : ((p.process_pid != null) ? p.process_pid : 'N/A');
             return `
                 <tr>
                     <td>${i + 1}</td>
                     <td>${p.process || p.name || 'Unknown'}</td>
+                    <td>${user}</td>
+                    <td>${pid}</td>
                     <td>${pct}%</td>
                 </tr>`;
         }).join('');
 
-        const windowNote = data.window_start
-            ? `<div class="text-muted small" style="margin:-8px 0 12px;">Since incident opened${data.window_end ? ` (${data.window_start} – ${data.window_end})` : ` (${data.window_start})`}</div>`
-            : '';
+        const chartItems = processes.map(p => ({
+            label: p.process || p.name || 'Unknown',
+            pct: p[`${tab}_percent`] ?? p.percent ?? p.value ?? 0
+        }));
+
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : renderLiveWindowNote(section);
 
         return `
-            <div class="evidence-stat-row">
-                <div class="evidence-stat"><div class="label">Historical Avg ${label}</div><div class="val">${histAvg}</div></div>
-                <div class="evidence-stat"><div class="label">Current Avg ${label}</div><div class="val">${curAvg}</div></div>
+            ${renderMetricSubTabBar(true)}
+            <div class="evidence-stat-row" style="grid-template-columns:1fr;">
+                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Live'} Avg ${label}</div><div class="val">${avg}</div></div>
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Processes by ${label} Usage</div>
+            ${renderBarChart(chartItems)}
             <table class="evidence-table">
-                <thead><tr><th>#</th><th>Process</th><th>${label} %</th></tr></thead>
-                <tbody>${rows || `<tr><td colspan="3" class="text-muted small">No process data available.</td></tr>`}</tbody>
+                <thead><tr><th>#</th><th>Process</th><th>User</th><th>PID</th><th>${label} %</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="5" class="text-muted small">No process data available.</td></tr>`}</tbody>
             </table>
         `;
     }
 
     function renderDiskTab(data) {
-        const histAvg = data.historical_avg != null ? `${data.historical_avg}%` : 'N/A';
-        const curAvg = data.current_avg != null ? `${data.current_avg}%` : 'N/A';
-        const windowNote = data.window_start
-            ? `<div class="text-muted small" style="margin:-8px 0 12px;">Since incident opened${data.window_end ? ` (${data.window_start} – ${data.window_end})` : ` (${data.window_start})`}</div>`
-            : '';
+        lastMetricTabType = 'disk';
+        lastMetricTabData = data;
 
-        const mounts = data.top_mount_points || data.mount_points || data.mounts || [];
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const avg = section.avg != null ? `${section.avg}%` : 'N/A';
+
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : renderLiveWindowNote(section);
+
+        const mounts = section.top_mount_points || section.mount_points || section.mounts || [];
         const sorted = [...mounts]
             .sort((a, b) => (b.percent_used ?? b.used_percent ?? b.percent ?? 0) - (a.percent_used ?? a.used_percent ?? a.percent ?? 0))
             .slice(0, 10);
@@ -1161,13 +1457,19 @@
                 </tr>`;
         }).join('');
 
+        const chartItems = sorted.map(m => ({
+            label: m.mount_point || m.path || m.mount || 'Unknown',
+            pct: m.percent_used ?? m.used_percent ?? m.percent ?? 0
+        }));
+
         return `
-            <div class="evidence-stat-row">
-                <div class="evidence-stat"><div class="label">Historical Avg Disk</div><div class="val">${histAvg}</div></div>
-                <div class="evidence-stat"><div class="label">Current Avg Disk</div><div class="val">${curAvg}</div></div>
+            ${renderMetricSubTabBar(true)}
+            <div class="evidence-stat-row" style="grid-template-columns:1fr;">
+                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Live'} Avg Disk</div><div class="val">${avg}</div></div>
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Mount Points by Storage Consumed</div>
+            ${renderBarChart(chartItems)}
             <table class="evidence-table">
                 <thead><tr><th>#</th><th>Mount Point</th><th>Used</th><th>Total</th><th>% Used</th></tr></thead>
                 <tbody>${rows || `<tr><td colspan="5" class="text-muted small">No mount point data available.</td></tr>`}</tbody>
@@ -1176,7 +1478,16 @@
     }
 
     function renderNetworkTab(data) {
-        const interfaces = data.interfaces || data.drivers || data.results || [];
+        lastMetricTabType = 'network';
+        lastMetricTabData = data;
+
+        const isHistoric = currentMetricSubTab === 'historic';
+        const section = data[currentMetricSubTab] || {};
+        const windowNote = isHistoric
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
+            : renderLiveWindowNote(section);
+
+        const interfaces = section.interfaces || section.drivers || section.results || [];
         const rows = interfaces.map(nic => `
             <tr>
                 <td>${nic.driver || nic.name || nic.interface || 'Unknown'}</td>
@@ -1187,6 +1498,8 @@
         `).join('');
 
         return `
+            ${renderMetricSubTabBar(true)}
+            ${windowNote}
             <div class="label">Network Drivers &amp; Traffic</div>
             <table class="evidence-table">
                 <thead><tr><th>Driver / Interface</th><th>Traffic In</th><th>Traffic Out</th><th>Flow Count</th></tr></thead>
@@ -1401,10 +1714,11 @@
             return;
         }
         try {
+            await ensureCsrfCookie();
             await fetch(AI_FEEDBACK_URL(incId), {
                 method: 'POST',
                 credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                headers: csrfHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ feedback, context: contextText })
             });
         } catch (e) {
@@ -1526,7 +1840,7 @@
             if (includeEvidence && currentCi) {
                 currentCi.metricsCache = currentCi.metricsCache || {};
                 for (const tab of selectedEvidenceTabs) {
-                    if (tab === 'raw' || currentCi.metricsCache[tab]) continue;
+                    if (currentCi.metricsCache[tab]) continue;
                     try {
                         currentCi.metricsCache[tab] = await fetchEvidenceTabData(tab, inc.id, currentCi.id || currentCi.name);
                     } catch (e) {
@@ -1549,7 +1863,7 @@
                 evidenceTabs: selectedEvidenceTabs
             });
 
-            renderAiAssistantWindow(win, prompt, summary);
+            await renderAiAssistantWindow(win, prompt, summary);
         } catch (err) {
             console.error('failed to prepare AI assistant context', err);
             if (win && !win.closed) {
@@ -1644,7 +1958,11 @@
                 sections.push('TECHNICAL EVIDENCE\nNo asset currently selected.');
             } else {
                 const text = selections.evidenceTabs.map(tab => {
-                    if (tab === 'raw') return `Raw Log:\n${currentCi.log || 'not loaded'}`;
+                    if (tab === 'raw') {
+                        const raw = currentCi.metricsCache && currentCi.metricsCache.raw;
+                        const logText = raw ? (raw.current && raw.current.log) || (raw.historic && raw.historic.log) : null;
+                        return `Raw Log:\n${logText || currentCi.log || 'not loaded'}`;
+                    }
                     const data = currentCi.metricsCache && currentCi.metricsCache[tab];
                     const label = (EVIDENCE_TABS.find(t => t.id === tab) || {}).label || tab;
                     return `${label}:\n${data ? JSON.stringify(data) : 'not loaded'}`;
@@ -1668,422 +1986,59 @@
      * the flat text actually sent to the AI. Mirrors DEMO_MODE so replies
      * are simulated in the demo build and hit AI_ASSISTANT_CHAT_URL for
      * real once that's wired to a live backend.
+     *
+     * The actual markup/CSS/JS lives in ai-assistant-popup.html (a sibling
+     * file, fetched at runtime) rather than inline here — this function's
+     * job is just to fetch that template and substitute six placeholder
+     * tokens with real values, then write the result into the popup
+     * window. See ai-assistant-popup.html's own header comment for the
+     * full placeholder list.
      */
-    function renderAiAssistantWindow(win, promptText, summary) {
+    async function renderAiAssistantWindow(win, promptText, summary) {
         if (!win || win.closed) {
             alert('The AI Assistant window was blocked or closed. Please allow pop-ups and try again.');
             return;
         }
+
+        let template;
+        try {
+            const res = await fetch(AI_ASSISTANT_POPUP_TEMPLATE_URL);
+            if (!res.ok) throw new Error(`Template fetch failed (HTTP ${res.status})`);
+            template = await res.text();
+        } catch (err) {
+            console.error('failed to load AI Assistant popup template', err);
+            if (!win.closed) {
+                win.document.body.innerHTML = `Failed to load the AI Assistant window template: ${err.message}`;
+            }
+            return;
+        }
+
         const promptJson = JSON.stringify(promptText).replace(/<\//g, '<\\/');
         const summaryJson = JSON.stringify(summary || {}).replace(/<\//g, '<\\/');
-        const chatUrlJson = JSON.stringify(AI_ASSISTANT_CHAT_URL);
-        const feedbackUrlJson = JSON.stringify(AI_ASSISTANT_FEEDBACK_URL);
 
-        const html = '<!DOCTYPE html>' +
-'<html lang="en">' +
-'<head>' +
-'<meta charset="UTF-8">' +
-'<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-'<title>Ops Console \u2014 Incident Copilot</title>' +
-'<link rel="preconnect" href="https://fonts.googleapis.com">' +
-'<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">' +
-'<style>' +
-':root {' +
-'  --apple-bg: #f5f5f7; --glass: rgba(255,255,255,0.9);' +
-'  --blue: #0071e3; --blue-bg: rgba(0,113,227,0.08);' +
-'  --green: #28cd41; --green-bg: rgba(40,205,65,0.08);' +
-'  --red: #ff3b30; --red-bg: rgba(255,59,48,0.08);' +
-'  --amber: #ff9f0a; --amber-bg: rgba(255,159,10,0.08);' +
-'  --text-main: #1d1d1f; --text-sec: #6e6e73;' +
-'  --border: rgba(0,0,0,0.08);' +
-'  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' +
-'  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;' +
-'}' +
-'* { box-sizing: border-box; }' +
-'body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color:var(--text-main); background:linear-gradient(135deg, #f5f5f7 0%, #ffffff 100%); font-size:14px; }' +
-'.nav-sidebar { width:212px; background:#fff; border-right:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; color:var(--text-sec); }' +
-'.nav-brand { display:flex; align-items:center; gap:10px; padding:18px 18px 14px; border-bottom:1px solid var(--border); }' +
-'.nav-brand-mark { width:26px; height:26px; border-radius:8px; background:linear-gradient(135deg, var(--blue), #34aadc); display:flex; align-items:center; justify-content:center; flex-shrink:0; }' +
-'.nav-brand-mark svg { width:15px; height:15px; }' +
-'.nav-brand-text { font-size:13px; font-weight:600; color:var(--text-main); line-height:1.3; }' +
-'.nav-brand-sub { font-size:10px; color:var(--text-sec); }' +
-'.nav-section { padding:14px 12px 4px; font-size:9.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:var(--text-sec); }' +
-'.nav-item { display:flex; align-items:center; gap:9px; padding:7px 12px; margin:1px 8px; border-radius:8px; font-size:12.5px; font-weight:500; cursor:default; color:var(--text-sec); }' +
-'.nav-item svg { width:14px; height:14px; flex-shrink:0; opacity:0.75; }' +
-'.nav-item.active { background:var(--blue-bg); color:var(--blue); }' +
-'.nav-item.active svg { opacity:1; }' +
-'.nav-spacer { flex:1; }' +
-'.nav-footer { display:flex; align-items:center; gap:10px; padding:13px 15px; border-top:1px solid var(--border); }' +
-'.avatar { width:24px; height:24px; border-radius:50%; background:var(--blue); color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex-shrink:0; }' +
-'.nav-footer-name { font-size:12px; font-weight:600; color:var(--text-main); }' +
-'.nav-footer-role { font-size:10px; color:var(--text-sec); }' +
-'.main-workspace { flex:1; display:flex; flex-direction:column; min-width:0; }' +
-'.top-bar { height:52px; padding:0 22px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:#fff; flex-shrink:0; }' +
-'.breadcrumb { font-size:12.5px; color:var(--text-sec); display:flex; align-items:center; gap:6px; }' +
-'.breadcrumb strong { color:var(--text-main); font-weight:600; }' +
-'.route-indicator { display:flex; align-items:center; gap:7px; font-size:11.5px; font-weight:600; padding:6px 12px; border-radius:8px; border:1px solid var(--border); }' +
-'.route-indicator.mcp { color:var(--text-sec); background:rgba(0,0,0,0.03); border-color:var(--border); }' +
-'.route-indicator.langgraph { color:var(--blue); background:var(--blue-bg); border-color:rgba(0,113,227,0.25); }' +
-'.route-dot { width:6px; height:6px; border-radius:50%; background:currentColor; }' +
-'.chat-view { flex:1; padding:24px 7%; overflow-y:auto; }' +
-'.exchange { margin-bottom:28px; max-width:100%; }' +
-'.msg-row { display:flex; margin-bottom:4px; }' +
-'.msg-row.user { justify-content:flex-end; }' +
-'.bubble-user { background:var(--blue); color:#fff; border-radius:16px 16px 4px 16px; padding:10px 15px; font-size:13.5px; max-width:80%; white-space:pre-wrap; }' +
-'.msg-meta { font-size:11px; color:var(--text-sec); margin-top:4px; text-align:right; }' +
-'.assistant-block { margin-top:14px; }' +
-'.assistant-block > * + * { margin-top:12px; }' +
-'.tool-chip { display:inline-flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--border); border-radius:10px; padding:6px 12px; font-size:11.5px; font-family:var(--font-mono); color:var(--text-sec); }' +
-'.tool-chip .dot { width:6px; height:6px; border-radius:50%; background:var(--blue); flex-shrink:0; }' +
-'.card { border:1px solid var(--border); border-radius:16px; background:#fff; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.03); }' +
-'.card-header { padding:13px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:10px; }' +
-'.card-id { font-family:var(--font-mono); font-size:12px; font-weight:600; color:var(--text-main); }' +
-'.card-body { padding:15px 16px; }' +
-'.card-desc { font-size:13.5px; margin-bottom:14px; color:var(--text-main); line-height:1.5; }' +
-'.field-grid { display:grid; grid-template-columns:1fr 1fr; gap:13px 22px; }' +
-'.field-label { font-size:9.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-sec); font-weight:700; margin-bottom:4px; }' +
-'.field-value { font-size:12.5px; color:var(--text-main); font-weight:500; }' +
-'.pill { display:inline-block; font-size:10px; font-weight:700; padding:3px 9px; border-radius:20px; letter-spacing:0.2px; }' +
-'.pill.p1 { background:var(--red-bg); color:var(--red); border:1px solid rgba(255,59,48,0.25); }' +
-'.pill.p2 { background:var(--amber-bg); color:var(--amber); border:1px solid rgba(255,159,10,0.25); }' +
-'.pill.progress { background:var(--blue-bg); color:var(--blue); border:1px solid rgba(0,113,227,0.25); }' +
-'.pill.done { background:var(--green-bg); color:var(--green); border:1px solid rgba(40,205,65,0.25); }' +
-'.trace { border:1px solid var(--border); border-radius:16px; background:#fff; overflow:hidden; }' +
-'.trace-step { display:flex; align-items:center; gap:10px; padding:9px 16px; font-size:12px; border-bottom:1px solid var(--border); }' +
-'.trace-step:last-child { border-bottom:none; }' +
-'.trace-step .check { width:15px; height:15px; border-radius:50%; background:var(--green-bg); border:1px solid rgba(40,205,65,0.3); display:flex; align-items:center; justify-content:center; flex-shrink:0; }' +
-'.trace-step .check svg { width:8px; height:8px; }' +
-'.trace-step .label { font-weight:600; color:var(--text-main); }' +
-'.thinking-chip { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--text-sec); font-style:italic; }' +
-'.thinking-chip .pulse { width:6px; height:6px; border-radius:50%; background:var(--blue); animation:pulse 1s infinite ease-in-out; }' +
-'@keyframes pulse { 0%,100% { opacity:0.3; } 50% { opacity:1; } }' +
-'.suggestion-row { display:flex; gap:8px; margin:0 7% 10px; flex-wrap:wrap; }' +
-'.suggestion-chip { font-size:11.5px; padding:6px 12px; border-radius:20px; border:1px solid var(--border); color:var(--text-sec); cursor:pointer; background:#fff; font-family:var(--font-mono); }' +
-'.suggestion-chip:hover { border-color:var(--blue); color:var(--blue); }' +
-'.command-bar { margin:0 7% 20px; border:1px solid var(--border); border-radius:14px; background:#fff; display:flex; align-items:center; padding:4px 6px 4px 14px; box-shadow:0 1px 2px rgba(15,23,42,0.04); }' +
-'.command-bar input { flex:1; border:none; outline:none; font-size:13px; padding:9px 0; font-family:var(--font-sans); }' +
-'.command-bar-send { width:30px; height:30px; border-radius:10px; background:var(--blue); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; }' +
-'.command-bar-send:disabled { opacity:0.5; cursor:default; }' +
-'.command-bar-send svg { width:13px; height:13px; color:#fff; }' +
-'.fb-row { display:flex; align-items:center; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }' +
-'.fb-btn { border:none; background:rgba(0,0,0,0.04); width:26px; height:26px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text-sec); transition:0.2s; }' +
-'.fb-btn:hover { background:rgba(0,0,0,0.08); }' +
-'.fb-btn.active-like { background:var(--green-bg); color:var(--green); }' +
-'.fb-btn.active-dislike { background:var(--red-bg); color:var(--red); }' +
-'</style>' +
-'</head>' +
-'<body>' +
-'<div class="nav-sidebar">' +
-'  <div class="nav-brand">' +
-'    <div class="nav-brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>' +
-'    <div><div class="nav-brand-text">Ops Console</div><div class="nav-brand-sub">Incident Copilot</div></div>' +
-'  </div>' +
-'  <div class="nav-section">Workspace</div>' +
-'  <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> Incident copilot</div>' +
-'  <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg> Triage agent</div>' +
-'  <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Run history</div>' +
-'  <div class="nav-spacer"></div>' +
-'  <div class="nav-footer"><div class="avatar" id="userAvatar">AI</div><div><div class="nav-footer-name">Incident Copilot</div><div class="nav-footer-role">Context-aware session</div></div></div>' +
-'</div>' +
-'<div class="main-workspace">' +
-'  <div class="top-bar">' +
-'    <div class="breadcrumb">Ops Console <span>/</span> <strong id="breadcrumbId">Incident Copilot</strong></div>' +
-'    <div class="route-indicator mcp" id="routeBadge"><span class="route-dot"></span><span id="routeBadgeText">Ready</span></div>' +
-'  </div>' +
-'  <div class="chat-view" id="log"></div>' +
-'  <div class="suggestion-row">' +
-'    <div class="suggestion-chip" onclick="askSuggestion(this)">Explain the root cause in more detail</div>' +
-'    <div class="suggestion-chip" onclick="askSuggestion(this)">Suggest the next remediation step</div>' +
-'    <div class="suggestion-chip" onclick="askSuggestion(this)">Any similar past incidents?</div>' +
-'  </div>' +
-'  <form class="command-bar" id="chatForm">' +
-'    <input id="chatInput" type="text" placeholder="Ask a follow-up question\u2026" autocomplete="off">' +
-'    <button type="submit" class="command-bar-send" id="sendBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>' +
-'  </form>' +
-'</div>' +
-'<script>' +
-'  var DEMO_MODE = ' + DEMO_MODE + ';' +
-'  var CHAT_URL = ' + chatUrlJson + ';' +
-'  var FEEDBACK_URL = ' + feedbackUrlJson + ';' +
-'  var initialPrompt = ' + promptJson + ';' +
-'  var contextSummary = ' + summaryJson + ';' +
-'  var chatHistory = [];' +
-'  var logEl = document.getElementById("log");' +
-'  document.getElementById("breadcrumbId").textContent = contextSummary.incidentId || "Incident Copilot";' +
-
-'  function esc(s) {' +
-'    var d = document.createElement("div");' +
-'    d.textContent = (s === null || s === undefined) ? "" : String(s);' +
-'    return d.innerHTML;' +
-'  }' +
-'  function nowTime() {' +
-'    var d = new Date();' +
-'    var h = d.getHours(), m = d.getMinutes();' +
-'    var ampm = h >= 12 ? "PM" : "AM";' +
-'    h = h % 12; if (h === 0) h = 12;' +
-'    return h + ":" + (m < 10 ? "0" : "") + m + " " + ampm;' +
-'  }' +
-'  function priorityPillClass(p) {' +
-'    var t = (p || "").toString().toLowerCase();' +
-'    if (t.indexOf("1") !== -1 || t.indexOf("critical") !== -1) return "p1";' +
-'    if (t.indexOf("2") !== -1 || t.indexOf("high") !== -1) return "p2";' +
-'    return "progress";' +
-'  }' +
-'  function statePillClass(s) {' +
-'    var t = (s || "").toString().toLowerCase();' +
-'    if (t.indexOf("complet") !== -1 || t.indexOf("success") !== -1 || t.indexOf("closed") !== -1 || t.indexOf("implement") !== -1) return "done";' +
-'    if (t.indexOf("fail") !== -1) return "p1";' +
-'    return "progress";' +
-'  }' +
-'  function setRoute(busy) {' +
-'    var badge = document.getElementById("routeBadge");' +
-'    var text = document.getElementById("routeBadgeText");' +
-'    if (busy) { badge.className = "route-indicator langgraph"; text.textContent = "Processing\u2026"; }' +
-'    else { badge.className = "route-indicator mcp"; text.textContent = "Ready"; }' +
-'  }' +
-
-'  function buildIncidentCard() {' +
-'    var inc = contextSummary.incident;' +
-'    var card = document.createElement("div");' +
-'    card.className = "card";' +
-'    card.innerHTML =' +
-'      \'<div class="card-header"><span class="card-id">\' + esc(contextSummary.incidentId) + \'</span><span class="pill \' + statePillClass(inc.state) + \'">\' + esc(inc.state || "Unknown") + \'</span></div>\' +' +
-'      \'<div class="card-body"><div class="card-desc">\' + esc(inc.desc) + \'</div><div class="field-grid">\' +' +
-'        \'<div><div class="field-label">Priority</div><div class="field-value"><span class="pill \' + priorityPillClass(inc.prio) + \'">\' + esc(inc.prio || "N/A") + \'</span></div></div>\' +' +
-'        \'<div><div class="field-label">Assigned To</div><div class="field-value">\' + esc(inc.assignedTo) + \'</div></div>\' +' +
-'        \'<div><div class="field-label">Assignment Group</div><div class="field-value">\' + esc(inc.group || "N/A") + \'</div></div>\' +' +
-'        \'<div><div class="field-label">App</div><div class="field-value">\' + esc(inc.app || "N/A") + \'</div></div>\' +' +
-'      \'</div></div>\';' +
-'    return card;' +
-'  }' +
-
-'  function buildChangeCard(c) {' +
-'    var card = document.createElement("div");' +
-'    card.className = "card";' +
-'    var impactedHtml = "None listed";' +
-'    if (c.impactedCis && c.impactedCis.length) {' +
-'      impactedHtml = c.impactedCis.map(function (ci) {' +
-'        var supp = (ci.suppressionRequestNumber && ci.suppressionRequestNumber !== "N/A") ? ("Ticket " + ci.suppressionRequestNumber) : "no suppression request raised";' +
-'        return esc(ci.ciName) + ": " + esc(ci.suppressionStatus) + " (" + esc(supp) + ")";' +
-'      }).join("<br>");' +
-'    }' +
-'    card.innerHTML =' +
-'      \'<div class="card-header"><span class="card-id">\' + esc(c.changeNumber) + \'</span><span class="pill \' + statePillClass(c.status) + \'">\' + esc(c.status || "Unknown") + \'</span></div>\' +' +
-'      \'<div class="card-body"><div class="field-grid">\' +' +
-'        \'<div><div class="field-label">Submitter</div><div class="field-value">\' + esc(c.submitter || "N/A") + \'</div></div>\' +' +
-'        \'<div><div class="field-label">Coordinator</div><div class="field-value">\' + esc(c.changeCoordinator || "N/A") + \'</div></div>\' +' +
-'        \'<div><div class="field-label">Start</div><div class="field-value">\' + esc(c.startTime || "N/A") + \'</div></div>\' +' +
-'        \'<div><div class="field-label">End</div><div class="field-value">\' + esc(c.endTime || "N/A") + \'</div></div>\' +' +
-'      \'</div><div style="margin-top:14px;"><div class="field-label">Impacted Servers</div><div class="field-value" style="font-weight:400; line-height:1.7;">\' + impactedHtml + \'</div></div></div>\';' +
-'    return card;' +
-'  }' +
-
-'  function buildAssetsCard() {' +
-'    var assets = contextSummary.assets || [];' +
-'    var card = document.createElement("div");' +
-'    card.className = "card";' +
-'    var rows = assets.map(function (ci) {' +
-'      var d = ci.fullDetails;' +
-'      var line = d ? (esc(d.name) + " \u2014 " + esc(d.manufacturer || "") + " " + esc(d.modelId || "") + ", " + esc(d.operatingSystem || "N/A")) : esc(ci.name);' +
-'      return \'<div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:12px;">\' + line + \'</div>\';' +
-'    }).join("");' +
-'    card.innerHTML = \'<div class="card-header"><span class="card-id">Asset Inventory</span></div><div class="card-body" style="padding-top:4px;">\' + (rows || \'<div class="field-value" style="font-weight:400;">No asset details loaded.</div>\') + \'</div>\';' +
-'    return card;' +
-'  }' +
-
-'  function buildEvidenceChip() {' +
-'    var ev = contextSummary.evidence;' +
-'    var chip = document.createElement("div");' +
-'    chip.className = "tool-chip";' +
-'    chip.innerHTML = \'<span class="dot"></span> Technical evidence (\' + esc(ev.assetName || "no asset") + \') &middot; \' + esc((ev.tabs || []).join(", "));' +
-'    return chip;' +
-'  }' +
-
-'  function buildTrace() {' +
-'    var trace = document.createElement("div");' +
-'    trace.className = "trace";' +
-'    var steps = ["Assembling context"];' +
-'    (contextSummary.included || []).forEach(function (s) { steps.push("Reviewed " + s.toLowerCase()); });' +
-'    steps.push("Generating response");' +
-'    trace.innerHTML = steps.map(function (s) {' +
-'      return \'<div class="trace-step"><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><span class="label">\' + esc(s) + \'</span></div>\';' +
-'    }).join("");' +
-'    return trace;' +
-'  }' +
-
-'  function addExchangeShell(userText) {' +
-'    var exch = document.createElement("div");' +
-'    exch.className = "exchange";' +
-'    var userRow = document.createElement("div");' +
-'    userRow.className = "msg-row user";' +
-'    var bubble = document.createElement("div");' +
-'    bubble.className = "bubble-user";' +
-'    bubble.textContent = userText;' +
-'    userRow.appendChild(bubble);' +
-'    exch.appendChild(userRow);' +
-'    var meta = document.createElement("div");' +
-'    meta.className = "msg-meta";' +
-'    meta.textContent = nowTime();' +
-'    exch.appendChild(meta);' +
-'    var block = document.createElement("div");' +
-'    block.className = "assistant-block";' +
-'    exch.appendChild(block);' +
-'    logEl.appendChild(exch);' +
-'    logEl.scrollTop = logEl.scrollHeight;' +
-'    return block;' +
-'  }' +
-
-'  function addThinkingChip(block) {' +
-'    var chip = document.createElement("div");' +
-'    chip.className = "thinking-chip";' +
-'    chip.innerHTML = \'<span class="pulse"></span>Thinking\u2026\';' +
-'    block.appendChild(chip);' +
-'    logEl.scrollTop = logEl.scrollHeight;' +
-'    return chip;' +
-'  }' +
-
-'  var feedbackCounter = 0;' +
-'  function submitFeedback(msgId, feedback, text) {' +
-'    if (DEMO_MODE || !FEEDBACK_URL) { console.log("[demo] feedback recorded", msgId, feedback); return; }' +
-'    fetch(FEEDBACK_URL, {' +
-'      method: "POST",' +
-'      credentials: "same-origin",' +
-'      headers: { "Content-Type": "application/json" },' +
-'      body: JSON.stringify({ message_id: msgId, feedback: feedback, message: text })' +
-'    }).catch(function (e) { console.error("feedback submit failed", e); });' +
-'  }' +
-'  function addReplyCard(block, text) {' +
-'    var card = document.createElement("div");' +
-'    card.className = "card";' +
-'    var msgId = "msg-" + (feedbackCounter++);' +
-'    card.innerHTML =' +
-'      \'<div class="card-body">\' +' +
-'      \'<div class="field-value" style="font-weight:400; line-height:1.7; white-space:pre-wrap;"></div>\' +' +
-'      \'<div class="fb-row">\' +' +
-'        \'<span style="font-size:11px; color:var(--text-sec);">Was this helpful?</span>\' +' +
-'        \'<button class="fb-btn" data-fb="like" title="Helpful"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M7 22V11M2 13v7a2 2 0 002 2h12.9a2 2 0 002-1.7l1.4-9A2 2 0 0018.3 9H14V4a2 2 0 00-2-2l-3 7v13"/></svg></button>\' +' +
-'        \'<button class="fb-btn" data-fb="dislike" title="Not helpful"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M17 2v11M22 11V4a2 2 0 00-2-2H7.1a2 2 0 00-2 1.7l-1.4 9A2 2 0 005.7 15H10v5a2 2 0 002 2l3-7V2"/></svg></button>\' +' +
-'      \'</div></div>\';' +
-'    card.querySelector(".field-value").textContent = text;' +
-'    var likeBtn = card.querySelector(\'[data-fb="like"]\');' +
-'    var dislikeBtn = card.querySelector(\'[data-fb="dislike"]\');' +
-'    var current = null;' +
-'    function applyState() {' +
-'      likeBtn.className = "fb-btn" + (current === "like" ? " active-like" : "");' +
-'      dislikeBtn.className = "fb-btn" + (current === "dislike" ? " active-dislike" : "");' +
-'    }' +
-'    likeBtn.addEventListener("click", function () { current = current === "like" ? null : "like"; applyState(); submitFeedback(msgId, current, text); });' +
-'    dislikeBtn.addEventListener("click", function () { current = current === "dislike" ? null : "dislike"; applyState(); submitFeedback(msgId, current, text); });' +
-'    block.appendChild(card);' +
-'    logEl.scrollTop = logEl.scrollHeight;' +
-'  }' +
-
-'  var DEMO_REPLIES = [' +
-'    "Based on the context shared, I would start by confirming whether the change window overlapped with the alert timestamps \u2014 that is the most common correlation I see in similar cases.",' +
-'    "Have you checked whether the suppression request (if any) was actually active during the incident window? A pending suppression would not have muted alerts.",' +
-'    "Given the asset details, I would also check recent patch history \u2014 if the last patch was applied close to the incident time, that is worth ruling in or out.",' +
-'    "It might help to compare the current resource averages against the historical baseline once more \u2014 a sustained deviation post-change is a strong signal.",' +
-'    "If none of the above pans out, escalating to the assignment group with this full context bundle is a reasonable next step."' +
-'  ];' +
-'  var demoReplyIndex = 0;' +
-
-'  function getAssistantReply(userText) {' +
-'    if (DEMO_MODE || !CHAT_URL) {' +
-'      return new Promise(function (resolve) {' +
-'        setTimeout(function () {' +
-'          var reply = DEMO_REPLIES[demoReplyIndex % DEMO_REPLIES.length];' +
-'          demoReplyIndex++;' +
-'          resolve(reply);' +
-'        }, 700);' +
-'      });' +
-'    }' +
-'    return fetch(CHAT_URL, {' +
-'      method: "POST",' +
-'      credentials: "same-origin",' +
-'      headers: { "Content-Type": "application/json" },' +
-'      body: JSON.stringify({ message: userText, history: chatHistory })' +
-'    }).then(function (res) {' +
-'      if (!res.ok) throw new Error("Assistant request failed (HTTP " + res.status + ")");' +
-'      return res.json();' +
-'    }).then(function (data) {' +
-'      return data.reply || data.message || "No response received.";' +
-'    });' +
-'  }' +
-
-'  function renderInitialExchange() {' +
-'    var openerText = "Continue investigating " + (contextSummary.incidentId || "this incident");' +
-'    var block = addExchangeShell(openerText);' +
-
-'    if (contextSummary.included && contextSummary.included.length) {' +
-'      var chip = document.createElement("div");' +
-'      chip.className = "tool-chip";' +
-'      chip.innerHTML = \'<span class="dot"></span> Context assembled &middot; \' + esc(contextSummary.included.join(", "));' +
-'      block.appendChild(chip);' +
-'    }' +
-'    if (contextSummary.incident) block.appendChild(buildIncidentCard());' +
-'    if (contextSummary.changes) {' +
-'      if (contextSummary.changes.length) {' +
-'        contextSummary.changes.forEach(function (c) { block.appendChild(buildChangeCard(c)); });' +
-'      } else {' +
-'        var noChg = document.createElement("div");' +
-'        noChg.className = "card";' +
-'        noChg.innerHTML = \'<div class="card-body"><div class="field-value" style="font-weight:400;">No linked change for this incident.</div></div>\';' +
-'        block.appendChild(noChg);' +
-'      }' +
-'    }' +
-'    if (contextSummary.assets && contextSummary.assets.length) block.appendChild(buildAssetsCard());' +
-'    if (contextSummary.evidence) block.appendChild(buildEvidenceChip());' +
-'    block.appendChild(buildTrace());' +
-
-'    setRoute(true);' +
-'    var thinking = addThinkingChip(block);' +
-'    getAssistantReply(initialPrompt).then(function (reply) {' +
-'      thinking.remove();' +
-'      addReplyCard(block, reply);' +
-'      chatHistory.push({ role: "user", content: initialPrompt });' +
-'      chatHistory.push({ role: "assistant", content: reply });' +
-'      setRoute(false);' +
-'    }).catch(function (err) {' +
-'      thinking.remove();' +
-'      addReplyCard(block, "Failed to reach the AI assistant: " + err.message);' +
-'      setRoute(false);' +
-'    });' +
-'  }' +
-
-'  function send(text) {' +
-'    var block = addExchangeShell(text);' +
-'    setRoute(true);' +
-'    var thinking = addThinkingChip(block);' +
-'    getAssistantReply(text).then(function (reply) {' +
-'      thinking.remove();' +
-'      addReplyCard(block, reply);' +
-'      chatHistory.push({ role: "user", content: text });' +
-'      chatHistory.push({ role: "assistant", content: reply });' +
-'      setRoute(false);' +
-'    }).catch(function (err) {' +
-'      thinking.remove();' +
-'      addReplyCard(block, "Failed to reach the AI assistant: " + err.message);' +
-'      setRoute(false);' +
-'    });' +
-'  }' +
-
-'  function askSuggestion(el) {' +
-'    send(el.textContent);' +
-'  }' +
-
-'  renderInitialExchange();' +
-
-'  document.getElementById("chatForm").addEventListener("submit", function (e) {' +
-'    e.preventDefault();' +
-'    var input = document.getElementById("chatInput");' +
-'    var text = input.value.trim();' +
-'    if (!text) return;' +
-'    input.value = "";' +
-'    send(text);' +
-'  });' +
-'<\/script>' +
-'</body>' +
-'</html>';
+        // Replacer FUNCTIONS, not plain strings — String.prototype.replace()
+        // treats "$" specially in a string replacement (e.g. "$&", "$1"),
+        // so a literal "$" in an incident description or prompt text would
+        // otherwise corrupt the substitution silently.
+        //
+        // Each placeholder needs different treatment depending on whether
+        // the template already wraps it in static quotes:
+        //   - DEMO_MODE: unquoted in the template -> substitute the bare boolean
+        //   - CHAT_URL / FEEDBACK_URL / CSRF_BOOTSTRAP_URL / INITIAL_PROMPT:
+        //     already inside "quotes" in the template -> substitute just the
+        //     escaped INNER content (JSON.stringify(...).slice(1, -1) strips
+        //     the pair of quotes JSON.stringify adds, since the template
+        //     supplies its own)
+        //   - CONTEXT_SUMMARY: NOT quoted in the template (it needs to be a
+        //     real JS object literal, e.g. {"incidentId":"INC1006",...}) ->
+        //     substitute the full JSON text as-is, no slicing
+        const html = template
+            .replace('__AI_POPUP_DEMO_MODE__', () => String(DEMO_MODE))
+            .replace('__AI_POPUP_CHAT_URL__', () => JSON.stringify(AI_ASSISTANT_CHAT_URL).slice(1, -1))
+            .replace('__AI_POPUP_FEEDBACK_URL__', () => JSON.stringify(AI_ASSISTANT_FEEDBACK_URL).slice(1, -1))
+            .replace('__AI_POPUP_CSRF_BOOTSTRAP_URL__', () => JSON.stringify(`${API_BASE}/api/csrf/`).slice(1, -1))
+            .replace('__AI_POPUP_INITIAL_PROMPT__', () => promptJson.slice(1, -1))
+            .replace('__AI_POPUP_CONTEXT_SUMMARY__', () => summaryJson);
 
         win.document.open();
         win.document.write(html);
@@ -2209,28 +2164,49 @@
      * renderMetricTab()/renderDiskTab()/renderNetworkTab() once you share a
      * real sample.
      *
-     * No timeframe is sent from the frontend — the backend is expected to
-     * derive the historical window itself from the incident's own opened
-     * time (created_at) through now, and current_avg is just the live/
-     * latest average at request time.
+     * Each metric response is split into two full sections — `historic`
+     * (a point-in-time snapshot around when the incident opened, i.e.
+     * incident.created_at) and `current` (the live/latest snapshot at
+     * request time). The UI renders these as a Historic/Current sub-tab
+     * toggle within each tab — no timeframe is sent from the frontend, the
+     * backend is expected to know what "around incident open" means.
      *
      *   GET {API_BASE}/api/triage/evidence/metrics/
      *       ?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
      *
      *   metric=cpu|memory ->
-     *     { historical_avg: number, current_avg: number,
-     *       window_start (optional, e.g. incident's created_at),
-     *       window_end (optional),
-     *       top_processes: [{ process, <metric>_percent }] }
+     *     { historic: { avg, window_start, window_end, top_processes: [{ process, <metric>_percent }] },
+     *       current:  { avg, captured_at, top_processes: [{ process, <metric>_percent }] } }
      *   metric=disk ->
-     *     { historical_avg: number, current_avg: number,
-     *       window_start (optional), window_end (optional),
-     *       top_mount_points: [{ mount_point, used, total, percent_used }] }
+     *     { historic: { avg, window_start, window_end, top_mount_points: [{ mount_point, used, total, percent_used }] },
+     *       current:  { avg, captured_at, top_mount_points: [{ mount_point, used, total, percent_used }] } }
      *   metric=network ->
-     *     { interfaces: [{ driver, traffic_in, traffic_out, flow_count }] }
+     *     { historic: { window_start, window_end, interfaces: [{ driver, traffic_in, traffic_out, flow_count }] },
+     *       current:  { captured_at, interfaces: [{ driver, traffic_in, traffic_out, flow_count }] } }
      */
-    const EVIDENCE_METRIC_URL = (incId, assetId, metric) =>
-        `${API_BASE}/api/triage/evidence/metrics/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}&metric=${encodeURIComponent(metric)}`;
+    const EVIDENCE_METRIC_URL = (incId, assetId, metric, rangeParams) => {
+        let url = `${API_BASE}/api/triage/evidence/metrics/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}&metric=${encodeURIComponent(metric)}`;
+        if (rangeParams && rangeParams.start && rangeParams.end) {
+            url += `&range_start=${encodeURIComponent(rangeParams.start)}&range_end=${encodeURIComponent(rangeParams.end)}`;
+        }
+        return url;
+    };
+
+    /**
+     * Linked Changes — live from ServiceNow, scoped to the incident's app
+     * and a +/-24h window around when the incident opened. Lazily fetched
+     * the first time the "Linked Change" card is clicked (see
+     * showChgPanel()), not on initial incident load — same lazy pattern
+     * as Asset Details.
+     *
+     *   GET {API_BASE}/api/triage/changes/?incident_number=<id>&app_id=<appId>
+     *   -> { changes: [{ change_number, submitter, affected_ci,
+     *        change_coordinator, start_time, end_time, status, app_id,
+     *        impacted_cis: [{ ci_name, suppression_status,
+     *                          suppression_request_number }] }] }
+     */
+    const CHANGES_URL = (incId, appId) =>
+        `${API_BASE}/api/triage/changes/?incident_number=${encodeURIComponent(incId)}&app_id=${encodeURIComponent(appId)}`;
 
     /**
      * Health Check tab data. NOT confirmed against a real response — best
@@ -2273,6 +2249,18 @@
         `${API_BASE}/api/triage/evidence/sslcerts/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}`;
 
     /**
+     * Location of ai-assistant-popup.html — the AI Assistant popup's
+     * template file (fetched at runtime by renderAiAssistantWindow(),
+     * placeholders substituted, then written into the popup window).
+     *
+     * Assumes it's hosted as a sibling static file next to this dashboard
+     * (same directory, fetched via a plain relative path) — adjust this
+     * if you host it somewhere else (e.g. behind a Django static/ URL, a
+     * CDN, etc).
+     */
+    const AI_ASSISTANT_POPUP_TEMPLATE_URL = 'ai-assistant-popup.html';
+
+    /**
      * Chat endpoint for continuing the conversation inside the AI Assistant
      * popup window. NOT confirmed against a real API — best guess below;
      * this is a placeholder until pointed at a real "My AI Assistant"
@@ -2297,6 +2285,30 @@
     function getCookie(name) {
         const match = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
         return match ? decodeURIComponent(match.pop()) : '';
+    }
+
+    // Django only sets the csrftoken cookie when something actually
+    // triggers it — this page being served as a static file (or by a view
+    // that never touches CSRF) means the browser may never receive it,
+    // leaving every getCookie('csrftoken') call returning '' and every
+    // POST below silently sending a malformed X-CSRFToken header. Calling
+    // this once (cached so it only ever fires one real request) guarantees
+    // the cookie exists before any POST needs it.
+    let csrfBootstrapPromise = null;
+    function ensureCsrfCookie() {
+        if (!csrfBootstrapPromise) {
+            csrfBootstrapPromise = fetch(`${API_BASE}/api/csrf/`, { credentials: 'same-origin' })
+                .catch(err => console.error('CSRF bootstrap failed', err));
+        }
+        return csrfBootstrapPromise;
+    }
+    ensureCsrfCookie(); // fire immediately on load, well ahead of any POST
+
+    function csrfHeaders(extra) {
+        const headers = Object.assign({}, extra);
+        const token = getCookie('csrftoken');
+        if (token) headers['X-CSRFToken'] = token;
+        return headers;
     }
 
     function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -2330,9 +2342,23 @@
     }
 
     async function fetchEvidenceMetric(incId, assetId, metric) {
-        if (DEMO_MODE) return generateDemoMetric(metric, assetId);
-        const res = await fetch(EVIDENCE_METRIC_URL(incId, assetId, metric), { credentials: 'same-origin' });
+        const rangeParams = getLiveRangeParams();
+        if (DEMO_MODE) return generateDemoMetric(metric, assetId, rangeParams);
+        const res = await fetch(EVIDENCE_METRIC_URL(incId, assetId, metric, rangeParams), { credentials: 'same-origin' });
         if (!res.ok) throw new Error(`${metric} metrics fetch failed (HTTP ${res.status})`);
+        return res.json();
+    }
+
+    async function fetchLiveChanges(incId, appId) {
+        if (DEMO_MODE) {
+            // Reuse whatever changes were already generated as part of this
+            // incident's bundled demo record — keeps demo data internally
+            // consistent rather than building a second, separate generator.
+            const record = getOrCreateDemoIncident(incId);
+            return { changes: record.changes || [] };
+        }
+        const res = await fetch(CHANGES_URL(incId, appId), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`Changes fetch failed (HTTP ${res.status})`);
         return res.json();
     }
 
@@ -2384,46 +2410,59 @@
         'logstash.exe', 'dockerd', 'powershell.exe', 'MsMpEng.exe', 'explorer.exe'
     ];
 
-    function generateDemoMetric(metric, assetId) {
+    function generateDemoMetric(metric, assetId, rangeParams) {
         return new Promise(resolve => {
             setTimeout(() => {
-                const rand = seededRandom(`${assetId}:${metric}`);
+                const seedSuffix = rangeParams ? `:${rangeParams.start}:${rangeParams.end}` : '';
+                const rand = seededRandom(`${assetId}:${metric}${seedSuffix}`);
                 if (metric === 'network') { resolve(generateDemoNetwork(rand)); return; }
                 if (metric === 'disk') { resolve(generateDemoDiskMetric(rand)); return; }
+                if (metric === 'raw') { resolve(generateDemoRawLogSections(rand)); return; }
                 resolve(generateDemoUsageMetric(metric, rand));
             }, 500);
         });
     }
 
-    function generateDemoUsageMetric(metric, rand) {
-        const current = Math.round(35 + rand() * 55);
-        const historical = Math.max(5, Math.round(current - (8 + rand() * 22)));
+    const DEMO_USERS = ['root', 'svc_app', 'svc_sql', 'www-data', 'SYSTEM', 'app_svc', 'postgres'];
 
+    function buildUsageSection(rand, metric, isHistoric, minAvg, maxAvg) {
+        const avg = Math.round(minAvg + rand() * (maxAvg - minAvg));
         const pool = [...DEMO_PROCESSES];
         for (let i = pool.length - 1; i > 0; i--) {
             const j = Math.floor(rand() * (i + 1));
             [pool[i], pool[j]] = [pool[j], pool[i]];
         }
-
-        let base = current * 0.85;
+        let base = avg * 0.85;
         const top_processes = pool.slice(0, 10).map((proc, i) => {
             const pct = Math.max(1, Math.round((base / Math.pow(1.45, i)) * (0.85 + rand() * 0.3)));
-            return { process: proc, [`${metric}_percent`]: pct };
+            return {
+                process: proc,
+                [`${metric}_percent`]: pct,
+                user_name: DEMO_USERS[Math.floor(rand() * DEMO_USERS.length)],
+                pid: 1000 + Math.floor(rand() * 30000)
+            };
         });
 
-        return {
-            historical_avg: historical,
-            current_avg: current,
-            window_start: (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString(),
-            window_end: 'Now',
-            top_processes
-        };
+        const section = { avg, top_processes };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start; // point-in-time snapshot around when the incident opened
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
     }
 
-    function generateDemoDiskMetric(rand) {
-        const current = Math.round(35 + rand() * 55);
-        const historical = Math.max(5, Math.round(current - (8 + rand() * 22)));
+    function generateDemoUsageMetric(metric, rand) {
+        // Current runs elevated vs. the historic baseline — tells a believable
+        // "something spiked after the incident opened" story in the demo.
+        const historic = buildUsageSection(rand, metric, true, 15, 50);
+        const current = buildUsageSection(rand, metric, false, 45, 95);
+        return { historic, current };
+    }
 
+    function buildDiskSection(rand, isHistoric, minAvg, maxAvg) {
+        const avg = Math.round(minAvg + rand() * (maxAvg - minAvg));
         const mountPool = ['/', '/var', '/var/log', '/data', '/tmp', '/home', '/opt', '/boot', '/var/lib/docker', '/mnt/backup'];
         const pool = [...mountPool];
         for (let i = pool.length - 1; i > 0; i--) {
@@ -2435,60 +2474,90 @@
 
         const top_mount_points = pool.slice(0, Math.min(mountCount, pool.length)).map((mp, i) => {
             const totalGb = sizes[Math.floor(rand() * sizes.length)];
-            const pct = Math.min(99, Math.max(3, Math.round((current * (1 - i * 0.07)) * (0.7 + rand() * 0.5))));
+            const pct = Math.min(99, Math.max(3, Math.round((avg * (1 - i * 0.07)) * (0.7 + rand() * 0.5))));
             const usedGb = Math.round(totalGb * pct / 100);
-            return {
-                mount_point: mp,
-                used: `${usedGb} GB`,
-                total: `${totalGb} GB`,
-                percent_used: pct
-            };
+            return { mount_point: mp, used: `${usedGb} GB`, total: `${totalGb} GB`, percent_used: pct };
         }).sort((a, b) => b.percent_used - a.percent_used);
 
-        return {
-            historical_avg: historical,
-            current_avg: current,
-            window_start: (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString(),
-            window_end: 'Now',
-            top_mount_points
-        };
+        const section = { avg, top_mount_points };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
     }
 
-    function generateDemoNetwork(rand) {
+    function generateDemoDiskMetric(rand) {
+        const historic = buildDiskSection(rand, true, 15, 50);
+        const current = buildDiskSection(rand, false, 40, 90);
+        return { historic, current };
+    }
+
+    function buildNetworkSection(rand, isHistoric, trafficScale) {
         const drivers = ['eth0', 'eth1', 'lo', 'bond0'];
         const interfaces = drivers.map(d => ({
             driver: d,
-            traffic_in: `${(Math.round(rand() * 12000) / 10).toFixed(1)} MB`,
-            traffic_out: `${(Math.round(rand() * 9000) / 10).toFixed(1)} MB`,
-            flow_count: Math.round(rand() * 400)
+            traffic_in: `${(Math.round(rand() * 12000 * trafficScale) / 10).toFixed(1)} MB`,
+            traffic_out: `${(Math.round(rand() * 9000 * trafficScale) / 10).toFixed(1)} MB`,
+            flow_count: Math.round(rand() * 400 * trafficScale)
         }));
-        return { interfaces };
+        const section = { interfaces };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
     }
 
-    function generateDemoRawLog(ci) {
-        const rand = seededRandom(`${ci.id || ci.name}:log`);
+    function generateDemoNetwork(rand) {
+        const historic = buildNetworkSection(rand, true, 0.6);
+        const current = buildNetworkSection(rand, false, 1.3); // elevated traffic post-incident
+        return { historic, current };
+    }
+
+    const DEMO_LOG_MESSAGES = [
+        'Connection pool exhausted, waiting for available connection',
+        'High memory usage detected on worker process',
+        'Disk I/O latency exceeded threshold (250ms)',
+        'Failed to reach upstream service after 3 retries',
+        'Certificate expiration warning: 12 days remaining',
+        'Thread pool queue backlog increasing',
+        'GC pause exceeded 500ms',
+        'Read timeout on database query',
+        'Service health check failed, marking node degraded',
+        'Retrying failed request to downstream API'
+    ];
+
+    function generateDemoLogSection(rand, isHistoric) {
         const levels = ['ERROR', 'WARN'];
-        const messages = [
-            'Connection pool exhausted, waiting for available connection',
-            'High memory usage detected on worker process',
-            'Disk I/O latency exceeded threshold (250ms)',
-            'Failed to reach upstream service after 3 retries',
-            'Certificate expiration warning: 12 days remaining',
-            'Thread pool queue backlog increasing',
-            'GC pause exceeded 500ms',
-            'Read timeout on database query',
-            'Service health check failed, marking node degraded',
-            'Retrying failed request to downstream API'
-        ];
         const lines = [];
         let ts = new Date();
         for (let i = 0; i < 14; i++) {
             const level = levels[Math.floor(rand() * levels.length)];
-            const msg = messages[Math.floor(rand() * messages.length)];
+            const msg = DEMO_LOG_MESSAGES[Math.floor(rand() * DEMO_LOG_MESSAGES.length)];
             lines.unshift(`[${ts.toISOString()}] ${level}: ${msg}`);
             ts = new Date(ts.getTime() - Math.round(rand() * 6 * 60000));
         }
-        return lines.join('\n');
+
+        const section = { log: lines.join('\n') };
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
+    }
+
+    function generateDemoRawLogSections(rand) {
+        return {
+            historic: generateDemoLogSection(rand, true),
+            current: generateDemoLogSection(rand, false)
+        };
     }
 
     function generateDemoHealthCheck(assetId) {
@@ -2699,6 +2768,14 @@
                     suppression_request_number: suppression === 'Not Suppressed' ? 'N/A' : `SUPP${Math.floor(10000 + rand() * 89999)}`
                 });
             }
+            // Change-level alarm suppression Service Requests — separate
+            // from the per-CI suppression above, matches ServiceNow's
+            // u_alarm_suppression list field on change_request itself.
+            const alarmSuppressionCount = rand() > 0.4 ? 0 : 1 + Math.floor(rand() * 2); // ~60% none, else 1-2
+            const alarmSuppressionRequests = [];
+            for (let i = 0; i < alarmSuppressionCount; i++) {
+                alarmSuppressionRequests.push(`REQ${Math.floor(1000000 + rand() * 8999999)}`);
+            }
             changes.push({
                 change_number: changeNumber,
                 submitter: pick(submitters),
@@ -2709,6 +2786,7 @@
                 status: pick(changeStatuses),
                 app_id: app,
                 change_type: pick(changeTypes),
+                alarm_suppression_requests: alarmSuppressionRequests,
                 impacted_cis: impactedCis
             });
         }
@@ -2812,10 +2890,11 @@
             const record = getOrCreateDemoIncident(incidentNumber);
             return { ...record.session[0], last_update: record.metadata[0].updated_at };
         }
+        await ensureCsrfCookie();
         const res = await fetch(`${API_BASE}/api/triage/trigger/?incident_number=${encodeURIComponent(incidentNumber)}`, {
             method: 'POST',
             credentials: 'same-origin',
-            headers: { 'X-CSRFToken': getCookie('csrftoken') }
+            headers: csrfHeaders({})
         });
         if (!res.ok) throw new Error(`Trigger failed (HTTP ${res.status})`);
         return res.json();
@@ -2847,7 +2926,13 @@
             }
 
             if (STATUS_COMPLETED.includes(status)) {
-                showTriageConfirm(data);
+                const forceRetriage = document.getElementById('forceRetriageCheckbox').checked;
+                if (forceRetriage) {
+                    await runFreshTriage(query);
+                } else {
+                    upsertIncidentIntoRepo(data, query);
+                    showTriageResult(true, data, query, true); // true = skippedRerun, reuse existing successful triage
+                }
                 return;
             }
 
@@ -2954,20 +3039,6 @@
         }
     }
 
-    async function confirmRedoTriage() {
-        const query = pendingQuery;
-        document.getElementById('triageConfirm').style.display = 'none';
-        openTriageLoading(query);
-        await runFreshTriage(query);
-    }
-
-    function keepTriageSuccessful() {
-        const data = pendingIncidentData;
-        document.getElementById('triageConfirm').style.display = 'none';
-        if (data) upsertIncidentIntoRepo(data, pendingQuery);
-        showTriageResult(true, data, pendingQuery, true);
-    }
-
     function recheckTriageStatus() {
         runTriage(pendingQuery);
     }
@@ -2979,27 +3050,15 @@
 
     function openTriageLoading(query) {
         document.getElementById('triageQueryText').innerText = 'Analyzing ' + query;
-        document.getElementById('triageConfirm').style.display = 'none';
         document.getElementById('triageInfo').style.display = 'none';
         document.getElementById('triageResult').style.display = 'none';
         document.getElementById('triageLoading').style.display = 'block';
         document.getElementById('triageOverlay').classList.add('open');
     }
 
-    function showTriageConfirm(data) {
-        pendingIncidentData = data;
-        document.getElementById('triageLoading').style.display = 'none';
-        document.getElementById('triageInfo').style.display = 'none';
-        document.getElementById('triageResult').style.display = 'none';
-        document.getElementById('triageConfirm').style.display = 'block';
-        document.getElementById('confirmIncidentId').innerText = data.incident_number || pendingQuery;
-        document.getElementById('triageOverlay').classList.add('open');
-    }
-
     function showTriageInfo(data) {
         pendingIncidentData = data;
         document.getElementById('triageLoading').style.display = 'none';
-        document.getElementById('triageConfirm').style.display = 'none';
         document.getElementById('triageResult').style.display = 'none';
         document.getElementById('triageInfo').style.display = 'block';
         const who = data.triggered_by ? ` (started by ${data.triggered_by})` : '';
@@ -3010,7 +3069,6 @@
 
     function showTriageResult(success, data, query, skippedRerun) {
         document.getElementById('triageLoading').style.display = 'none';
-        document.getElementById('triageConfirm').style.display = 'none';
         document.getElementById('triageInfo').style.display = 'none';
         document.getElementById('triageResult').style.display = 'block';
 
@@ -3039,7 +3097,6 @@
 
     function showTriageError(query, message) {
         document.getElementById('triageLoading').style.display = 'none';
-        document.getElementById('triageConfirm').style.display = 'none';
         document.getElementById('triageInfo').style.display = 'none';
         document.getElementById('triageResult').style.display = 'block';
 
