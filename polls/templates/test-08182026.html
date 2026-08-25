@@ -971,6 +971,22 @@ SNOW_REQUEST_TIMEOUT = 10  # seconds — TODO: tune to your instance's typical l
 # SNOW_AUTH above and send this header on every request instead:
 #   SNOW_HEADERS = {"Authorization": "Bearer <access_token>"}
 
+from urllib.parse import quote as _url_quote
+
+
+def _snow_record_url(table, sys_id):
+    """
+    Builds a standard ServiceNow "go to record" deep link
+    (nav_to.do?uri=<table>.do?sys_id=<id>), used for the Incident Number
+    and Change Number hyperlinks in the frontend. Returns None if sys_id
+    is missing (e.g. the record lookup failed upstream) — frontend treats
+    a null url as "no link, render as plain text".
+    """
+    if not sys_id:
+        return None
+    inner = f"{table}.do?sys_id={sys_id}"
+    return f"{SNOW_INSTANCE_URL}/nav_to.do?uri={_url_quote(inner, safe='')}"
+
 CMDB_TABLE = "cmdb_ci_server"      # base server table — has everything except patch data
 CMDB_WIN_TABLE = "cmdb_ci_win_server"      # Windows extension table — has patch data for Windows servers
 CMDB_LINUX_TABLE = "cmdb_ci_linux_server"  # Linux extension table — has patch data for Linux servers
@@ -1361,6 +1377,7 @@ def _build_change_response(record, app_id):
     )
 
     change_sys_id = record.get("sys_id")  # sys_id is never a reference field, always a plain string
+    data["change_url"] = _snow_record_url("change_request", change_sys_id)
     try:
         data["impacted_cis"] = _snow_search_impacted_cis(change_sys_id) if change_sys_id else []
     except Exception:
@@ -1749,6 +1766,65 @@ def _collect_server_names_from_incident(record):
     return deduped
 
 
+# ---------------------------------------------------------------------------
+# Job-name extraction — Control-M / AutoSys job-failure incidents don't
+# have a server CI at all; the job name is only ever mentioned in free
+# text. Three known phrasings, each with a different "where the job name
+# ends" rule:
+#   "AutoSys Job Failure: <jobname>"        -> rest of the line
+#   "AutoSys MAXRUNALARM Alarm: <jobname>"  -> rest of the line
+#   "Control-M Failure: <jobname>."         -> up to (not including) the first dot
+#
+# NOTE the Control-M pattern requires a trailing period to know where the
+# job name ends — if a real Control-M incident's text doesn't end the job
+# name with a dot, it won't match. Adjust CONTROLM_FAILURE_RE if that
+# turns out to be common in your actual incident text.
+# ---------------------------------------------------------------------------
+
+AUTOSYS_JOB_FAILURE_RE = re.compile(r'AutoSys Job Failure:\s*(.+?)(?:\r?\n|$)', re.IGNORECASE)
+AUTOSYS_MAXRUNALARM_RE = re.compile(r'AutoSys MAXRUNALARM Alarm:\s*(.+?)(?:\r?\n|$)', re.IGNORECASE)
+CONTROLM_FAILURE_RE = re.compile(r'Control-M Failure:\s*([^.\r\n]+)\.', re.IGNORECASE)
+
+
+def _extract_job_names(text):
+    """Finds every job-failure mention in free text, returning [{name, system}, ...]."""
+    if not text:
+        return []
+    jobs = []
+    for m in AUTOSYS_JOB_FAILURE_RE.finditer(text):
+        name = m.group(1).strip()
+        if name:
+            jobs.append({"name": name, "system": "autosys"})
+    for m in AUTOSYS_MAXRUNALARM_RE.finditer(text):
+        name = m.group(1).strip()
+        if name:
+            jobs.append({"name": name, "system": "autosys"})
+    for m in CONTROLM_FAILURE_RE.finditer(text):
+        name = m.group(1).strip()
+        if name:
+            jobs.append({"name": name, "system": "controlm"})
+    return jobs
+
+
+def _collect_job_names_from_incident(record):
+    """
+    Collects job names from Summary + Description, deduped case-
+    insensitively by (name, system) while preserving first-seen order.
+    """
+    candidates = []
+    candidates.extend(_extract_job_names(_extract_field(record, "short_description")))
+    candidates.extend(_extract_job_names(_extract_field(record, "description")))
+
+    seen = set()
+    deduped = []
+    for job in candidates:
+        key = (job["name"].lower(), job["system"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(job)
+    return deduped
+
+
 def _snow_search_incident(incident_number):
     """
     Queries ServiceNow's Table API for the incident record matching
@@ -1784,6 +1860,8 @@ def _build_incident_details_response(record):
         for output_key, snow_field in INCIDENT_FIELD_MAP.items()
     }
     data["servers"] = _collect_server_names_from_incident(record)
+    data["jobs"] = _collect_job_names_from_incident(record)
+    data["incident_url"] = _snow_record_url("incident", record.get("sys_id"))
     return data
 
 
@@ -1812,3 +1890,88 @@ def incident_details(request):
         return JsonResponse({"error": f"Incident '{incident_number}' not found in ServiceNow"}, status=404)
 
     return JsonResponse(_build_incident_details_response(record))
+
+
+# ===========================================================================
+# Control-M / AutoSys job execution history — for the "Jobs" evidence tab.
+#
+# Job-based incidents (Control-M/AutoSys job failures) don't have server
+# metrics in Elasticsearch — there's no host to query CPU/Memory/Disk for.
+# Instead, this tab shows the job's last 5 execution instances and whether
+# each succeeded or failed, pulled from the actual job scheduler.
+#
+# >>> DUMMY DATA — NOT A REAL INTEGRATION <<<
+# Per explicit instruction, these two endpoints return fake/generated data
+# for now. _generate_dummy_job_instances() is the only thing that needs
+# replacing once you have real Control-M/AutoSys API connection details —
+# everything else (URL routing, response shape, frontend rendering) is
+# already wired to the real contract, so swapping in a real API call here
+# is the only change needed later.
+# ===========================================================================
+
+import random as _random
+
+
+def _generate_dummy_job_instances(job_name, system):
+    """
+    DUMMY DATA. Generates 5 fake past run instances, most successful with
+    one failure mixed in (a reasonably realistic distribution), newest
+    first. Replace this with a real Control-M/AutoSys API call — e.g.
+    Control-M's /run/jobs/status or AutoSys's WCC REST endpoints — once
+    you have connection details. The response shape below is what the
+    frontend already expects, so nothing else needs to change.
+    """
+    now = timezone.now()
+    # Mostly successful with one recent failure — order is newest-first.
+    statuses = ["Success", "Success", "Failure", "Success", "Success"]
+    instances = []
+    for i, status in enumerate(statuses):
+        start = now - timedelta(hours=(i + 1) * 24)  # roughly one run per day, going back
+        duration_minutes = _random.randint(5, 45)
+        end = start + timedelta(minutes=duration_minutes)
+        instances.append({
+            "run_id": f"{system.upper()}-{1000 + i}",
+            "start_time": start.isoformat(),
+            "end_time": end.isoformat(),
+            "status": status,
+            "duration_minutes": duration_minutes,
+        })
+    return instances
+
+
+@require_GET
+def controlm_job_instances(request):
+    """
+    GET /api/triage/jobs/controlm/?job_name=<name>
+
+    DUMMY DATA for now (see module note above). Response:
+        { "job_name": str, "system": "controlm",
+          "instances": [{ run_id, start_time, end_time, status, duration_minutes }, ...] }
+    """
+    job_name = request.GET.get('job_name')
+    if not job_name:
+        return JsonResponse({"error": "job_name is required"}, status=400)
+    return JsonResponse({
+        "job_name": job_name,
+        "system": "controlm",
+        "instances": _generate_dummy_job_instances(job_name, "controlm"),
+    })
+
+
+@require_GET
+def autosys_job_instances(request):
+    """
+    GET /api/triage/jobs/autosys/?job_name=<name>
+
+    DUMMY DATA for now (see module note above). Response:
+        { "job_name": str, "system": "autosys",
+          "instances": [{ run_id, start_time, end_time, status, duration_minutes }, ...] }
+    """
+    job_name = request.GET.get('job_name')
+    if not job_name:
+        return JsonResponse({"error": "job_name is required"}, status=400)
+    return JsonResponse({
+        "job_name": job_name,
+        "system": "autosys",
+        "instances": _generate_dummy_job_instances(job_name, "autosys"),
+    })
