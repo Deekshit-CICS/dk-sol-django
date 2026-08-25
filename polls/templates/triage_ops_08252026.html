@@ -471,7 +471,7 @@
 
         let inc = dataRepo.find(i => i.id === incId);
         if (!inc) {
-            inc = { id: incId, app: 'N/A', desc: '', changes: [], group: 'N/A', assignedTo: '', prio: 'N/A', state: 'N/A', cis: [], fix: '', action: '', confidence: null, feedback: null, evidenceByAsset: {}, triggered_by: null, created_at: null, last_update: null };
+            inc = { id: incId, app: 'N/A', desc: '', changes: [], group: 'N/A', assignedTo: '', prio: 'N/A', state: 'N/A', cis: [], fix: '', action: '', confidence: null, feedback: null, triggered_by: null, created_at: null, last_update: null };
             dataRepo.push(inc);
         }
         currentInc = inc;
@@ -535,16 +535,14 @@
      * the same inc.changes[] array — adjust the field names in the mapping
      * below once you share a real sample with multiple changes.
      *
-     * `evidence` is one entry per asset — `hostname` is the asset identifier
-     * and `technical_evidence` is that asset's log text. Only kept as a
-     * lookup table now (evidenceByAsset) for cross-referencing a server's
-     * log text once Asset Inventory is populated — Asset Inventory itself
-     * is exclusively ServiceNow-sourced (see applySnowServerListToAssetInventory()),
-     * deliberately NOT built from this array or from data.assets/data.cis/
-     * data.configuration_items even if your backend later adds one.
-     * `asset_details` and `fetched_at` are carried through and shown in the
-     * asset panel; `elastic_query_meta` (the underlying Elastic query) isn't
-     * surfaced in the UI.
+     * `evidence` (hostname + technical_evidence per asset) is present in
+     * this response but no longer used anywhere — Asset Inventory is
+     * exclusively ServiceNow-sourced (see applySnowServerListToAssetInventory()),
+     * and Technical Evidence's card-level preview is a static prompt (see
+     * showAssetEvidencePrompt()), not populated from this array or from
+     * data.assets/data.cis/data.configuration_items even if your backend
+     * later adds one. Real technical evidence comes from the CPU/Memory/
+     * Disk/Network/Raw Log tabs, which query Elasticsearch directly.
      */
     function mapChangesRaw(changesRaw, inc) {
         return (changesRaw || []).map(item => ({
@@ -569,7 +567,6 @@
     function applyIncidentDetails(inc, data) {
         const session  = (data.session && data.session[0]) || {};
         const metadata = (data.metadata && data.metadata[0]) || {};
-        const evidenceArr = Array.isArray(data.evidence) ? data.evidence : [];
 
         // Incident
         inc.app = session.app_id || inc.app;
@@ -612,21 +609,6 @@
         inc.fix = metadata.fredai_rag_historical_resolution || inc.fix || 'No recommendation available.';
         inc.action = inc.action || 'Review Manually'; // no explicit action field in this response
         document.getElementById('m-fix').innerText = inc.fix;
-
-        // Per-asset evidence text, still derived from the `evidence` array
-        // — CONFIRMED real shape: { id, session_id, hostname, asset_details,
-        // technical_evidence, elastic_query_meta, fetched_at }. Kept purely
-        // as a lookup table (hostname -> log text) for cross-referencing
-        // once Asset Inventory is populated from ServiceNow below — this is
-        // NOT used to build the asset list itself anymore (see note below).
-        inc.evidenceByAsset = {};
-        evidenceArr.forEach(e => {
-            if (typeof e === 'string') return; // no asset identifier to key off
-            const assetKey = (e.hostname || e.asset_id || e.ci || e.asset || e.ci_name || e.name || '').toString();
-            const logText = e.technical_evidence || e.log || e.evidence || e.description || JSON.stringify(e);
-            if (!assetKey) return;
-            inc.evidenceByAsset[assetKey.toLowerCase()] = logText;
-        });
 
         // Asset Inventory is exclusively ServiceNow-sourced now — see
         // applySnowServerListToAssetInventory(), triggered by the parallel
@@ -696,51 +678,20 @@
     async function selectAsset(ci) {
         currentCi = ci;
         showCiPanel(ci);
-        await loadAssetEvidence(ci);
+        showAssetEvidencePrompt(ci);
     }
 
-    async function loadAssetEvidence(ci) {
-        document.getElementById('log-summary').innerText = 'Loading evidence for ' + ci.name + '…';
-        document.getElementById('m-log').innerText = 'Fetching technical evidence…';
-
-        if (ci.log) {
-            renderAssetEvidence(ci);
-            return;
-        }
-
-        const key = (ci.id || ci.name || '').toString().toLowerCase();
-        if (currentInc && currentInc.evidenceByAsset && currentInc.evidenceByAsset[key]) {
-            ci.log = currentInc.evidenceByAsset[key];
-            renderAssetEvidence(ci);
-            return;
-        }
-
-        try {
-            const data = await fetchAssetEvidence(currentInc.id, ci.id || ci.name);
-            ci.log = data.log || data.evidence ||
-                     (Array.isArray(data.logs) ? data.logs.join('\n') : null) ||
-                     'No evidence returned for this asset.';
-            if (currentCi !== ci) return; // a different asset was clicked before this resolved
-            renderAssetEvidence(ci);
-        } catch (err) {
-            // Non-fatal, and expected for a lot of assets now: Asset
-            // Inventory is exclusively ServiceNow-sourced (see
-            // applySnowServerListToAssetInventory()), so this asset may
-            // simply have no corresponding entry in the internal evidence
-            // pipeline this preview queries — that's not a real error, the
-            // Technical Evidence tabs below (CPU/Memory/Disk/etc, backed
-            // directly by Elasticsearch via host.name) are the actual
-            // source of live data and aren't affected by this miss.
-            console.error('asset evidence preview fetch failed (non-fatal)', err);
-            if (currentCi !== ci) return;
-            document.getElementById('log-summary').innerText = 'No preview available';
-            document.getElementById('m-log').innerText = 'Open a tab below (CPU, Memory, etc.) to view live technical evidence for ' + ci.name + '.';
-        }
-    }
-
-    function renderAssetEvidence(ci) {
-        document.getElementById('log-summary').innerText = 'Evidence for ' + ci.name;
-        document.getElementById('m-log').innerText = ci.log;
+    function showAssetEvidencePrompt(ci) {
+        // Deliberately static, no fetch — Technical Evidence's card-level
+        // preview no longer sources from /api/triage/details/ or
+        // /api/triage/evidence/ (the internal triage pipeline). Asset
+        // Inventory is exclusively ServiceNow-sourced, and those endpoints
+        // have no reliable correspondence to ServiceNow-derived asset
+        // names. Live data comes from the Technical Evidence tabs below
+        // (CPU/Memory/Disk/Network/Raw Log), which query Elasticsearch
+        // directly via host.name.
+        document.getElementById('log-summary').innerText = ci.name;
+        document.getElementById('m-log').innerText = 'Open a tab below (CPU, Memory, etc.) to view live technical evidence for this asset.';
     }
 
     /* ---------- Detail panel logic ---------- */
@@ -816,7 +767,7 @@
             patch: 'N/A',
             details: '',
             fetchedAt: null,
-            log: (inc.evidenceByAsset && inc.evidenceByAsset[name.toLowerCase()]) || null,
+            log: null, // Technical Evidence's card preview no longer sources from the internal triage pipeline — see showAssetEvidencePrompt()
             metricsCache: {}
         }));
         renderCiList(inc);
@@ -2237,12 +2188,6 @@
 
     const DETAILS_URL = (id) => `${API_BASE}/api/triage/details/?incident_number=${encodeURIComponent(id)}`;
 
-    // Lazy-loaded only when an asset is clicked and no evidence for it was
-    // already embedded in the DETAILS_URL response (assets[].log) or in a
-    // top-level evidence map — see applyIncidentDetails() / loadAssetEvidence().
-    const ASSET_EVIDENCE_URL = (incId, assetId) =>
-        `${API_BASE}/api/triage/evidence/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}`;
-
     /**
      * Full CMDB-style asset details for the Asset Inventory panel. NOT
      * confirmed against a real response yet — best-guess snake_case field
@@ -2452,12 +2397,6 @@
         return json.data || json; // unwrap the envelope
     }
 
-    async function fetchAssetEvidence(incId, assetId) {
-        const res = await fetch(ASSET_EVIDENCE_URL(incId, assetId), { credentials: 'same-origin' });
-        if (!res.ok) throw new Error(`Evidence fetch failed (HTTP ${res.status})`);
-        return res.json();
-    }
-
     async function fetchAssetDetails(incId, assetId) {
         if (DEMO_MODE) return generateDemoAssetDetails(assetId);
         const res = await fetch(ASSET_DETAILS_URL(incId, assetId), { credentials: 'same-origin' });
@@ -2495,12 +2434,13 @@
 
     function generateDemoServerName(rand) {
         // Matches the real naming convention: 3-char prefix (he2/he3/or1/or2)
-        // + 11 more chars = 14 total.
+        // + 11 or 12 more chars = 14 or 15 total.
         const prefixes = ['he2', 'he3', 'or1', 'or2'];
         const prefix = prefixes[Math.floor(rand() * prefixes.length)];
         const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        const suffixLength = 11 + Math.floor(rand() * 2); // 11 or 12
         let suffix = '';
-        for (let i = 0; i < 11; i++) suffix += chars[Math.floor(rand() * chars.length)];
+        for (let i = 0; i < suffixLength; i++) suffix += chars[Math.floor(rand() * chars.length)];
         return prefix + suffix;
     }
 
