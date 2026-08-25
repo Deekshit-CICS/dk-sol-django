@@ -721,7 +721,6 @@ def _query_raw_log_events(asset_id, start, end, size=RAW_LOG_MAX_LINES):
     return "\n".join(lines) if lines else "No matching log events found in this window."
 
 
-@require_GET
 def _build_list_metrics_response(incident_number, asset_id, query_fn, error_label, range_start=None, range_end=None):
     """
     Shared builder for the three "just a list, no average" tabs (Services,
@@ -769,6 +768,7 @@ def _build_list_metrics_response(incident_number, asset_id, query_fn, error_labe
     return JsonResponse({"historic": historic, "current": current})
 
 
+@require_GET
 def evidence_metrics(request):
     """
     GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network|raw|services|processes|netstat>
