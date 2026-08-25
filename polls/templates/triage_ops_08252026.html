@@ -547,6 +547,7 @@
     function mapChangesRaw(changesRaw, inc) {
         return (changesRaw || []).map(item => ({
             changeNumber: item.change_number || item.chg || item.number || 'Unknown',
+            changeUrl: item.change_url || null, // ServiceNow deep link — see _snow_record_url() in views.py
             submitter: item.submitter || item.submitted_by || item.requested_by,
             affectedCi: item.affected_ci || item.affected_ci_name || item.ci || item.asset,
             changeCoordinator: item.change_coordinator || item.coordinator,
@@ -556,10 +557,7 @@
             appId: item.app_id || item.application || (inc && inc.app),
             alarmSuppressionRequests: item.alarm_suppression_requests || item.u_alarm_suppression || [],
             impactedCis: (item.impacted_cis || item.impacted_ci_list || item.impacted_configuration_items || []).map(x => ({
-                ciName: x.ci_name || x.name || x.hostname || 'Unknown',
-                suppressionStatus: x.suppression_status || x.suppressed_status ||
-                    (x.suppressed != null ? (x.suppressed ? 'Suppressed' : 'Not Suppressed') : 'N/A'),
-                suppressionRequestNumber: x.suppression_request_number || x.suppression_req || x.suppression_ticket || 'N/A'
+                ciName: x.ci_name || x.name || x.hostname || 'Unknown'
             }))
         }));
     }
@@ -655,7 +653,8 @@
         inc.cis.forEach(ci => {
             const d = document.createElement('div');
             d.className = 'ci-item';
-            d.innerHTML = `<span><b>${ci.name}</b></span> <i class="bi bi-chevron-right small text-muted"></i>`;
+            const icon = ci.type === 'job' ? 'bi-diagram-3' : 'bi-hdd-rack';
+            d.innerHTML = `<span><i class="bi ${icon} small text-muted" style="margin-right:6px;"></i><b>${ci.name}</b></span> <i class="bi bi-chevron-right small text-muted"></i>`;
             d.onclick = (e) => {
                 e.stopPropagation();
                 document.querySelectorAll('.ci-item').forEach(i => i.classList.remove('active'));
@@ -701,7 +700,16 @@
     function openPanel(eyebrow, title, bodyHtml) {
         panelToken++;
         document.getElementById('panel-eyebrow').innerText = eyebrow;
-        document.getElementById('panel-title').innerText = title;
+        const titleEl = document.getElementById('panel-title');
+        // Most panel titles are plain text (CI names, "Technical Evidence",
+        // etc.) and stay on the safe innerText path. Only when a caller
+        // explicitly hands us a pre-built <a> tag (see showIncPanel()) do
+        // we render it as HTML — everything else keeps its escaping.
+        if (typeof title === 'string' && title.trim().startsWith('<a ')) {
+            titleEl.innerHTML = title;
+        } else {
+            titleEl.innerText = title;
+        }
         document.getElementById('panel-body').innerHTML = bodyHtml;
         document.getElementById('sidePanel').classList.add('open');
         document.getElementById('panelOverlay').classList.add('open');
@@ -759,10 +767,12 @@
         const cached = snowIncidentCache[key];
         if (!cached || cached.loading || cached.error || !cached.data) return;
         const servers = cached.data.servers || [];
+        const jobs = cached.data.jobs || [];
 
-        inc.cis = servers.map(name => ({
+        const serverCis = servers.map(name => ({
             id: name,
             name: name,
+            type: 'server',
             crit: 'N/A',
             patch: 'N/A',
             details: '',
@@ -770,6 +780,24 @@
             log: null, // Technical Evidence's card preview no longer sources from the internal triage pipeline — see showAssetEvidencePrompt()
             metricsCache: {}
         }));
+
+        // Control-M/AutoSys job "assets" — no host, so no metricsCache;
+        // their evidence is job execution history (jobsCache), not
+        // Elasticsearch metrics. See getEvidenceTabsForCi()/renderJobsTab().
+        const jobCis = jobs.map(job => ({
+            id: job.name,
+            name: job.name,
+            type: 'job',
+            jobSystem: job.system, // 'controlm' | 'autosys' — becomes the default sub-tab
+            crit: 'N/A',
+            patch: 'N/A',
+            details: '',
+            fetchedAt: null,
+            log: null,
+            jobsCache: {}
+        }));
+
+        inc.cis = [...serverCis, ...jobCis];
         renderCiList(inc);
     }
 
@@ -842,7 +870,12 @@
         // internal triage pipeline (evidence/details, lookup, etc.) here;
         // those are shown elsewhere (Linked Change panel, evidence tabs,
         // AI Remediation panel).
-        openPanel('Incident Record', currentInc.id, renderSnowIncidentSection(currentInc.id));
+        const cached = snowIncidentCache[currentInc.id.toUpperCase()];
+        const incidentUrl = cached && cached.data && cached.data.incident_url;
+        const title = incidentUrl
+            ? `<a href="${incidentUrl}" target="_blank" rel="noopener noreferrer" style="color:inherit;">${currentInc.id}</a>`
+            : currentInc.id;
+        openPanel('Incident Record', title, renderSnowIncidentSection(currentInc.id));
     }
 
     let currentChangePanelInc = null; // tracks which incident's change panel is open, to guard async writes
@@ -917,34 +950,46 @@
         return changes.map((chg, idx) => renderSingleChangeBlock(chg, idx, changes.length)).join('');
     }
 
-    function renderSingleChangeBlock(chg, idx, total) {
-        const impactedRows = (chg.impactedCis || []).map(ci => {
-            const hasSuppressionTicket = ci.suppressionRequestNumber && ci.suppressionRequestNumber !== 'N/A';
-            const suppressionCell = hasSuppressionTicket
-                ? ci.suppressionRequestNumber
-                : '<span class="text-muted">There was no suppression request</span>';
-            return `
-            <tr>
-                <td>${ci.ciName}</td>
-                <td>${ci.suppressionStatus}</td>
-                <td>${suppressionCell}</td>
-            </tr>
-        `;
-        }).join('');
+    const CHANGE_SERVERS_EXPAND_THRESHOLD = 8;
 
-        const impactedTable = (chg.impactedCis && chg.impactedCis.length) ? `
-            <div class="label" style="margin-top:14px;">Servers Under This Change</div>
-            <table class="evidence-table">
-                <thead><tr><th>Server / CI</th><th>Suppression Status</th><th>Suppression Request #</th></tr></thead>
-                <tbody>${impactedRows}</tbody>
-            </table>
-        ` : `<div class="text-muted small" style="margin-top:10px;">No servers listed as impacted by this change.</div>`;
+    function renderSingleChangeBlock(chg, idx, total) {
+        const allImpactedNames = (chg.impactedCis || []).map(ci => ci.ciName).filter(Boolean);
+
+        // Only show servers that are ALSO in Asset Inventory — unless none
+        // of them match, in which case fall back to showing the full list
+        // (better than showing nothing at all).
+        const assetNames = new Set((currentInc && currentInc.cis || []).map(ci => (ci.name || '').toLowerCase()));
+        const matchingNames = allImpactedNames.filter(name => assetNames.has(name.toLowerCase()));
+        const displayNames = matchingNames.length > 0 ? matchingNames : allImpactedNames;
+
+        let serversHtml;
+        if (displayNames.length === 0) {
+            serversHtml = `<div class="text-muted small" style="margin-top:10px;">No servers listed as impacted by this change.</div>`;
+        } else {
+            const visible = displayNames.slice(0, CHANGE_SERVERS_EXPAND_THRESHOLD);
+            const hidden = displayNames.slice(CHANGE_SERVERS_EXPAND_THRESHOLD);
+            const blockId = `chg-servers-${idx}`;
+            const rowHtml = (name) => `<div class="ci-item" style="cursor:default;"><span>${name}</span></div>`;
+            const hiddenBlock = hidden.length
+                ? `<div id="${blockId}-more" style="display:none;">${hidden.map(rowHtml).join('')}</div>
+                   <button type="button" class="btn btn-sm btn-outline-secondary" style="margin-top:6px;" onclick="toggleChangeServerList('${blockId}', this)">+ ${hidden.length} more</button>`
+                : '';
+            serversHtml = `
+                <div class="label" style="margin-top:14px;">Servers Under This Change</div>
+                <div>${visible.map(rowHtml).join('')}</div>
+                ${hiddenBlock}
+            `;
+        }
+
+        const changeNumberHtml = chg.changeUrl
+            ? `<a href="${chg.changeUrl}" target="_blank" rel="noopener noreferrer">${chg.changeNumber}</a>`
+            : chg.changeNumber;
 
         return `
             <div style="${idx > 0 ? 'margin-top:24px; padding-top:20px; border-top:1px solid var(--border);' : ''}">
                 <div class="panel-chip">${chg.status || 'Unknown Status'}</div>
                 <div class="fw-bold mb-2" style="font-size:1rem;">
-                    ${chg.changeNumber}${total > 1 ? ` <span class="text-muted small fw-normal">(${idx + 1} of ${total})</span>` : ''}
+                    ${changeNumberHtml}${total > 1 ? ` <span class="text-muted small fw-normal">(${idx + 1} of ${total})</span>` : ''}
                 </div>
                 <div class="panel-row">
                     <div><div class="label">Submitter</div><div class="val">${chg.submitter || 'N/A'}</div></div>
@@ -962,9 +1007,18 @@
                 <div class="val">${(chg.alarmSuppressionRequests && chg.alarmSuppressionRequests.length)
                     ? chg.alarmSuppressionRequests.join(', ')
                     : '<span class="text-muted">There was no suppression request</span>'}</div>
-                ${impactedTable}
+                ${serversHtml}
             </div>
         `;
+    }
+
+    function toggleChangeServerList(blockId, btn) {
+        const moreEl = document.getElementById(blockId + '-more');
+        if (!moreEl) return;
+        const isHidden = moreEl.style.display === 'none';
+        moreEl.style.display = isHidden ? '' : 'none';
+        const hiddenCount = moreEl.children.length;
+        btn.textContent = isHidden ? 'Show less' : `+ ${hiddenCount} more`;
     }
 
     /* ---------- Asset Inventory panel: full CMDB-style asset details ---------- */
@@ -1130,6 +1184,17 @@
         { id: 'raw', label: 'Raw Log' }
     ];
 
+    const JOB_EVIDENCE_TABS = [
+        { id: 'jobs', label: 'Jobs' }
+    ];
+
+    function getEvidenceTabsForCi(ci) {
+        // Control-M/AutoSys job "assets" have no host, so none of the
+        // CPU/Memory/Disk/etc tabs apply — job data isn't in Elasticsearch
+        // at all. Only the Jobs tab is shown for these.
+        return (ci && ci.type === 'job') ? JOB_EVIDENCE_TABS : EVIDENCE_TABS;
+    }
+
     let currentEvidenceTab = 'cpu';
 
     function showLogPanel() {
@@ -1146,13 +1211,20 @@
             `);
             return;
         }
-        openPanel('Technical Evidence', ci.name, renderEvidenceShell());
+        // Reset to a valid default tab when switching between a job CI and
+        // a server CI (e.g. currentEvidenceTab might still be 'cpu' from a
+        // previously-selected server, which isn't a valid tab for a job).
+        const tabs = getEvidenceTabsForCi(ci);
+        if (!tabs.some(t => t.id === currentEvidenceTab)) {
+            currentEvidenceTab = tabs[0].id;
+        }
+        openPanel('Technical Evidence', ci.name, renderEvidenceShell(ci));
         bindEvidenceTabHandlers(ci);
         loadEvidenceTab(ci, currentEvidenceTab);
     }
 
-    function renderEvidenceShell() {
-        const tabButtons = EVIDENCE_TABS.map(t =>
+    function renderEvidenceShell(ci) {
+        const tabButtons = getEvidenceTabsForCi(ci).map(t =>
             `<button class="evidence-tab${t.id === currentEvidenceTab ? ' active' : ''}" data-evidence-tab="${t.id}">${t.label}</button>`
         ).join('');
 
@@ -1178,7 +1250,7 @@
     const EVIDENCE_TAB_LABELS = {
         cpu: 'CPU metrics', memory: 'memory metrics', disk: 'disk metrics',
         network: 'network data', health: 'health check', sslcerts: 'SSL certificates',
-        raw: 'raw log data'
+        raw: 'raw log data', jobs: 'job execution history'
     };
 
     function fetchEvidenceTabData(tab, incId, assetId) {
@@ -1199,6 +1271,14 @@
             // wires the button; the actual check only fires on click.
             contentEl.innerHTML = renderFirewallForm(ci);
             bindFirewallForm(ci);
+            return;
+        }
+
+        if (tab === 'jobs') {
+            // Own sub-tab (Control-M/AutoSys) and per-system caching,
+            // managed entirely inside renderJobsTab() — bypasses the
+            // generic single-shot ci.metricsCache path below.
+            contentEl.innerHTML = renderJobsTab(ci);
             return;
         }
 
@@ -1594,6 +1674,127 @@
                 <tbody>${rows || `<tr><td colspan="3" class="text-muted small">No health check data available.</td></tr>`}</tbody>
             </table>
         `;
+    }
+
+    function renderJobsTab(ci) {
+        ci.jobsCache = ci.jobsCache || {};
+        const activeSystem = ci.activeJobSubTab || ci.jobSystem || 'controlm';
+        ci.activeJobSubTab = activeSystem;
+
+        const subTabBar = `
+            <div class="metric-subtabs">
+                <button class="metric-subtab${activeSystem === 'controlm' ? ' active' : ''}" onclick="switchJobSystemSubTab('controlm')">Control-M</button>
+                <button class="metric-subtab${activeSystem === 'autosys' ? ' active' : ''}" onclick="switchJobSystemSubTab('autosys')">AutoSys</button>
+            </div>
+        `;
+
+        const systemLabel = activeSystem === 'controlm' ? 'Control-M' : 'AutoSys';
+        const cached = ci.jobsCache[activeSystem];
+        let bodyHtml;
+        if (!cached) {
+            bodyHtml = `<div class="panel-empty"><i class="bi bi-hourglass-split"></i>Loading ${systemLabel} job history…</div>`;
+            loadJobInstancesForSystem(ci, activeSystem);
+        } else if (cached.loading) {
+            bodyHtml = `<div class="panel-empty"><i class="bi bi-hourglass-split"></i>Loading ${systemLabel} job history…</div>`;
+        } else if (cached.error) {
+            bodyHtml = `<div class="panel-empty"><i class="bi bi-exclamation-triangle"></i>Failed to load job history: ${cached.error}</div>`;
+        } else {
+            bodyHtml = renderJobInstancesTable(cached.data);
+        }
+
+        return subTabBar + bodyHtml;
+    }
+
+    function switchJobSystemSubTab(system) {
+        if (!currentCi) return;
+        currentCi.activeJobSubTab = system;
+        if (currentEvidenceTab === 'jobs' && document.getElementById('evidenceTabContent')) {
+            document.getElementById('evidenceTabContent').innerHTML = renderJobsTab(currentCi);
+        }
+    }
+
+    async function loadJobInstancesForSystem(ci, system) {
+        ci.jobsCache = ci.jobsCache || {};
+        ci.jobsCache[system] = { loading: true, error: null, data: null };
+        try {
+            const data = await fetchJobInstances(ci.name, system);
+            ci.jobsCache[system] = { loading: false, error: null, data };
+        } catch (err) {
+            console.error('job instances fetch failed', err);
+            ci.jobsCache[system] = { loading: false, error: err.message, data: null };
+        }
+        const stillRelevant = currentCi === ci && currentEvidenceTab === 'jobs' &&
+                               ci.activeJobSubTab === system && document.getElementById('evidenceTabContent');
+        if (stillRelevant) {
+            document.getElementById('evidenceTabContent').innerHTML = renderJobsTab(ci);
+        }
+    }
+
+    function renderJobInstancesTable(data) {
+        const instances = (data && data.instances) || [];
+        const rows = instances.map(inst => {
+            const isSuccess = (inst.status || '').toLowerCase() === 'success';
+            const color = isSuccess ? 'var(--green)' : '#ff3b30';
+            const bg = isSuccess ? 'rgba(40,205,65,0.1)' : 'rgba(255,59,48,0.1)';
+            return `
+                <tr>
+                    <td>${inst.run_id || 'N/A'}</td>
+                    <td>${inst.start_time || 'N/A'}</td>
+                    <td>${inst.end_time || 'N/A'}</td>
+                    <td>${inst.duration_minutes != null ? inst.duration_minutes + ' min' : 'N/A'}</td>
+                    <td><span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.7rem; font-weight:700; color:${color}; background:${bg};">${inst.status || 'Unknown'}</span></td>
+                </tr>
+            `;
+        }).join('');
+        return `
+            <div class="label">Last 5 Job Executions</div>
+            <table class="evidence-table">
+                <thead><tr><th>Run ID</th><th>Start Time</th><th>End Time</th><th>Duration</th><th>Status</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="5" class="text-muted small">No execution history available.</td></tr>`}</tbody>
+            </table>
+        `;
+    }
+
+    /**
+     * Control-M / AutoSys job execution history. DUMMY DATA in the backend
+     * for now (no real Control-M/AutoSys API integration yet) — see the
+     * module note above controlm_job_instances()/autosys_job_instances()
+     * in views.py. Response shape is already what a real integration
+     * would return, so only the backend's data source needs to change
+     * later, not this frontend code.
+     *
+     *   GET {API_BASE}/api/triage/jobs/<controlm|autosys>/?job_name=<name>
+     *   -> { job_name, system, instances: [{ run_id, start_time, end_time, status, duration_minutes }, ...] }
+     */
+    const JOB_INSTANCES_URL = (jobName, system) =>
+        `${API_BASE}/api/triage/jobs/${system}/?job_name=${encodeURIComponent(jobName)}`;
+
+    async function fetchJobInstances(jobName, system) {
+        if (DEMO_MODE) return generateDemoJobInstances(jobName, system);
+        const res = await fetch(JOB_INSTANCES_URL(jobName, system), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`Job instances fetch failed (HTTP ${res.status})`);
+        return res.json();
+    }
+
+    function generateDemoJobInstances(jobName, system) {
+        const rand = seededRandom(`${jobName}:${system}`);
+        const statuses = ['Success', 'Success', 'Failure', 'Success', 'Success'];
+        const now = new Date();
+        const instances = statuses.map((status, i) => {
+            const start = new Date(now.getTime() - (i + 1) * 24 * 60 * 60000);
+            const durationMinutes = 5 + Math.floor(rand() * 40);
+            const end = new Date(start.getTime() + durationMinutes * 60000);
+            return {
+                run_id: `${system.toUpperCase()}-${1000 + i}`,
+                start_time: start.toISOString(),
+                end_time: end.toISOString(),
+                status,
+                duration_minutes: durationMinutes
+            };
+        });
+        return new Promise(resolve => {
+            setTimeout(() => resolve({ job_name: jobName, system, instances }), 300);
+        });
     }
 
     function renderFirewallForm(ci) {
