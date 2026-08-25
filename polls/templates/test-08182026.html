@@ -1703,10 +1703,10 @@ ASSET_INFO_CI_FIELD = "cmdb_ci"           # "Asset Info (CI)" — same field as 
 AFFECTED_CI_FIELD = "u_affected_ci"       # TODO: confirm real field name — likely custom
 EXTRA_IMPACTED_CI_FIELD = "u_impacted_ci"  # TODO: confirm real field name — likely custom; distinct from cmdb_ci if your instance tracks it separately
 
-# Server naming convention: exactly 14 characters, starting with one of
-# these four 3-character prefixes (case-insensitive). Non-capturing group
-# so re.findall() returns the full match, not just the prefix.
-SERVER_NAME_PATTERN = re.compile(r'\b(?:he2|he3|or1|or2)[a-zA-Z0-9]{11}\b', re.IGNORECASE)
+# Server naming convention: 14 OR 15 characters total, starting with one
+# of these four 3-character prefixes (case-insensitive). Non-capturing
+# group so re.findall() returns the full match, not just the prefix.
+SERVER_NAME_PATTERN = re.compile(r'\b(?:he2|he3|or1|or2)[a-zA-Z0-9]{11,12}\b', re.IGNORECASE)
 
 
 def _extract_server_names(text):
