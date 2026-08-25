@@ -134,6 +134,22 @@
         .metric-subtabs { display: inline-flex; background: rgba(0,0,0,0.05); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
         .metric-subtab { border: none; background: transparent; padding: 6px 14px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; color: var(--text-sec); cursor: pointer; transition: 0.15s; }
         .metric-subtab.active { background: #fff; color: var(--text-main); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .metric-subtabs-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+        .metric-subtabs-row .metric-subtabs { margin-bottom: 0; }
+        .time-range-picker { position: relative; }
+        .trp-toggle { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; color: var(--text-main); cursor: pointer; }
+        .trp-toggle:hover { border-color: var(--blue); color: var(--blue); }
+        .trp-menu { display: none; position: absolute; right: 0; top: calc(100% + 6px); background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 10px; z-index: 50; width: 260px; }
+        .trp-menu.open { display: block; }
+        .trp-quick-options { display: flex; flex-direction: column; gap: 2px; }
+        .trp-quick-options button { text-align: left; background: none; border: none; padding: 7px 8px; border-radius: 6px; font-size: 0.78rem; color: var(--text-main); cursor: pointer; width: 100%; }
+        .trp-quick-options button:hover { background: rgba(0,113,227,0.08); color: var(--blue); }
+        .trp-divider { height: 1px; background: var(--border); margin: 8px 0; }
+        .trp-custom-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-sec); font-weight: 700; margin-bottom: 6px; }
+        .trp-input { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 0.75rem; margin-bottom: 6px; font-family: inherit; }
+        .trp-to { font-size: 0.68rem; color: var(--text-sec); text-align: center; margin: -2px 0 6px; }
+        .trp-apply-btn { width: 100%; background: var(--blue); color: #fff; border: none; border-radius: 6px; padding: 7px; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
+        .trp-apply-btn:hover { opacity: 0.9; }
         .evidence-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.8rem; }
         .evidence-table th { text-align: left; font-size: 0.63rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-sec); padding: 8px 6px; border-bottom: 1px solid var(--border); }
         .evidence-table td { padding: 8px 6px; border-bottom: 1px solid rgba(0,0,0,0.04); }
@@ -210,6 +226,10 @@
                 <div class="search-container" style="margin:0; width:100%;">
                     <i class="bi bi-search" style="position: absolute; left: 15px; top: 12px; color: var(--text-sec);"></i>
                     <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch(event)">
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;" title="When checked, pressing Enter always starts a fresh triage — even if this incident was already triaged successfully. When unchecked, an existing successful triage is reused automatically.">
+                    <input type="checkbox" id="forceRetriageCheckbox" style="cursor:pointer; margin:0;">
+                    <label for="forceRetriageCheckbox" class="small text-muted" style="cursor:pointer; white-space:nowrap; margin:0;">Force Retriage</label>
                 </div>
                 <button id="tryDemoBtn" class="btn-fw-check" style="white-space:nowrap; flex-shrink:0;" onclick="tryDemoData()">
                     <i class="bi bi-magic"></i> Try Demo Data
@@ -335,15 +355,6 @@
             <div class="text-muted small mb-2" id="resultDetail">Incident correlated successfully.</div>
             <button class="btn-triage-done" style="width:100%;" onclick="closeTriage()">Done</button>
         </div>
-        <div id="triageConfirm" style="display:none;">
-            <div class="confirm-icon-wrap"><i class="bi bi-arrow-repeat" style="font-size:1.6rem; color:#ff9f0a;"></i></div>
-            <div class="fw-bold mb-1" style="font-size:1.1rem;">Already Triaged</div>
-            <div class="text-muted small mb-3">Incident <b id="confirmIncidentId">—</b> has already been triaged. Redo the triage?</div>
-            <div class="triage-btn-row">
-                <button class="btn-triage-secondary" onclick="keepTriageSuccessful()">Keep Successful</button>
-                <button class="btn-triage-done" style="margin-top:0;" onclick="confirmRedoTriage()">Redo Triage</button>
-            </div>
-        </div>
         <div id="triageInfo" style="display:none;">
             <div class="confirm-icon-wrap" style="background: rgba(0,113,227,0.12);">
                 <i class="bi bi-hourglass-split" style="font-size:1.6rem; color: var(--blue);"></i>
@@ -460,7 +471,7 @@
 
         let inc = dataRepo.find(i => i.id === incId);
         if (!inc) {
-            inc = { id: incId, app: 'N/A', desc: '', changes: [], group: 'N/A', assignedTo: '', prio: 'N/A', state: 'N/A', cis: [], fix: '', action: '', confidence: null, feedback: null, evidenceByAsset: {}, triggered_by: null, created_at: null, last_update: null };
+            inc = { id: incId, app: 'N/A', desc: '', changes: [], group: 'N/A', assignedTo: '', prio: 'N/A', state: 'N/A', cis: [], fix: '', action: '', confidence: null, feedback: null, triggered_by: null, created_at: null, last_update: null };
             dataRepo.push(inc);
         }
         currentInc = inc;
@@ -524,20 +535,19 @@
      * the same inc.changes[] array — adjust the field names in the mapping
      * below once you share a real sample with multiple changes.
      *
-     * `evidence` is one entry per asset — `hostname` is the asset identifier
-     * and `technical_evidence` is that asset's log text. An incident with
-     * multiple assets simply has multiple evidence entries with different
-     * hostnames. There's still no dedicated "assets"/"cis" list in this API,
-     * so Asset Inventory rows are built from the unique hostnames in
-     * `evidence` (if your backend later adds a real data.assets/data.cis
-     * array, it's picked up automatically and takes priority instead).
-     * `asset_details` and `fetched_at` are carried through and shown in the
-     * asset panel; `elastic_query_meta` (the underlying Elastic query) isn't
-     * surfaced in the UI.
+     * `evidence` (hostname + technical_evidence per asset) is present in
+     * this response but no longer used anywhere — Asset Inventory is
+     * exclusively ServiceNow-sourced (see applySnowServerListToAssetInventory()),
+     * and Technical Evidence's card-level preview is a static prompt (see
+     * showAssetEvidencePrompt()), not populated from this array or from
+     * data.assets/data.cis/data.configuration_items even if your backend
+     * later adds one. Real technical evidence comes from the CPU/Memory/
+     * Disk/Network/Raw Log tabs, which query Elasticsearch directly.
      */
     function mapChangesRaw(changesRaw, inc) {
         return (changesRaw || []).map(item => ({
             changeNumber: item.change_number || item.chg || item.number || 'Unknown',
+            changeUrl: item.change_url || null, // ServiceNow deep link — see _snow_record_url() in views.py
             submitter: item.submitter || item.submitted_by || item.requested_by,
             affectedCi: item.affected_ci || item.affected_ci_name || item.ci || item.asset,
             changeCoordinator: item.change_coordinator || item.coordinator,
@@ -545,11 +555,9 @@
             endTime: item.end_time || item.planned_end || item.end,
             status: item.status,
             appId: item.app_id || item.application || (inc && inc.app),
+            alarmSuppressionRequests: item.alarm_suppression_requests || item.u_alarm_suppression || [],
             impactedCis: (item.impacted_cis || item.impacted_ci_list || item.impacted_configuration_items || []).map(x => ({
-                ciName: x.ci_name || x.name || x.hostname || 'Unknown',
-                suppressionStatus: x.suppression_status || x.suppressed_status ||
-                    (x.suppressed != null ? (x.suppressed ? 'Suppressed' : 'Not Suppressed') : 'N/A'),
-                suppressionRequestNumber: x.suppression_request_number || x.suppression_req || x.suppression_ticket || 'N/A'
+                ciName: x.ci_name || x.name || x.hostname || 'Unknown'
             }))
         }));
     }
@@ -557,7 +565,6 @@
     function applyIncidentDetails(inc, data) {
         const session  = (data.session && data.session[0]) || {};
         const metadata = (data.metadata && data.metadata[0]) || {};
-        const evidenceArr = Array.isArray(data.evidence) ? data.evidence : [];
 
         // Incident
         inc.app = session.app_id || inc.app;
@@ -601,52 +608,43 @@
         inc.action = inc.action || 'Review Manually'; // no explicit action field in this response
         document.getElementById('m-fix').innerText = inc.fix;
 
-        // Asset Inventory + per-asset evidence, derived from the `evidence`
-        // array — CONFIRMED real shape, one entry per asset:
-        //   { id, session_id, hostname, asset_details, technical_evidence,
-        //     elastic_query_meta, fetched_at }
-        // `hostname` is the asset identifier and `technical_evidence` is the
-        // actual log/evidence text. There's still no separate assets/cis
-        // list in this API, so Asset Inventory rows come straight from the
-        // unique hostnames seen here — one incident can (and does) have
-        // multiple assets, each with its own technical_evidence.
-        inc.evidenceByAsset = {};
-        const assetsFromEvidence = [];
-        evidenceArr.forEach(e => {
-            if (typeof e === 'string') return; // no asset identifier to key off
-            const assetKey = (e.hostname || e.asset_id || e.ci || e.asset || e.ci_name || e.name || '').toString();
-            const logText = e.technical_evidence || e.log || e.evidence || e.description || JSON.stringify(e);
-            if (!assetKey) return;
-            inc.evidenceByAsset[assetKey.toLowerCase()] = logText;
-            assetsFromEvidence.push({
-                id: assetKey,
-                name: assetKey,               // hostname doubles as the display name
-                crit: e.criticality || e.crit || 'N/A',   // not present in this API — stays N/A unless a real assets list supplies it
-                patch: e.last_patch || e.patch || 'N/A',  // same as above
-                details: e.asset_details || '',
-                fetchedAt: e.fetched_at || null,
-                log: logText
-            });
-        });
-
-        const assetsRaw = data.assets || data.cis || data.configuration_items || assetsFromEvidence;
-        inc.cis = assetsRaw.map(item => ({
-            id: item.sys_id || item.asset_id || item.hostname || item.id || item.name || item.ci_name,
-            name: item.hostname || item.name || item.ci_name || item.display_value || item.sys_id || 'Unknown Asset',
-            crit: item.criticality || item.crit || 'N/A',
-            patch: item.last_patch || item.patch || item.sys_updated_on || 'N/A',
-            details: item.asset_details || item.details || '',
-            fetchedAt: item.fetched_at || item.fetchedAt || null,
-            log: item.log || item.evidence || item.technical_evidence || null,
-            metricsCache: {} // populated lazily per tab — see loadEvidenceTab()
-        }));
-
+        // Asset Inventory is exclusively ServiceNow-sourced now — see
+        // applySnowServerListToAssetInventory(), triggered by the parallel
+        // fetch started in runTriage(). Deliberately NOT populated from
+        // data.assets/data.cis/data.configuration_items/evidence hostnames
+        // here (that was the old behavior — removed on purpose). This call
+        // just makes sure the list reflects the ServiceNow fetch's current
+        // state immediately (covers the race where that fetch already
+        // resolved before this function ran); renderCiList() itself shows
+        // a loading/error state correctly if it hasn't resolved yet.
+        applySnowServerListToAssetInventory(inc, inc.id.toUpperCase());
         renderCiList(inc);
+
+        // Linked Changes — now that inc.app is known, fetch live from
+        // ServiceNow automatically rather than waiting for the user to
+        // click the Linked Change card. Always refetches (no "already
+        // loaded" skip), so a Force Retriage reload gets fresh data too.
+        if (inc.app && inc.app !== 'N/A') {
+            loadLiveChanges(inc);
+        }
+
         setTimeout(draw, 50);
     }
 
     function renderCiList(inc) {
         const list = document.getElementById('ci-list');
+        const key = (inc.id || '').toUpperCase();
+        const cached = snowIncidentCache[key];
+
+        if (!cached || cached.loading) {
+            list.innerHTML = '<div class="text-muted small"><i class="bi bi-hourglass-split"></i> Loading assets from ServiceNow…</div>';
+            return;
+        }
+        if (cached.error) {
+            list.innerHTML = `<div class="text-muted small"><i class="bi bi-exclamation-triangle"></i> Failed to load assets: ${cached.error}</div>`;
+            return;
+        }
+
         list.innerHTML = '';
         if (!inc.cis.length) {
             list.innerHTML = '<div class="text-muted small">No assets found for this incident.</div>';
@@ -655,7 +653,8 @@
         inc.cis.forEach(ci => {
             const d = document.createElement('div');
             d.className = 'ci-item';
-            d.innerHTML = `<span><b>${ci.name}</b></span> <i class="bi bi-chevron-right small text-muted"></i>`;
+            const icon = ci.type === 'job' ? 'bi-diagram-3' : 'bi-hdd-rack';
+            d.innerHTML = `<span><i class="bi ${icon} small text-muted" style="margin-right:6px;"></i><b>${ci.name}</b></span> <i class="bi bi-chevron-right small text-muted"></i>`;
             d.onclick = (e) => {
                 e.stopPropagation();
                 document.querySelectorAll('.ci-item').forEach(i => i.classList.remove('active'));
@@ -678,43 +677,20 @@
     async function selectAsset(ci) {
         currentCi = ci;
         showCiPanel(ci);
-        await loadAssetEvidence(ci);
+        showAssetEvidencePrompt(ci);
     }
 
-    async function loadAssetEvidence(ci) {
-        document.getElementById('log-summary').innerText = 'Loading evidence for ' + ci.name + '…';
-        document.getElementById('m-log').innerText = 'Fetching technical evidence…';
-
-        if (ci.log) {
-            renderAssetEvidence(ci);
-            return;
-        }
-
-        const key = (ci.id || ci.name || '').toString().toLowerCase();
-        if (currentInc && currentInc.evidenceByAsset && currentInc.evidenceByAsset[key]) {
-            ci.log = currentInc.evidenceByAsset[key];
-            renderAssetEvidence(ci);
-            return;
-        }
-
-        try {
-            const data = await fetchAssetEvidence(currentInc.id, ci.id || ci.name);
-            ci.log = data.log || data.evidence ||
-                     (Array.isArray(data.logs) ? data.logs.join('\n') : null) ||
-                     'No evidence returned for this asset.';
-            if (currentCi !== ci) return; // a different asset was clicked before this resolved
-            renderAssetEvidence(ci);
-        } catch (err) {
-            console.error('asset evidence load failed', err);
-            if (currentCi !== ci) return;
-            document.getElementById('log-summary').innerText = 'Error loading evidence';
-            document.getElementById('m-log').innerText = 'Failed to load technical evidence for ' + ci.name + '.';
-        }
-    }
-
-    function renderAssetEvidence(ci) {
-        document.getElementById('log-summary').innerText = 'Evidence for ' + ci.name;
-        document.getElementById('m-log').innerText = ci.log;
+    function showAssetEvidencePrompt(ci) {
+        // Deliberately static, no fetch — Technical Evidence's card-level
+        // preview no longer sources from /api/triage/details/ or
+        // /api/triage/evidence/ (the internal triage pipeline). Asset
+        // Inventory is exclusively ServiceNow-sourced, and those endpoints
+        // have no reliable correspondence to ServiceNow-derived asset
+        // names. Live data comes from the Technical Evidence tabs below
+        // (CPU/Memory/Disk/Network/Raw Log), which query Elasticsearch
+        // directly via host.name.
+        document.getElementById('log-summary').innerText = ci.name;
+        document.getElementById('m-log').innerText = 'Open a tab below (CPU, Memory, etc.) to view live technical evidence for this asset.';
     }
 
     /* ---------- Detail panel logic ---------- */
@@ -724,7 +700,16 @@
     function openPanel(eyebrow, title, bodyHtml) {
         panelToken++;
         document.getElementById('panel-eyebrow').innerText = eyebrow;
-        document.getElementById('panel-title').innerText = title;
+        const titleEl = document.getElementById('panel-title');
+        // Most panel titles are plain text (CI names, "Technical Evidence",
+        // etc.) and stay on the safe innerText path. Only when a caller
+        // explicitly hands us a pre-built <a> tag (see showIncPanel()) do
+        // we render it as HTML — everything else keeps its escaping.
+        if (typeof title === 'string' && title.trim().startsWith('<a ')) {
+            titleEl.innerHTML = title;
+        } else {
+            titleEl.innerText = title;
+        }
         document.getElementById('panel-body').innerHTML = bodyHtml;
         document.getElementById('sidePanel').classList.add('open');
         document.getElementById('panelOverlay').classList.add('open');
@@ -745,34 +730,152 @@
         btn.title = expanded ? 'Collapse panel' : 'Expand panel';
     }
 
+    // ServiceNow incident record cache — keyed by incident number
+    // (uppercase). Populated by fetchAndCacheSnowIncidentDetails(), called
+    // from runTriage() in parallel with the existing lookup/trigger flow.
+    // Independent of dataRepo/currentInc so it survives across incidents.
+    const snowIncidentCache = {};
+    let currentIncPanelInc = null; // tracks which incident's Incident Record panel is open, to guard async re-renders
+
+    async function fetchAndCacheSnowIncidentDetails(incidentNumber) {
+        const key = incidentNumber.toUpperCase();
+        snowIncidentCache[key] = { loading: true, data: null, error: null };
+        try {
+            const data = await fetchServiceNowIncidentDetails(incidentNumber);
+            snowIncidentCache[key] = { loading: false, data, error: null };
+        } catch (err) {
+            console.error('ServiceNow incident details fetch failed', err);
+            snowIncidentCache[key] = { loading: false, data: null, error: err.message };
+        }
+        // Re-render only if the Incident Record panel is still open for
+        // this same incident — avoids clobbering the panel if the user
+        // has since selected a different incident or closed it.
+        if (currentIncPanelInc && currentIncPanelInc.id.toUpperCase() === key) {
+            showIncPanel();
+        }
+        // Refresh Asset Inventory with the ServiceNow-derived server list,
+        // if this is still the currently-selected incident. Doesn't wipe
+        // the existing (evidence-derived) list if ServiceNow returned zero
+        // servers — keeps whatever was already showing rather than going
+        // blank.
+        if (currentInc && currentInc.id.toUpperCase() === key) {
+            applySnowServerListToAssetInventory(currentInc, key);
+        }
+    }
+
+    function applySnowServerListToAssetInventory(inc, key) {
+        const cached = snowIncidentCache[key];
+        if (!cached || cached.loading || cached.error || !cached.data) return;
+        const servers = cached.data.servers || [];
+        const jobs = cached.data.jobs || [];
+
+        const serverCis = servers.map(name => ({
+            id: name,
+            name: name,
+            type: 'server',
+            crit: 'N/A',
+            patch: 'N/A',
+            details: '',
+            fetchedAt: null,
+            log: null, // Technical Evidence's card preview no longer sources from the internal triage pipeline — see showAssetEvidencePrompt()
+            metricsCache: {}
+        }));
+
+        // Control-M/AutoSys job "assets" — no host, so no metricsCache;
+        // their evidence is job execution history (jobsCache), not
+        // Elasticsearch metrics. See getEvidenceTabsForCi()/renderJobsTab().
+        const jobCis = jobs.map(job => ({
+            id: job.name,
+            name: job.name,
+            type: 'job',
+            jobSystem: job.system, // 'controlm' | 'autosys' — becomes the default sub-tab
+            crit: 'N/A',
+            patch: 'N/A',
+            details: '',
+            fetchedAt: null,
+            log: null,
+            jobsCache: {}
+        }));
+
+        inc.cis = [...serverCis, ...jobCis];
+        renderCiList(inc);
+    }
+
+    function escAttr(s) {
+        // Safe escaping for embedding text inside an HTML attribute (the
+        // description's full text goes into a title="" tooltip below) —
+        // reuses the browser's own escaping via a throwaway element rather
+        // than a hand-rolled regex, so it can't miss an edge case.
+        const div = document.createElement('div');
+        div.textContent = s == null ? '' : String(s);
+        return div.innerHTML.replace(/"/g, '&quot;');
+    }
+
+    function renderSnowIncidentSection(incId) {
+        const key = (incId || '').toUpperCase();
+        const cached = snowIncidentCache[key];
+
+        if (!cached || cached.loading) {
+            return `
+                <div class="text-muted small"><i class="bi bi-hourglass-split"></i> Loading from ServiceNow…</div>
+            `;
+        }
+        if (cached.error) {
+            return `
+                <div class="text-muted small"><i class="bi bi-exclamation-triangle"></i> Failed to load: ${cached.error}</div>
+            `;
+        }
+
+        const d = cached.data || {};
+        const descriptionHtml = d.description
+            ? `<div class="val" style="display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; cursor:help;" title="${escAttr(d.description)}">${d.description}</div>`
+            : `<div class="val text-muted">N/A</div>`;
+
+        return `
+            <div class="panel-chip">${d.status || 'Unknown'}</div>
+            <div class="label">Summary</div>
+            <div class="val">${d.summary || 'N/A'}</div>
+            <div class="label" style="margin-top:14px;">Description</div>
+            ${descriptionHtml}
+            <div class="panel-row" style="margin-top:14px;">
+                <div><div class="label">Number</div><div class="val">${d.number || 'N/A'}</div></div>
+                <div><div class="label">Caller</div><div class="val">${d.caller || 'N/A'}</div></div>
+            </div>
+            <div class="panel-row">
+                <div><div class="label">Opened</div><div class="val">${d.opened_at || 'N/A'}</div></div>
+                <div><div class="label">Opened By</div><div class="val">${d.opened_by || 'N/A'}</div></div>
+            </div>
+            <div class="panel-row">
+                <div><div class="label">Status</div><div class="val">${d.status || 'N/A'}</div></div>
+                <div><div class="label">Environment</div><div class="val">${d.environment || 'N/A'}</div></div>
+            </div>
+            <div class="panel-row">
+                <div><div class="label">Category</div><div class="val">${d.category || 'N/A'}</div></div>
+                <div><div class="label">Impacted CI</div><div class="val">${d.impacted_ci || 'N/A'}</div></div>
+            </div>
+            <div class="panel-row">
+                <div><div class="label">Priority</div><div class="val">${d.priority || 'N/A'}</div></div>
+                <div><div class="label">Assignment Group</div><div class="val">${d.assignment_group || 'N/A'}</div></div>
+            </div>
+            <div class="panel-row">
+                <div><div class="label">Assigned To</div><div class="val">${d.assigned_to || 'Unassigned'}</div></div>
+            </div>
+        `;
+    }
+
     function showIncPanel() {
-        if(!currentInc) return;
-        const inc = currentInc;
-        const hasTriageMeta = inc.triggered_by || inc.created_at || inc.last_update;
-        const changeCount = (inc.changes || []).length;
-        const chgSummary = changeCount === 0 ? 'None' : changeCount === 1 ? inc.changes[0].changeNumber : `${changeCount} changes`;
-        openPanel('Incident Record', inc.id, `
-            <div class="panel-chip">${inc.state}</div>
-            <div class="label">Description</div>
-            <div class="val">${inc.desc}</div>
-            <div class="panel-row">
-                <div><div class="label">Priority</div><div class="val">${inc.prio}</div></div>
-                <div><div class="label">State</div><div class="val">${inc.state}</div></div>
-            </div>
-            <div class="panel-row">
-                <div><div class="label">Assignment Group</div><div class="val">${inc.group}</div></div>
-                <div><div class="label">Assigned To</div><div class="val">${inc.assignedTo || 'Unassigned'}</div></div>
-            </div>
-            <div class="panel-row">
-                <div><div class="label">App ID</div><div class="val">${inc.app}</div></div>
-                <div><div class="label">Linked Change</div><div class="val">${chgSummary}</div></div>
-            </div>
-            ${hasTriageMeta ? `
-            <div class="panel-row">
-                <div><div class="label">Triaged By</div><div class="val">${inc.triggered_by || '—'}</div></div>
-                <div><div class="label">Last Updated</div><div class="val">${inc.last_update || inc.created_at || '—'}</div></div>
-            </div>` : ''}
-        `);
+        if (!currentInc) return;
+        currentIncPanelInc = currentInc;
+        // Purely ServiceNow-sourced — deliberately no fields from the
+        // internal triage pipeline (evidence/details, lookup, etc.) here;
+        // those are shown elsewhere (Linked Change panel, evidence tabs,
+        // AI Remediation panel).
+        const cached = snowIncidentCache[currentInc.id.toUpperCase()];
+        const incidentUrl = cached && cached.data && cached.data.incident_url;
+        const title = incidentUrl
+            ? `<a href="${incidentUrl}" target="_blank" rel="noopener noreferrer" style="color:inherit;">${currentInc.id}</a>`
+            : currentInc.id;
+        openPanel('Incident Record', title, renderSnowIncidentSection(currentInc.id));
     }
 
     let currentChangePanelInc = null; // tracks which incident's change panel is open, to guard async writes
@@ -847,34 +950,46 @@
         return changes.map((chg, idx) => renderSingleChangeBlock(chg, idx, changes.length)).join('');
     }
 
-    function renderSingleChangeBlock(chg, idx, total) {
-        const impactedRows = (chg.impactedCis || []).map(ci => {
-            const hasSuppressionTicket = ci.suppressionRequestNumber && ci.suppressionRequestNumber !== 'N/A';
-            const suppressionCell = hasSuppressionTicket
-                ? ci.suppressionRequestNumber
-                : '<span class="text-muted">There was no suppression request</span>';
-            return `
-            <tr>
-                <td>${ci.ciName}</td>
-                <td>${ci.suppressionStatus}</td>
-                <td>${suppressionCell}</td>
-            </tr>
-        `;
-        }).join('');
+    const CHANGE_SERVERS_EXPAND_THRESHOLD = 8;
 
-        const impactedTable = (chg.impactedCis && chg.impactedCis.length) ? `
-            <div class="label" style="margin-top:14px;">Servers Under This Change</div>
-            <table class="evidence-table">
-                <thead><tr><th>Server / CI</th><th>Suppression Status</th><th>Suppression Request #</th></tr></thead>
-                <tbody>${impactedRows}</tbody>
-            </table>
-        ` : `<div class="text-muted small" style="margin-top:10px;">No servers listed as impacted by this change.</div>`;
+    function renderSingleChangeBlock(chg, idx, total) {
+        const allImpactedNames = (chg.impactedCis || []).map(ci => ci.ciName).filter(Boolean);
+
+        // Only show servers that are ALSO in Asset Inventory — unless none
+        // of them match, in which case fall back to showing the full list
+        // (better than showing nothing at all).
+        const assetNames = new Set((currentInc && currentInc.cis || []).map(ci => (ci.name || '').toLowerCase()));
+        const matchingNames = allImpactedNames.filter(name => assetNames.has(name.toLowerCase()));
+        const displayNames = matchingNames.length > 0 ? matchingNames : allImpactedNames;
+
+        let serversHtml;
+        if (displayNames.length === 0) {
+            serversHtml = `<div class="text-muted small" style="margin-top:10px;">No servers listed as impacted by this change.</div>`;
+        } else {
+            const visible = displayNames.slice(0, CHANGE_SERVERS_EXPAND_THRESHOLD);
+            const hidden = displayNames.slice(CHANGE_SERVERS_EXPAND_THRESHOLD);
+            const blockId = `chg-servers-${idx}`;
+            const rowHtml = (name) => `<div class="ci-item" style="cursor:default;"><span>${name}</span></div>`;
+            const hiddenBlock = hidden.length
+                ? `<div id="${blockId}-more" style="display:none;">${hidden.map(rowHtml).join('')}</div>
+                   <button type="button" class="btn btn-sm btn-outline-secondary" style="margin-top:6px;" onclick="toggleChangeServerList('${blockId}', this)">+ ${hidden.length} more</button>`
+                : '';
+            serversHtml = `
+                <div class="label" style="margin-top:14px;">Servers Under This Change</div>
+                <div>${visible.map(rowHtml).join('')}</div>
+                ${hiddenBlock}
+            `;
+        }
+
+        const changeNumberHtml = chg.changeUrl
+            ? `<a href="${chg.changeUrl}" target="_blank" rel="noopener noreferrer">${chg.changeNumber}</a>`
+            : chg.changeNumber;
 
         return `
             <div style="${idx > 0 ? 'margin-top:24px; padding-top:20px; border-top:1px solid var(--border);' : ''}">
                 <div class="panel-chip">${chg.status || 'Unknown Status'}</div>
                 <div class="fw-bold mb-2" style="font-size:1rem;">
-                    ${chg.changeNumber}${total > 1 ? ` <span class="text-muted small fw-normal">(${idx + 1} of ${total})</span>` : ''}
+                    ${changeNumberHtml}${total > 1 ? ` <span class="text-muted small fw-normal">(${idx + 1} of ${total})</span>` : ''}
                 </div>
                 <div class="panel-row">
                     <div><div class="label">Submitter</div><div class="val">${chg.submitter || 'N/A'}</div></div>
@@ -888,9 +1003,22 @@
                     <div><div class="label">Start Time</div><div class="val">${chg.startTime || 'N/A'}</div></div>
                     <div><div class="label">End Time</div><div class="val">${chg.endTime || 'N/A'}</div></div>
                 </div>
-                ${impactedTable}
+                <div class="label" style="margin-top:14px;">Alarm Suppression Requests</div>
+                <div class="val">${(chg.alarmSuppressionRequests && chg.alarmSuppressionRequests.length)
+                    ? chg.alarmSuppressionRequests.join(', ')
+                    : '<span class="text-muted">There was no suppression request</span>'}</div>
+                ${serversHtml}
             </div>
         `;
+    }
+
+    function toggleChangeServerList(blockId, btn) {
+        const moreEl = document.getElementById(blockId + '-more');
+        if (!moreEl) return;
+        const isHidden = moreEl.style.display === 'none';
+        moreEl.style.display = isHidden ? '' : 'none';
+        const hiddenCount = moreEl.children.length;
+        btn.textContent = isHidden ? 'Show less' : `+ ${hiddenCount} more`;
     }
 
     /* ---------- Asset Inventory panel: full CMDB-style asset details ---------- */
@@ -1050,11 +1178,25 @@
         { id: 'memory', label: 'Memory' },
         { id: 'disk', label: 'Disk' },
         { id: 'network', label: 'Network' },
+        { id: 'services', label: 'Services' },
+        { id: 'processes', label: 'Processes' },
+        { id: 'netstat', label: 'Netstat' },
         { id: 'health', label: 'Health Check' },
         { id: 'firewall', label: 'Firewall' },
         { id: 'sslcerts', label: 'SSL Certs' },
         { id: 'raw', label: 'Raw Log' }
     ];
+
+    const JOB_EVIDENCE_TABS = [
+        { id: 'jobs', label: 'Jobs' }
+    ];
+
+    function getEvidenceTabsForCi(ci) {
+        // Control-M/AutoSys job "assets" have no host, so none of the
+        // CPU/Memory/Disk/etc tabs apply — job data isn't in Elasticsearch
+        // at all. Only the Jobs tab is shown for these.
+        return (ci && ci.type === 'job') ? JOB_EVIDENCE_TABS : EVIDENCE_TABS;
+    }
 
     let currentEvidenceTab = 'cpu';
 
@@ -1072,13 +1214,20 @@
             `);
             return;
         }
-        openPanel('Technical Evidence', ci.name, renderEvidenceShell());
+        // Reset to a valid default tab when switching between a job CI and
+        // a server CI (e.g. currentEvidenceTab might still be 'cpu' from a
+        // previously-selected server, which isn't a valid tab for a job).
+        const tabs = getEvidenceTabsForCi(ci);
+        if (!tabs.some(t => t.id === currentEvidenceTab)) {
+            currentEvidenceTab = tabs[0].id;
+        }
+        openPanel('Technical Evidence', ci.name, renderEvidenceShell(ci));
         bindEvidenceTabHandlers(ci);
         loadEvidenceTab(ci, currentEvidenceTab);
     }
 
-    function renderEvidenceShell() {
-        const tabButtons = EVIDENCE_TABS.map(t =>
+    function renderEvidenceShell(ci) {
+        const tabButtons = getEvidenceTabsForCi(ci).map(t =>
             `<button class="evidence-tab${t.id === currentEvidenceTab ? ' active' : ''}" data-evidence-tab="${t.id}">${t.label}</button>`
         ).join('');
 
@@ -1104,7 +1253,8 @@
     const EVIDENCE_TAB_LABELS = {
         cpu: 'CPU metrics', memory: 'memory metrics', disk: 'disk metrics',
         network: 'network data', health: 'health check', sslcerts: 'SSL certificates',
-        raw: 'raw log data'
+        raw: 'raw log data', jobs: 'job execution history',
+        services: 'services', processes: 'processes', netstat: 'listening ports'
     };
 
     function fetchEvidenceTabData(tab, incId, assetId) {
@@ -1125,6 +1275,14 @@
             // wires the button; the actual check only fires on click.
             contentEl.innerHTML = renderFirewallForm(ci);
             bindFirewallForm(ci);
+            return;
+        }
+
+        if (tab === 'jobs') {
+            // Own sub-tab (Control-M/AutoSys) and per-system caching,
+            // managed entirely inside renderJobsTab() — bypasses the
+            // generic single-shot ci.metricsCache path below.
+            contentEl.innerHTML = renderJobsTab(ci);
             return;
         }
 
@@ -1155,12 +1313,152 @@
         }
     }
 
+    // Search term state per list-based tab, kept separate from
+    // lastMetricTabType/Data so a search survives switching between
+    // Historic/Live (which re-renders via renderEvidenceTab, reading this
+    // same state back out).
+    const evidenceSearchTerms = { services: '', processes: '', netstat: '' };
+
+    function currentSectionItems(data) {
+        const section = currentMetricSubTab === 'historic' ? data.historic : data.current;
+        return { section: section || {}, items: (section && section.items) || [] };
+    }
+
+    function listWindowNote(section) {
+        return currentMetricSubTab === 'historic'
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open (${section.window_start})</div>` : '')
+            : renderLiveWindowNote(section);
+    }
+
+    function renderServicesTab(data) {
+        lastMetricTabType = 'services';
+        lastMetricTabData = data;
+        const { section, items } = currentSectionItems(data);
+        return `
+            ${renderMetricSubTabBar(true)}
+            ${listWindowNote(section)}
+            <input type="text" class="form-control form-control-sm" placeholder="Search services…"
+                   id="searchBox_services" value="${escAttr(evidenceSearchTerms.services)}"
+                   oninput="filterEvidenceList('services')" style="margin-bottom:10px; max-width:280px;">
+            <table class="evidence-table">
+                <thead><tr><th>Service</th><th>State</th><th>Sub-State</th><th>Last Seen</th></tr></thead>
+                <tbody id="listBody_services">${renderServicesRows(items, evidenceSearchTerms.services)}</tbody>
+            </table>
+        `;
+    }
+
+    function renderServicesRows(items, searchTerm) {
+        const term = (searchTerm || '').toLowerCase();
+        const filtered = term ? items.filter(s => (s.name || '').toLowerCase().includes(term)) : items;
+        if (!filtered.length) return `<tr><td colspan="4" class="text-muted small">No services ${term ? 'match your search' : 'found'}.</td></tr>`;
+        return filtered.map(s => {
+            const isRunning = (s.state || '').toLowerCase() === 'running';
+            const color = isRunning ? 'var(--green)' : '#ff3b30';
+            return `
+                <tr>
+                    <td>${s.name || 'N/A'}</td>
+                    <td><span style="color:${color}; font-weight:600;">${s.state || 'Unknown'}</span></td>
+                    <td>${s.sub_state || 'N/A'}</td>
+                    <td>${s.last_seen || 'N/A'}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function renderProcessesTab(data) {
+        lastMetricTabType = 'processes';
+        lastMetricTabData = data;
+        const { section, items } = currentSectionItems(data);
+        return `
+            ${renderMetricSubTabBar(true)}
+            ${listWindowNote(section)}
+            <input type="text" class="form-control form-control-sm" placeholder="Search processes…"
+                   id="searchBox_processes" value="${escAttr(evidenceSearchTerms.processes)}"
+                   oninput="filterEvidenceList('processes')" style="margin-bottom:10px; max-width:280px;">
+            <table class="evidence-table">
+                <thead><tr><th>PID</th><th>PPID</th><th>User</th><th>Command</th><th>State</th></tr></thead>
+                <tbody id="listBody_processes">${renderProcessesRows(items, evidenceSearchTerms.processes)}</tbody>
+            </table>
+        `;
+    }
+
+    function renderProcessesRows(items, searchTerm) {
+        const term = (searchTerm || '').toLowerCase();
+        const filtered = term
+            ? items.filter(p => (p.name || '').toLowerCase().includes(term) || (p.cmdline || '').toLowerCase().includes(term))
+            : items;
+        if (!filtered.length) return `<tr><td colspan="5" class="text-muted small">No processes ${term ? 'match your search' : 'found'}.</td></tr>`;
+        return filtered.map(p => `
+            <tr>
+                <td>${p.pid != null ? p.pid : 'N/A'}</td>
+                <td>${p.ppid != null ? p.ppid : 'N/A'}</td>
+                <td>${p.user_name || 'N/A'}</td>
+                <td style="max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escAttr(p.cmdline || '')}">${p.cmdline || p.name || 'N/A'}</td>
+                <td>${p.state || 'N/A'}</td>
+            </tr>
+        `).join('');
+    }
+
+    function renderNetstatTab(data) {
+        lastMetricTabType = 'netstat';
+        lastMetricTabData = data;
+        const { section, items } = currentSectionItems(data);
+        return `
+            ${renderMetricSubTabBar(true)}
+            ${listWindowNote(section)}
+            <input type="text" class="form-control form-control-sm" placeholder="Search by port or process…"
+                   id="searchBox_netstat" value="${escAttr(evidenceSearchTerms.netstat)}"
+                   oninput="filterEvidenceList('netstat')" style="margin-bottom:10px; max-width:280px;">
+            <table class="evidence-table">
+                <thead><tr><th>Proto</th><th>Local Address</th><th>Port</th><th>PID</th><th>Program</th></tr></thead>
+                <tbody id="listBody_netstat">${renderNetstatRows(items, evidenceSearchTerms.netstat)}</tbody>
+            </table>
+        `;
+    }
+
+    function renderNetstatRows(items, searchTerm) {
+        const term = (searchTerm || '').toLowerCase();
+        const filtered = term
+            ? items.filter(s => String(s.local_port || '').includes(term) || (s.process_name || '').toLowerCase().includes(term))
+            : items;
+        if (!filtered.length) return `<tr><td colspan="5" class="text-muted small">No listening sockets ${term ? 'match your search' : 'found'}.</td></tr>`;
+        return filtered.map(s => `
+            <tr>
+                <td>${(s.protocol || 'N/A').toUpperCase()}</td>
+                <td>${s.local_ip || '0.0.0.0'}</td>
+                <td>${s.local_port != null ? s.local_port : 'N/A'}</td>
+                <td>${s.pid != null ? s.pid : 'N/A'}</td>
+                <td>${s.process_name || 'N/A'}</td>
+            </tr>
+        `).join('');
+    }
+
+    // Shared by all three tabs above — updates the search term and
+    // re-renders ONLY the table body (not the whole tab, which would blow
+    // away input focus mid-keystroke).
+    function filterEvidenceList(tab) {
+        const input = document.getElementById('searchBox_' + tab);
+        if (!input || !lastMetricTabData) return;
+        evidenceSearchTerms[tab] = input.value;
+
+        const { items } = currentSectionItems(lastMetricTabData);
+        const bodyEl = document.getElementById('listBody_' + tab);
+        if (!bodyEl) return;
+
+        if (tab === 'services') bodyEl.innerHTML = renderServicesRows(items, input.value);
+        else if (tab === 'processes') bodyEl.innerHTML = renderProcessesRows(items, input.value);
+        else if (tab === 'netstat') bodyEl.innerHTML = renderNetstatRows(items, input.value);
+    }
+
     const EVIDENCE_TAB_RENDERERS = {
         disk: renderDiskTab,
         network: renderNetworkTab,
         health: renderHealthCheckTab,
         sslcerts: renderSslCertsTab,
-        raw: renderRawLogTab
+        raw: renderRawLogTab,
+        services: renderServicesTab,
+        processes: renderProcessesTab,
+        netstat: renderNetstatTab
     };
 
     function renderEvidenceTab(tab, data) {
@@ -1181,7 +1479,7 @@
             : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
 
         return `
-            ${renderMetricSubTabBar()}
+            ${renderMetricSubTabBar(false)}
             ${windowNote}
             <div class="label">Raw Log Output</div>
             <pre>${section.log || 'No evidence available yet.'}</pre>
@@ -1212,19 +1510,162 @@
     let lastMetricTabType = null;        // remembers what to re-render when the sub-tab is switched
     let lastMetricTabData = null;
 
+    // Time-range picker state for the Live sub-tab (CPU/Memory/Disk/Network
+    // only — Raw Log keeps the fixed trailing window). Shared/global, same
+    // pattern as currentMetricSubTab above. null start/end = use the
+    // backend's own default trailing window, same as before this feature.
+    let liveRangeStart = null;
+    let liveRangeEnd = null;
+    let liveRangeLabel = 'Live';
+
     function switchMetricSubTab(sub) {
         currentMetricSubTab = sub;
         if (!lastMetricTabType || !lastMetricTabData) return;
         renderEvidenceTab(lastMetricTabType, lastMetricTabData);
     }
 
-    function renderMetricSubTabBar() {
+    function renderMetricSubTabBar(showRangePicker) {
+        const pickerHtml = (showRangePicker && currentMetricSubTab === 'current') ? renderTimeRangePicker() : '';
         return `
-            <div class="metric-subtabs">
-                <button class="metric-subtab${currentMetricSubTab === 'current' ? ' active' : ''}" onclick="switchMetricSubTab('current')">Current</button>
-                <button class="metric-subtab${currentMetricSubTab === 'historic' ? ' active' : ''}" onclick="switchMetricSubTab('historic')">Historic</button>
+            <div class="metric-subtabs-row">
+                <div class="metric-subtabs">
+                    <button class="metric-subtab${currentMetricSubTab === 'current' ? ' active' : ''}" onclick="switchMetricSubTab('current')">Live</button>
+                    <button class="metric-subtab${currentMetricSubTab === 'historic' ? ' active' : ''}" onclick="switchMetricSubTab('historic')">Historic</button>
+                </div>
+                ${pickerHtml}
             </div>
         `;
+    }
+
+    function toDatetimeLocalValue(isoString) {
+        // Converts a stored ISO/UTC string back into the local-time
+        // "YYYY-MM-DDTHH:mm" format a <input type="datetime-local"> needs
+        // for its value — using local getters (getFullYear/getHours/etc.,
+        // not the UTC variants), so this correctly reflects the value in
+        // whatever timezone the browser is running in (e.g. EST), not UTC.
+        if (!isoString) return '';
+        const d = new Date(isoString);
+        if (isNaN(d.getTime())) return '';
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function renderTimeRangePicker() {
+        const startVal = toDatetimeLocalValue(liveRangeStart);
+        const endVal = toDatetimeLocalValue(liveRangeEnd);
+        return `
+            <div class="time-range-picker">
+                <button class="trp-toggle" onclick="toggleTimeRangeMenu(event)">
+                    <i class="bi bi-calendar3"></i> ${liveRangeLabel} <i class="bi bi-chevron-down" style="font-size:0.6rem;"></i>
+                </button>
+                <div class="trp-menu" id="trpMenu">
+                    <div class="trp-quick-options">
+                        <button onclick="applyQuickRange(5, '5 minutes')">Last 5 minutes</button>
+                        <button onclick="applyQuickRange(15, '15 minutes')">Last 15 minutes</button>
+                        <button onclick="applyQuickRange(60, '1 hour')">Last 1 hour</button>
+                        <button onclick="applyQuickRange(240, '4 hours')">Last 4 hours</button>
+                        <button onclick="applyQuickRange(1440, '24 hours')">Last 24 hours</button>
+                    </div>
+                    <div class="trp-divider"></div>
+                    <div class="trp-custom">
+                        <div class="trp-custom-label">Custom range</div>
+                        <input type="datetime-local" id="trpStart" class="trp-input" value="${startVal}">
+                        <div class="trp-to">to</div>
+                        <input type="datetime-local" id="trpEnd" class="trp-input" value="${endVal}">
+                        <button class="trp-apply-btn" onclick="applyCustomRange()">Apply</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function toggleTimeRangeMenu(e) {
+        if (e) e.stopPropagation();
+        const menu = document.getElementById('trpMenu');
+        if (!menu) return;
+        const isOpen = menu.classList.contains('open');
+        document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        if (!isOpen) menu.classList.add('open');
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.time-range-picker')) {
+            document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        }
+    });
+
+    function toLocalIsoString(d) {
+        // Formats a Date's LOCAL wall-clock fields (getHours/getMinutes/etc,
+        // not the UTC variants) as an ISO-shaped string with NO 'Z' or
+        // offset suffix — e.g. "2026-08-21T14:30:00". This intentionally
+        // sends the exact time the user selected/sees on screen, not its
+        // UTC equivalent (unlike .toISOString(), which would shift it by
+        // the browser's UTC offset — 4-5 hours for EST/EDT).
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function applyQuickRange(minutes, label) {
+        const end = new Date();
+        const start = new Date(end.getTime() - minutes * 60000);
+        liveRangeStart = toLocalIsoString(start);
+        liveRangeEnd = toLocalIsoString(end);
+        liveRangeLabel = 'Last ' + label;
+        document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        refreshLiveRangeData();
+    }
+
+    function applyCustomRange() {
+        const startInput = document.getElementById('trpStart');
+        const endInput = document.getElementById('trpEnd');
+        if (!startInput.value || !endInput.value) return;
+        const start = new Date(startInput.value);
+        const end = new Date(endInput.value);
+        if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+            alert('Please select a valid start and end time (start must be before end).');
+            return;
+        }
+        liveRangeStart = toLocalIsoString(start);
+        liveRangeEnd = toLocalIsoString(end);
+        liveRangeLabel = formatRangeLabel(start, end);
+        document.querySelectorAll('.trp-menu.open').forEach(m => m.classList.remove('open'));
+        refreshLiveRangeData();
+    }
+
+    function formatRangeLabel(start, end) {
+        const fmt = (d) => d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        return `${fmt(start)} – ${fmt(end)}`;
+    }
+
+    // Metrics that support the Live sub-tab's time-range picker — CPU/
+    // Memory/Disk/Network plus the three new list-based tabs. Raw Log,
+    // Health Check, Firewall, and SSL Certs are NOT in this list (they
+    // keep their existing fixed-window or on-demand behavior).
+    const RANGE_PICKER_METRICS = ['cpu', 'memory', 'disk', 'network', 'services', 'processes', 'netstat'];
+
+    function refreshLiveRangeData() {
+        if (!currentCi) return;
+        RANGE_PICKER_METRICS.forEach(t => {
+            if (currentCi.metricsCache) delete currentCi.metricsCache[t];
+        });
+        if (RANGE_PICKER_METRICS.includes(currentEvidenceTab)) {
+            loadEvidenceTab(currentCi, currentEvidenceTab);
+        }
+    }
+
+    function getLiveRangeParams() {
+        if (!RANGE_PICKER_METRICS.includes(currentEvidenceTab)) return null;
+        if (liveRangeStart && liveRangeEnd) return { start: liveRangeStart, end: liveRangeEnd };
+        return null;
+    }
+
+    function renderLiveWindowNote(section) {
+        if (liveRangeStart && liveRangeEnd) {
+            return `<div class="text-muted small" style="margin:-4px 0 12px;">${liveRangeLabel}</div>`;
+        }
+        return section.captured_at
+            ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>`
+            : '';
     }
 
     function renderMetricTab(tab, data) {
@@ -1239,10 +1680,14 @@
 
         const rows = processes.map((p, i) => {
             const pct = p[`${tab}_percent`] ?? p.percent ?? p.value ?? 0;
+            const user = p.user_name || p.user || p['user.name'] || 'N/A';
+            const pid = (p.pid != null) ? p.pid : ((p.process_pid != null) ? p.process_pid : 'N/A');
             return `
                 <tr>
                     <td>${i + 1}</td>
                     <td>${p.process || p.name || 'Unknown'}</td>
+                    <td>${user}</td>
+                    <td>${pid}</td>
                     <td>${pct}%</td>
                 </tr>`;
         }).join('');
@@ -1254,19 +1699,19 @@
 
         const windowNote = isHistoric
             ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
-            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+            : renderLiveWindowNote(section);
 
         return `
-            ${renderMetricSubTabBar()}
+            ${renderMetricSubTabBar(true)}
             <div class="evidence-stat-row" style="grid-template-columns:1fr;">
-                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Current'} Avg ${label}</div><div class="val">${avg}</div></div>
+                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Live'} Avg ${label}</div><div class="val">${avg}</div></div>
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Processes by ${label} Usage</div>
             ${renderBarChart(chartItems)}
             <table class="evidence-table">
-                <thead><tr><th>#</th><th>Process</th><th>${label} %</th></tr></thead>
-                <tbody>${rows || `<tr><td colspan="3" class="text-muted small">No process data available.</td></tr>`}</tbody>
+                <thead><tr><th>#</th><th>Process</th><th>User</th><th>PID</th><th>${label} %</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="5" class="text-muted small">No process data available.</td></tr>`}</tbody>
             </table>
         `;
     }
@@ -1281,7 +1726,7 @@
 
         const windowNote = isHistoric
             ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
-            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+            : renderLiveWindowNote(section);
 
         const mounts = section.top_mount_points || section.mount_points || section.mounts || [];
         const sorted = [...mounts]
@@ -1306,9 +1751,9 @@
         }));
 
         return `
-            ${renderMetricSubTabBar()}
+            ${renderMetricSubTabBar(true)}
             <div class="evidence-stat-row" style="grid-template-columns:1fr;">
-                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Current'} Avg Disk</div><div class="val">${avg}</div></div>
+                <div class="evidence-stat"><div class="label">${isHistoric ? 'Historical' : 'Live'} Avg Disk</div><div class="val">${avg}</div></div>
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Mount Points by Storage Consumed</div>
@@ -1328,7 +1773,7 @@
         const section = data[currentMetricSubTab] || {};
         const windowNote = isHistoric
             ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open${section.window_end && section.window_end !== section.window_start ? ` (${section.window_start} – ${section.window_end})` : ` (${section.window_start})`}</div>` : '')
-            : (section.captured_at ? `<div class="text-muted small" style="margin:-4px 0 12px;">Live snapshot (${section.captured_at})</div>` : '');
+            : renderLiveWindowNote(section);
 
         const interfaces = section.interfaces || section.drivers || section.results || [];
         const rows = interfaces.map(nic => `
@@ -1341,7 +1786,7 @@
         `).join('');
 
         return `
-            ${renderMetricSubTabBar()}
+            ${renderMetricSubTabBar(true)}
             ${windowNote}
             <div class="label">Network Drivers &amp; Traffic</div>
             <table class="evidence-table">
@@ -1379,6 +1824,127 @@
                 <tbody>${rows || `<tr><td colspan="3" class="text-muted small">No health check data available.</td></tr>`}</tbody>
             </table>
         `;
+    }
+
+    function renderJobsTab(ci) {
+        ci.jobsCache = ci.jobsCache || {};
+        const activeSystem = ci.activeJobSubTab || ci.jobSystem || 'controlm';
+        ci.activeJobSubTab = activeSystem;
+
+        const subTabBar = `
+            <div class="metric-subtabs">
+                <button class="metric-subtab${activeSystem === 'controlm' ? ' active' : ''}" onclick="switchJobSystemSubTab('controlm')">Control-M</button>
+                <button class="metric-subtab${activeSystem === 'autosys' ? ' active' : ''}" onclick="switchJobSystemSubTab('autosys')">AutoSys</button>
+            </div>
+        `;
+
+        const systemLabel = activeSystem === 'controlm' ? 'Control-M' : 'AutoSys';
+        const cached = ci.jobsCache[activeSystem];
+        let bodyHtml;
+        if (!cached) {
+            bodyHtml = `<div class="panel-empty"><i class="bi bi-hourglass-split"></i>Loading ${systemLabel} job history…</div>`;
+            loadJobInstancesForSystem(ci, activeSystem);
+        } else if (cached.loading) {
+            bodyHtml = `<div class="panel-empty"><i class="bi bi-hourglass-split"></i>Loading ${systemLabel} job history…</div>`;
+        } else if (cached.error) {
+            bodyHtml = `<div class="panel-empty"><i class="bi bi-exclamation-triangle"></i>Failed to load job history: ${cached.error}</div>`;
+        } else {
+            bodyHtml = renderJobInstancesTable(cached.data);
+        }
+
+        return subTabBar + bodyHtml;
+    }
+
+    function switchJobSystemSubTab(system) {
+        if (!currentCi) return;
+        currentCi.activeJobSubTab = system;
+        if (currentEvidenceTab === 'jobs' && document.getElementById('evidenceTabContent')) {
+            document.getElementById('evidenceTabContent').innerHTML = renderJobsTab(currentCi);
+        }
+    }
+
+    async function loadJobInstancesForSystem(ci, system) {
+        ci.jobsCache = ci.jobsCache || {};
+        ci.jobsCache[system] = { loading: true, error: null, data: null };
+        try {
+            const data = await fetchJobInstances(ci.name, system);
+            ci.jobsCache[system] = { loading: false, error: null, data };
+        } catch (err) {
+            console.error('job instances fetch failed', err);
+            ci.jobsCache[system] = { loading: false, error: err.message, data: null };
+        }
+        const stillRelevant = currentCi === ci && currentEvidenceTab === 'jobs' &&
+                               ci.activeJobSubTab === system && document.getElementById('evidenceTabContent');
+        if (stillRelevant) {
+            document.getElementById('evidenceTabContent').innerHTML = renderJobsTab(ci);
+        }
+    }
+
+    function renderJobInstancesTable(data) {
+        const instances = (data && data.instances) || [];
+        const rows = instances.map(inst => {
+            const isSuccess = (inst.status || '').toLowerCase() === 'success';
+            const color = isSuccess ? 'var(--green)' : '#ff3b30';
+            const bg = isSuccess ? 'rgba(40,205,65,0.1)' : 'rgba(255,59,48,0.1)';
+            return `
+                <tr>
+                    <td>${inst.run_id || 'N/A'}</td>
+                    <td>${inst.start_time || 'N/A'}</td>
+                    <td>${inst.end_time || 'N/A'}</td>
+                    <td>${inst.duration_minutes != null ? inst.duration_minutes + ' min' : 'N/A'}</td>
+                    <td><span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.7rem; font-weight:700; color:${color}; background:${bg};">${inst.status || 'Unknown'}</span></td>
+                </tr>
+            `;
+        }).join('');
+        return `
+            <div class="label">Last 5 Job Executions</div>
+            <table class="evidence-table">
+                <thead><tr><th>Run ID</th><th>Start Time</th><th>End Time</th><th>Duration</th><th>Status</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="5" class="text-muted small">No execution history available.</td></tr>`}</tbody>
+            </table>
+        `;
+    }
+
+    /**
+     * Control-M / AutoSys job execution history. DUMMY DATA in the backend
+     * for now (no real Control-M/AutoSys API integration yet) — see the
+     * module note above controlm_job_instances()/autosys_job_instances()
+     * in views.py. Response shape is already what a real integration
+     * would return, so only the backend's data source needs to change
+     * later, not this frontend code.
+     *
+     *   GET {API_BASE}/api/triage/jobs/<controlm|autosys>/?job_name=<name>
+     *   -> { job_name, system, instances: [{ run_id, start_time, end_time, status, duration_minutes }, ...] }
+     */
+    const JOB_INSTANCES_URL = (jobName, system) =>
+        `${API_BASE}/api/triage/jobs/${system}/?job_name=${encodeURIComponent(jobName)}`;
+
+    async function fetchJobInstances(jobName, system) {
+        if (DEMO_MODE) return generateDemoJobInstances(jobName, system);
+        const res = await fetch(JOB_INSTANCES_URL(jobName, system), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`Job instances fetch failed (HTTP ${res.status})`);
+        return res.json();
+    }
+
+    function generateDemoJobInstances(jobName, system) {
+        const rand = seededRandom(`${jobName}:${system}`);
+        const statuses = ['Success', 'Success', 'Failure', 'Success', 'Success'];
+        const now = new Date();
+        const instances = statuses.map((status, i) => {
+            const start = new Date(now.getTime() - (i + 1) * 24 * 60 * 60000);
+            const durationMinutes = 5 + Math.floor(rand() * 40);
+            const end = new Date(start.getTime() + durationMinutes * 60000);
+            return {
+                run_id: `${system.toUpperCase()}-${1000 + i}`,
+                start_time: start.toISOString(),
+                end_time: end.toISOString(),
+                status,
+                duration_minutes: durationMinutes
+            };
+        });
+        return new Promise(resolve => {
+            setTimeout(() => resolve({ job_name: jobName, system, instances }), 300);
+        });
     }
 
     function renderFirewallForm(ci) {
@@ -1557,10 +2123,11 @@
             return;
         }
         try {
+            await ensureCsrfCookie();
             await fetch(AI_FEEDBACK_URL(incId), {
                 method: 'POST',
                 credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                headers: csrfHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ feedback, context: contextText })
             });
         } catch (e) {
@@ -1705,7 +2272,7 @@
                 evidenceTabs: selectedEvidenceTabs
             });
 
-            renderAiAssistantWindow(win, prompt, summary);
+            await renderAiAssistantWindow(win, prompt, summary);
         } catch (err) {
             console.error('failed to prepare AI assistant context', err);
             if (win && !win.closed) {
@@ -1828,422 +2395,59 @@
      * the flat text actually sent to the AI. Mirrors DEMO_MODE so replies
      * are simulated in the demo build and hit AI_ASSISTANT_CHAT_URL for
      * real once that's wired to a live backend.
+     *
+     * The actual markup/CSS/JS lives in ai-assistant-popup.html (a sibling
+     * file, fetched at runtime) rather than inline here — this function's
+     * job is just to fetch that template and substitute six placeholder
+     * tokens with real values, then write the result into the popup
+     * window. See ai-assistant-popup.html's own header comment for the
+     * full placeholder list.
      */
-    function renderAiAssistantWindow(win, promptText, summary) {
+    async function renderAiAssistantWindow(win, promptText, summary) {
         if (!win || win.closed) {
             alert('The AI Assistant window was blocked or closed. Please allow pop-ups and try again.');
             return;
         }
+
+        let template;
+        try {
+            const res = await fetch(AI_ASSISTANT_POPUP_TEMPLATE_URL);
+            if (!res.ok) throw new Error(`Template fetch failed (HTTP ${res.status})`);
+            template = await res.text();
+        } catch (err) {
+            console.error('failed to load AI Assistant popup template', err);
+            if (!win.closed) {
+                win.document.body.innerHTML = `Failed to load the AI Assistant window template: ${err.message}`;
+            }
+            return;
+        }
+
         const promptJson = JSON.stringify(promptText).replace(/<\//g, '<\\/');
         const summaryJson = JSON.stringify(summary || {}).replace(/<\//g, '<\\/');
-        const chatUrlJson = JSON.stringify(AI_ASSISTANT_CHAT_URL);
-        const feedbackUrlJson = JSON.stringify(AI_ASSISTANT_FEEDBACK_URL);
 
-        const html = '<!DOCTYPE html>' +
-'<html lang="en">' +
-'<head>' +
-'<meta charset="UTF-8">' +
-'<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-'<title>Ops Console \u2014 Incident Copilot</title>' +
-'<link rel="preconnect" href="https://fonts.googleapis.com">' +
-'<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">' +
-'<style>' +
-':root {' +
-'  --apple-bg: #f5f5f7; --glass: rgba(255,255,255,0.9);' +
-'  --blue: #0071e3; --blue-bg: rgba(0,113,227,0.08);' +
-'  --green: #28cd41; --green-bg: rgba(40,205,65,0.08);' +
-'  --red: #ff3b30; --red-bg: rgba(255,59,48,0.08);' +
-'  --amber: #ff9f0a; --amber-bg: rgba(255,159,10,0.08);' +
-'  --text-main: #1d1d1f; --text-sec: #6e6e73;' +
-'  --border: rgba(0,0,0,0.08);' +
-'  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' +
-'  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;' +
-'}' +
-'* { box-sizing: border-box; }' +
-'body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color:var(--text-main); background:linear-gradient(135deg, #f5f5f7 0%, #ffffff 100%); font-size:14px; }' +
-'.nav-sidebar { width:212px; background:#fff; border-right:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; color:var(--text-sec); }' +
-'.nav-brand { display:flex; align-items:center; gap:10px; padding:18px 18px 14px; border-bottom:1px solid var(--border); }' +
-'.nav-brand-mark { width:26px; height:26px; border-radius:8px; background:linear-gradient(135deg, var(--blue), #34aadc); display:flex; align-items:center; justify-content:center; flex-shrink:0; }' +
-'.nav-brand-mark svg { width:15px; height:15px; }' +
-'.nav-brand-text { font-size:13px; font-weight:600; color:var(--text-main); line-height:1.3; }' +
-'.nav-brand-sub { font-size:10px; color:var(--text-sec); }' +
-'.nav-section { padding:14px 12px 4px; font-size:9.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:var(--text-sec); }' +
-'.nav-item { display:flex; align-items:center; gap:9px; padding:7px 12px; margin:1px 8px; border-radius:8px; font-size:12.5px; font-weight:500; cursor:default; color:var(--text-sec); }' +
-'.nav-item svg { width:14px; height:14px; flex-shrink:0; opacity:0.75; }' +
-'.nav-item.active { background:var(--blue-bg); color:var(--blue); }' +
-'.nav-item.active svg { opacity:1; }' +
-'.nav-spacer { flex:1; }' +
-'.nav-footer { display:flex; align-items:center; gap:10px; padding:13px 15px; border-top:1px solid var(--border); }' +
-'.avatar { width:24px; height:24px; border-radius:50%; background:var(--blue); color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex-shrink:0; }' +
-'.nav-footer-name { font-size:12px; font-weight:600; color:var(--text-main); }' +
-'.nav-footer-role { font-size:10px; color:var(--text-sec); }' +
-'.main-workspace { flex:1; display:flex; flex-direction:column; min-width:0; }' +
-'.top-bar { height:52px; padding:0 22px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:#fff; flex-shrink:0; }' +
-'.breadcrumb { font-size:12.5px; color:var(--text-sec); display:flex; align-items:center; gap:6px; }' +
-'.breadcrumb strong { color:var(--text-main); font-weight:600; }' +
-'.route-indicator { display:flex; align-items:center; gap:7px; font-size:11.5px; font-weight:600; padding:6px 12px; border-radius:8px; border:1px solid var(--border); }' +
-'.route-indicator.mcp { color:var(--text-sec); background:rgba(0,0,0,0.03); border-color:var(--border); }' +
-'.route-indicator.langgraph { color:var(--blue); background:var(--blue-bg); border-color:rgba(0,113,227,0.25); }' +
-'.route-dot { width:6px; height:6px; border-radius:50%; background:currentColor; }' +
-'.chat-view { flex:1; padding:24px 7%; overflow-y:auto; }' +
-'.exchange { margin-bottom:28px; max-width:100%; }' +
-'.msg-row { display:flex; margin-bottom:4px; }' +
-'.msg-row.user { justify-content:flex-end; }' +
-'.bubble-user { background:var(--blue); color:#fff; border-radius:16px 16px 4px 16px; padding:10px 15px; font-size:13.5px; max-width:80%; white-space:pre-wrap; }' +
-'.msg-meta { font-size:11px; color:var(--text-sec); margin-top:4px; text-align:right; }' +
-'.assistant-block { margin-top:14px; }' +
-'.assistant-block > * + * { margin-top:12px; }' +
-'.tool-chip { display:inline-flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--border); border-radius:10px; padding:6px 12px; font-size:11.5px; font-family:var(--font-mono); color:var(--text-sec); }' +
-'.tool-chip .dot { width:6px; height:6px; border-radius:50%; background:var(--blue); flex-shrink:0; }' +
-'.card { border:1px solid var(--border); border-radius:16px; background:#fff; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.03); }' +
-'.card-header { padding:13px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:10px; }' +
-'.card-id { font-family:var(--font-mono); font-size:12px; font-weight:600; color:var(--text-main); }' +
-'.card-body { padding:15px 16px; }' +
-'.card-desc { font-size:13.5px; margin-bottom:14px; color:var(--text-main); line-height:1.5; }' +
-'.field-grid { display:grid; grid-template-columns:1fr 1fr; gap:13px 22px; }' +
-'.field-label { font-size:9.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-sec); font-weight:700; margin-bottom:4px; }' +
-'.field-value { font-size:12.5px; color:var(--text-main); font-weight:500; }' +
-'.pill { display:inline-block; font-size:10px; font-weight:700; padding:3px 9px; border-radius:20px; letter-spacing:0.2px; }' +
-'.pill.p1 { background:var(--red-bg); color:var(--red); border:1px solid rgba(255,59,48,0.25); }' +
-'.pill.p2 { background:var(--amber-bg); color:var(--amber); border:1px solid rgba(255,159,10,0.25); }' +
-'.pill.progress { background:var(--blue-bg); color:var(--blue); border:1px solid rgba(0,113,227,0.25); }' +
-'.pill.done { background:var(--green-bg); color:var(--green); border:1px solid rgba(40,205,65,0.25); }' +
-'.trace { border:1px solid var(--border); border-radius:16px; background:#fff; overflow:hidden; }' +
-'.trace-step { display:flex; align-items:center; gap:10px; padding:9px 16px; font-size:12px; border-bottom:1px solid var(--border); }' +
-'.trace-step:last-child { border-bottom:none; }' +
-'.trace-step .check { width:15px; height:15px; border-radius:50%; background:var(--green-bg); border:1px solid rgba(40,205,65,0.3); display:flex; align-items:center; justify-content:center; flex-shrink:0; }' +
-'.trace-step .check svg { width:8px; height:8px; }' +
-'.trace-step .label { font-weight:600; color:var(--text-main); }' +
-'.thinking-chip { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--text-sec); font-style:italic; }' +
-'.thinking-chip .pulse { width:6px; height:6px; border-radius:50%; background:var(--blue); animation:pulse 1s infinite ease-in-out; }' +
-'@keyframes pulse { 0%,100% { opacity:0.3; } 50% { opacity:1; } }' +
-'.suggestion-row { display:flex; gap:8px; margin:0 7% 10px; flex-wrap:wrap; }' +
-'.suggestion-chip { font-size:11.5px; padding:6px 12px; border-radius:20px; border:1px solid var(--border); color:var(--text-sec); cursor:pointer; background:#fff; font-family:var(--font-mono); }' +
-'.suggestion-chip:hover { border-color:var(--blue); color:var(--blue); }' +
-'.command-bar { margin:0 7% 20px; border:1px solid var(--border); border-radius:14px; background:#fff; display:flex; align-items:center; padding:4px 6px 4px 14px; box-shadow:0 1px 2px rgba(15,23,42,0.04); }' +
-'.command-bar input { flex:1; border:none; outline:none; font-size:13px; padding:9px 0; font-family:var(--font-sans); }' +
-'.command-bar-send { width:30px; height:30px; border-radius:10px; background:var(--blue); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; }' +
-'.command-bar-send:disabled { opacity:0.5; cursor:default; }' +
-'.command-bar-send svg { width:13px; height:13px; color:#fff; }' +
-'.fb-row { display:flex; align-items:center; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }' +
-'.fb-btn { border:none; background:rgba(0,0,0,0.04); width:26px; height:26px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text-sec); transition:0.2s; }' +
-'.fb-btn:hover { background:rgba(0,0,0,0.08); }' +
-'.fb-btn.active-like { background:var(--green-bg); color:var(--green); }' +
-'.fb-btn.active-dislike { background:var(--red-bg); color:var(--red); }' +
-'</style>' +
-'</head>' +
-'<body>' +
-'<div class="nav-sidebar">' +
-'  <div class="nav-brand">' +
-'    <div class="nav-brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>' +
-'    <div><div class="nav-brand-text">Ops Console</div><div class="nav-brand-sub">Incident Copilot</div></div>' +
-'  </div>' +
-'  <div class="nav-section">Workspace</div>' +
-'  <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> Incident copilot</div>' +
-'  <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg> Triage agent</div>' +
-'  <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Run history</div>' +
-'  <div class="nav-spacer"></div>' +
-'  <div class="nav-footer"><div class="avatar" id="userAvatar">AI</div><div><div class="nav-footer-name">Incident Copilot</div><div class="nav-footer-role">Context-aware session</div></div></div>' +
-'</div>' +
-'<div class="main-workspace">' +
-'  <div class="top-bar">' +
-'    <div class="breadcrumb">Ops Console <span>/</span> <strong id="breadcrumbId">Incident Copilot</strong></div>' +
-'    <div class="route-indicator mcp" id="routeBadge"><span class="route-dot"></span><span id="routeBadgeText">Ready</span></div>' +
-'  </div>' +
-'  <div class="chat-view" id="log"></div>' +
-'  <div class="suggestion-row">' +
-'    <div class="suggestion-chip" onclick="askSuggestion(this)">Explain the root cause in more detail</div>' +
-'    <div class="suggestion-chip" onclick="askSuggestion(this)">Suggest the next remediation step</div>' +
-'    <div class="suggestion-chip" onclick="askSuggestion(this)">Any similar past incidents?</div>' +
-'  </div>' +
-'  <form class="command-bar" id="chatForm">' +
-'    <input id="chatInput" type="text" placeholder="Ask a follow-up question\u2026" autocomplete="off">' +
-'    <button type="submit" class="command-bar-send" id="sendBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>' +
-'  </form>' +
-'</div>' +
-'<script>' +
-'  var DEMO_MODE = ' + DEMO_MODE + ';' +
-'  var CHAT_URL = ' + chatUrlJson + ';' +
-'  var FEEDBACK_URL = ' + feedbackUrlJson + ';' +
-'  var initialPrompt = ' + promptJson + ';' +
-'  var contextSummary = ' + summaryJson + ';' +
-'  var chatHistory = [];' +
-'  var logEl = document.getElementById("log");' +
-'  document.getElementById("breadcrumbId").textContent = contextSummary.incidentId || "Incident Copilot";' +
-
-'  function esc(s) {' +
-'    var d = document.createElement("div");' +
-'    d.textContent = (s === null || s === undefined) ? "" : String(s);' +
-'    return d.innerHTML;' +
-'  }' +
-'  function nowTime() {' +
-'    var d = new Date();' +
-'    var h = d.getHours(), m = d.getMinutes();' +
-'    var ampm = h >= 12 ? "PM" : "AM";' +
-'    h = h % 12; if (h === 0) h = 12;' +
-'    return h + ":" + (m < 10 ? "0" : "") + m + " " + ampm;' +
-'  }' +
-'  function priorityPillClass(p) {' +
-'    var t = (p || "").toString().toLowerCase();' +
-'    if (t.indexOf("1") !== -1 || t.indexOf("critical") !== -1) return "p1";' +
-'    if (t.indexOf("2") !== -1 || t.indexOf("high") !== -1) return "p2";' +
-'    return "progress";' +
-'  }' +
-'  function statePillClass(s) {' +
-'    var t = (s || "").toString().toLowerCase();' +
-'    if (t.indexOf("complet") !== -1 || t.indexOf("success") !== -1 || t.indexOf("closed") !== -1 || t.indexOf("implement") !== -1) return "done";' +
-'    if (t.indexOf("fail") !== -1) return "p1";' +
-'    return "progress";' +
-'  }' +
-'  function setRoute(busy) {' +
-'    var badge = document.getElementById("routeBadge");' +
-'    var text = document.getElementById("routeBadgeText");' +
-'    if (busy) { badge.className = "route-indicator langgraph"; text.textContent = "Processing\u2026"; }' +
-'    else { badge.className = "route-indicator mcp"; text.textContent = "Ready"; }' +
-'  }' +
-
-'  function buildIncidentCard() {' +
-'    var inc = contextSummary.incident;' +
-'    var card = document.createElement("div");' +
-'    card.className = "card";' +
-'    card.innerHTML =' +
-'      \'<div class="card-header"><span class="card-id">\' + esc(contextSummary.incidentId) + \'</span><span class="pill \' + statePillClass(inc.state) + \'">\' + esc(inc.state || "Unknown") + \'</span></div>\' +' +
-'      \'<div class="card-body"><div class="card-desc">\' + esc(inc.desc) + \'</div><div class="field-grid">\' +' +
-'        \'<div><div class="field-label">Priority</div><div class="field-value"><span class="pill \' + priorityPillClass(inc.prio) + \'">\' + esc(inc.prio || "N/A") + \'</span></div></div>\' +' +
-'        \'<div><div class="field-label">Assigned To</div><div class="field-value">\' + esc(inc.assignedTo) + \'</div></div>\' +' +
-'        \'<div><div class="field-label">Assignment Group</div><div class="field-value">\' + esc(inc.group || "N/A") + \'</div></div>\' +' +
-'        \'<div><div class="field-label">App</div><div class="field-value">\' + esc(inc.app || "N/A") + \'</div></div>\' +' +
-'      \'</div></div>\';' +
-'    return card;' +
-'  }' +
-
-'  function buildChangeCard(c) {' +
-'    var card = document.createElement("div");' +
-'    card.className = "card";' +
-'    var impactedHtml = "None listed";' +
-'    if (c.impactedCis && c.impactedCis.length) {' +
-'      impactedHtml = c.impactedCis.map(function (ci) {' +
-'        var supp = (ci.suppressionRequestNumber && ci.suppressionRequestNumber !== "N/A") ? ("Ticket " + ci.suppressionRequestNumber) : "no suppression request raised";' +
-'        return esc(ci.ciName) + ": " + esc(ci.suppressionStatus) + " (" + esc(supp) + ")";' +
-'      }).join("<br>");' +
-'    }' +
-'    card.innerHTML =' +
-'      \'<div class="card-header"><span class="card-id">\' + esc(c.changeNumber) + \'</span><span class="pill \' + statePillClass(c.status) + \'">\' + esc(c.status || "Unknown") + \'</span></div>\' +' +
-'      \'<div class="card-body"><div class="field-grid">\' +' +
-'        \'<div><div class="field-label">Submitter</div><div class="field-value">\' + esc(c.submitter || "N/A") + \'</div></div>\' +' +
-'        \'<div><div class="field-label">Coordinator</div><div class="field-value">\' + esc(c.changeCoordinator || "N/A") + \'</div></div>\' +' +
-'        \'<div><div class="field-label">Start</div><div class="field-value">\' + esc(c.startTime || "N/A") + \'</div></div>\' +' +
-'        \'<div><div class="field-label">End</div><div class="field-value">\' + esc(c.endTime || "N/A") + \'</div></div>\' +' +
-'      \'</div><div style="margin-top:14px;"><div class="field-label">Impacted Servers</div><div class="field-value" style="font-weight:400; line-height:1.7;">\' + impactedHtml + \'</div></div></div>\';' +
-'    return card;' +
-'  }' +
-
-'  function buildAssetsCard() {' +
-'    var assets = contextSummary.assets || [];' +
-'    var card = document.createElement("div");' +
-'    card.className = "card";' +
-'    var rows = assets.map(function (ci) {' +
-'      var d = ci.fullDetails;' +
-'      var line = d ? (esc(d.name) + " \u2014 " + esc(d.manufacturer || "") + " " + esc(d.modelId || "") + ", " + esc(d.operatingSystem || "N/A")) : esc(ci.name);' +
-'      return \'<div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:12px;">\' + line + \'</div>\';' +
-'    }).join("");' +
-'    card.innerHTML = \'<div class="card-header"><span class="card-id">Asset Inventory</span></div><div class="card-body" style="padding-top:4px;">\' + (rows || \'<div class="field-value" style="font-weight:400;">No asset details loaded.</div>\') + \'</div>\';' +
-'    return card;' +
-'  }' +
-
-'  function buildEvidenceChip() {' +
-'    var ev = contextSummary.evidence;' +
-'    var chip = document.createElement("div");' +
-'    chip.className = "tool-chip";' +
-'    chip.innerHTML = \'<span class="dot"></span> Technical evidence (\' + esc(ev.assetName || "no asset") + \') &middot; \' + esc((ev.tabs || []).join(", "));' +
-'    return chip;' +
-'  }' +
-
-'  function buildTrace() {' +
-'    var trace = document.createElement("div");' +
-'    trace.className = "trace";' +
-'    var steps = ["Assembling context"];' +
-'    (contextSummary.included || []).forEach(function (s) { steps.push("Reviewed " + s.toLowerCase()); });' +
-'    steps.push("Generating response");' +
-'    trace.innerHTML = steps.map(function (s) {' +
-'      return \'<div class="trace-step"><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><span class="label">\' + esc(s) + \'</span></div>\';' +
-'    }).join("");' +
-'    return trace;' +
-'  }' +
-
-'  function addExchangeShell(userText) {' +
-'    var exch = document.createElement("div");' +
-'    exch.className = "exchange";' +
-'    var userRow = document.createElement("div");' +
-'    userRow.className = "msg-row user";' +
-'    var bubble = document.createElement("div");' +
-'    bubble.className = "bubble-user";' +
-'    bubble.textContent = userText;' +
-'    userRow.appendChild(bubble);' +
-'    exch.appendChild(userRow);' +
-'    var meta = document.createElement("div");' +
-'    meta.className = "msg-meta";' +
-'    meta.textContent = nowTime();' +
-'    exch.appendChild(meta);' +
-'    var block = document.createElement("div");' +
-'    block.className = "assistant-block";' +
-'    exch.appendChild(block);' +
-'    logEl.appendChild(exch);' +
-'    logEl.scrollTop = logEl.scrollHeight;' +
-'    return block;' +
-'  }' +
-
-'  function addThinkingChip(block) {' +
-'    var chip = document.createElement("div");' +
-'    chip.className = "thinking-chip";' +
-'    chip.innerHTML = \'<span class="pulse"></span>Thinking\u2026\';' +
-'    block.appendChild(chip);' +
-'    logEl.scrollTop = logEl.scrollHeight;' +
-'    return chip;' +
-'  }' +
-
-'  var feedbackCounter = 0;' +
-'  function submitFeedback(msgId, feedback, text) {' +
-'    if (DEMO_MODE || !FEEDBACK_URL) { console.log("[demo] feedback recorded", msgId, feedback); return; }' +
-'    fetch(FEEDBACK_URL, {' +
-'      method: "POST",' +
-'      credentials: "same-origin",' +
-'      headers: { "Content-Type": "application/json" },' +
-'      body: JSON.stringify({ message_id: msgId, feedback: feedback, message: text })' +
-'    }).catch(function (e) { console.error("feedback submit failed", e); });' +
-'  }' +
-'  function addReplyCard(block, text) {' +
-'    var card = document.createElement("div");' +
-'    card.className = "card";' +
-'    var msgId = "msg-" + (feedbackCounter++);' +
-'    card.innerHTML =' +
-'      \'<div class="card-body">\' +' +
-'      \'<div class="field-value" style="font-weight:400; line-height:1.7; white-space:pre-wrap;"></div>\' +' +
-'      \'<div class="fb-row">\' +' +
-'        \'<span style="font-size:11px; color:var(--text-sec);">Was this helpful?</span>\' +' +
-'        \'<button class="fb-btn" data-fb="like" title="Helpful"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M7 22V11M2 13v7a2 2 0 002 2h12.9a2 2 0 002-1.7l1.4-9A2 2 0 0018.3 9H14V4a2 2 0 00-2-2l-3 7v13"/></svg></button>\' +' +
-'        \'<button class="fb-btn" data-fb="dislike" title="Not helpful"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M17 2v11M22 11V4a2 2 0 00-2-2H7.1a2 2 0 00-2 1.7l-1.4 9A2 2 0 005.7 15H10v5a2 2 0 002 2l3-7V2"/></svg></button>\' +' +
-'      \'</div></div>\';' +
-'    card.querySelector(".field-value").textContent = text;' +
-'    var likeBtn = card.querySelector(\'[data-fb="like"]\');' +
-'    var dislikeBtn = card.querySelector(\'[data-fb="dislike"]\');' +
-'    var current = null;' +
-'    function applyState() {' +
-'      likeBtn.className = "fb-btn" + (current === "like" ? " active-like" : "");' +
-'      dislikeBtn.className = "fb-btn" + (current === "dislike" ? " active-dislike" : "");' +
-'    }' +
-'    likeBtn.addEventListener("click", function () { current = current === "like" ? null : "like"; applyState(); submitFeedback(msgId, current, text); });' +
-'    dislikeBtn.addEventListener("click", function () { current = current === "dislike" ? null : "dislike"; applyState(); submitFeedback(msgId, current, text); });' +
-'    block.appendChild(card);' +
-'    logEl.scrollTop = logEl.scrollHeight;' +
-'  }' +
-
-'  var DEMO_REPLIES = [' +
-'    "Based on the context shared, I would start by confirming whether the change window overlapped with the alert timestamps \u2014 that is the most common correlation I see in similar cases.",' +
-'    "Have you checked whether the suppression request (if any) was actually active during the incident window? A pending suppression would not have muted alerts.",' +
-'    "Given the asset details, I would also check recent patch history \u2014 if the last patch was applied close to the incident time, that is worth ruling in or out.",' +
-'    "It might help to compare the current resource averages against the historical baseline once more \u2014 a sustained deviation post-change is a strong signal.",' +
-'    "If none of the above pans out, escalating to the assignment group with this full context bundle is a reasonable next step."' +
-'  ];' +
-'  var demoReplyIndex = 0;' +
-
-'  function getAssistantReply(userText) {' +
-'    if (DEMO_MODE || !CHAT_URL) {' +
-'      return new Promise(function (resolve) {' +
-'        setTimeout(function () {' +
-'          var reply = DEMO_REPLIES[demoReplyIndex % DEMO_REPLIES.length];' +
-'          demoReplyIndex++;' +
-'          resolve(reply);' +
-'        }, 700);' +
-'      });' +
-'    }' +
-'    return fetch(CHAT_URL, {' +
-'      method: "POST",' +
-'      credentials: "same-origin",' +
-'      headers: { "Content-Type": "application/json" },' +
-'      body: JSON.stringify({ message: userText, history: chatHistory })' +
-'    }).then(function (res) {' +
-'      if (!res.ok) throw new Error("Assistant request failed (HTTP " + res.status + ")");' +
-'      return res.json();' +
-'    }).then(function (data) {' +
-'      return data.reply || data.message || "No response received.";' +
-'    });' +
-'  }' +
-
-'  function renderInitialExchange() {' +
-'    var openerText = "Continue investigating " + (contextSummary.incidentId || "this incident");' +
-'    var block = addExchangeShell(openerText);' +
-
-'    if (contextSummary.included && contextSummary.included.length) {' +
-'      var chip = document.createElement("div");' +
-'      chip.className = "tool-chip";' +
-'      chip.innerHTML = \'<span class="dot"></span> Context assembled &middot; \' + esc(contextSummary.included.join(", "));' +
-'      block.appendChild(chip);' +
-'    }' +
-'    if (contextSummary.incident) block.appendChild(buildIncidentCard());' +
-'    if (contextSummary.changes) {' +
-'      if (contextSummary.changes.length) {' +
-'        contextSummary.changes.forEach(function (c) { block.appendChild(buildChangeCard(c)); });' +
-'      } else {' +
-'        var noChg = document.createElement("div");' +
-'        noChg.className = "card";' +
-'        noChg.innerHTML = \'<div class="card-body"><div class="field-value" style="font-weight:400;">No linked change for this incident.</div></div>\';' +
-'        block.appendChild(noChg);' +
-'      }' +
-'    }' +
-'    if (contextSummary.assets && contextSummary.assets.length) block.appendChild(buildAssetsCard());' +
-'    if (contextSummary.evidence) block.appendChild(buildEvidenceChip());' +
-'    block.appendChild(buildTrace());' +
-
-'    setRoute(true);' +
-'    var thinking = addThinkingChip(block);' +
-'    getAssistantReply(initialPrompt).then(function (reply) {' +
-'      thinking.remove();' +
-'      addReplyCard(block, reply);' +
-'      chatHistory.push({ role: "user", content: initialPrompt });' +
-'      chatHistory.push({ role: "assistant", content: reply });' +
-'      setRoute(false);' +
-'    }).catch(function (err) {' +
-'      thinking.remove();' +
-'      addReplyCard(block, "Failed to reach the AI assistant: " + err.message);' +
-'      setRoute(false);' +
-'    });' +
-'  }' +
-
-'  function send(text) {' +
-'    var block = addExchangeShell(text);' +
-'    setRoute(true);' +
-'    var thinking = addThinkingChip(block);' +
-'    getAssistantReply(text).then(function (reply) {' +
-'      thinking.remove();' +
-'      addReplyCard(block, reply);' +
-'      chatHistory.push({ role: "user", content: text });' +
-'      chatHistory.push({ role: "assistant", content: reply });' +
-'      setRoute(false);' +
-'    }).catch(function (err) {' +
-'      thinking.remove();' +
-'      addReplyCard(block, "Failed to reach the AI assistant: " + err.message);' +
-'      setRoute(false);' +
-'    });' +
-'  }' +
-
-'  function askSuggestion(el) {' +
-'    send(el.textContent);' +
-'  }' +
-
-'  renderInitialExchange();' +
-
-'  document.getElementById("chatForm").addEventListener("submit", function (e) {' +
-'    e.preventDefault();' +
-'    var input = document.getElementById("chatInput");' +
-'    var text = input.value.trim();' +
-'    if (!text) return;' +
-'    input.value = "";' +
-'    send(text);' +
-'  });' +
-'<\/script>' +
-'</body>' +
-'</html>';
+        // Replacer FUNCTIONS, not plain strings — String.prototype.replace()
+        // treats "$" specially in a string replacement (e.g. "$&", "$1"),
+        // so a literal "$" in an incident description or prompt text would
+        // otherwise corrupt the substitution silently.
+        //
+        // Each placeholder needs different treatment depending on whether
+        // the template already wraps it in static quotes:
+        //   - DEMO_MODE: unquoted in the template -> substitute the bare boolean
+        //   - CHAT_URL / FEEDBACK_URL / CSRF_BOOTSTRAP_URL / INITIAL_PROMPT:
+        //     already inside "quotes" in the template -> substitute just the
+        //     escaped INNER content (JSON.stringify(...).slice(1, -1) strips
+        //     the pair of quotes JSON.stringify adds, since the template
+        //     supplies its own)
+        //   - CONTEXT_SUMMARY: NOT quoted in the template (it needs to be a
+        //     real JS object literal, e.g. {"incidentId":"INC1006",...}) ->
+        //     substitute the full JSON text as-is, no slicing
+        const html = template
+            .replace('__AI_POPUP_DEMO_MODE__', () => String(DEMO_MODE))
+            .replace('__AI_POPUP_CHAT_URL__', () => JSON.stringify(AI_ASSISTANT_CHAT_URL).slice(1, -1))
+            .replace('__AI_POPUP_FEEDBACK_URL__', () => JSON.stringify(AI_ASSISTANT_FEEDBACK_URL).slice(1, -1))
+            .replace('__AI_POPUP_CSRF_BOOTSTRAP_URL__', () => JSON.stringify(`${API_BASE}/api/csrf/`).slice(1, -1))
+            .replace('__AI_POPUP_INITIAL_PROMPT__', () => promptJson.slice(1, -1))
+            .replace('__AI_POPUP_CONTEXT_SUMMARY__', () => summaryJson);
 
         win.document.open();
         win.document.write(html);
@@ -2301,11 +2505,9 @@
                `hostname` is the asset identifier, `technical_evidence` is
                that asset's evidence text — an incident with multiple
                assets has multiple evidence entries with different
-               hostnames. There's still no dedicated assets/cis list, so
-               Asset Inventory rows are derived from the unique hostnames
-               in `evidence`. If your backend later adds a real
-               data.assets/data.cis array, it's picked up automatically and
-               takes priority over the evidence-derived list.
+               hostnames. Only used as a log-text lookup now; Asset
+               Inventory itself is exclusively ServiceNow-sourced (see
+               applySnowServerListToAssetInventory()), not built from this.
                Technical Evidence is asset-specific (an incident can have
                multiple CIs/assets), so it's NOT auto-populated on row
                select — it only fills in once an asset is clicked.
@@ -2336,12 +2538,6 @@
     const POLL_MAX_ATTEMPTS  = 15;      // ~30s of polling after a fresh trigger before giving up
 
     const DETAILS_URL = (id) => `${API_BASE}/api/triage/details/?incident_number=${encodeURIComponent(id)}`;
-
-    // Lazy-loaded only when an asset is clicked and no evidence for it was
-    // already embedded in the DETAILS_URL response (assets[].log) or in a
-    // top-level evidence map — see applyIncidentDetails() / loadAssetEvidence().
-    const ASSET_EVIDENCE_URL = (incId, assetId) =>
-        `${API_BASE}/api/triage/evidence/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}`;
 
     /**
      * Full CMDB-style asset details for the Asset Inventory panel. NOT
@@ -2389,8 +2585,13 @@
      *     { historic: { window_start, window_end, interfaces: [{ driver, traffic_in, traffic_out, flow_count }] },
      *       current:  { captured_at, interfaces: [{ driver, traffic_in, traffic_out, flow_count }] } }
      */
-    const EVIDENCE_METRIC_URL = (incId, assetId, metric) =>
-        `${API_BASE}/api/triage/evidence/metrics/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}&metric=${encodeURIComponent(metric)}`;
+    const EVIDENCE_METRIC_URL = (incId, assetId, metric, rangeParams) => {
+        let url = `${API_BASE}/api/triage/evidence/metrics/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}&metric=${encodeURIComponent(metric)}`;
+        if (rangeParams && rangeParams.start && rangeParams.end) {
+            url += `&range_start=${encodeURIComponent(rangeParams.start)}&range_end=${encodeURIComponent(rangeParams.end)}`;
+        }
+        return url;
+    };
 
     /**
      * Linked Changes — live from ServiceNow, scoped to the incident's app
@@ -2407,6 +2608,23 @@
      */
     const CHANGES_URL = (incId, appId) =>
         `${API_BASE}/api/triage/changes/?incident_number=${encodeURIComponent(incId)}&app_id=${encodeURIComponent(appId)}`;
+
+    /**
+     * ServiceNow Incident record — Number/Caller/Opened/Opened By/Status/
+     * Environment/Category/Impacted CI/Priority/Assignment Group/Assigned
+     * To. Fetched in PARALLEL with the existing triage lookup/trigger flow
+     * (started from runTriage() without blocking it — see
+     * fetchAndCacheSnowIncidentDetails()), not lazily on panel open like
+     * Asset Details/Linked Changes. Displayed inside the Incident Record
+     * panel (showIncPanel()) alongside the existing triage-derived fields,
+     * which are untouched by this — this is purely additive.
+     *
+     *   GET {API_BASE}/api/triage/incident/details/?incident_number=<id>
+     *   -> { number, caller, opened_at, opened_by, status, environment,
+     *        category, impacted_ci, priority, assignment_group, assigned_to }
+     */
+    const INCIDENT_DETAILS_URL = (incId) =>
+        `${API_BASE}/api/triage/incident/details/?incident_number=${encodeURIComponent(incId)}`;
 
     /**
      * Health Check tab data. NOT confirmed against a real response — best
@@ -2449,6 +2667,20 @@
         `${API_BASE}/api/triage/evidence/sslcerts/?incident_number=${encodeURIComponent(incId)}&asset_id=${encodeURIComponent(assetId)}`;
 
     /**
+     * Location of ai-assistant-popup.html — the AI Assistant popup's
+     * template file (fetched at runtime by renderAiAssistantWindow(),
+     * placeholders substituted, then written into the popup window).
+     *
+     * Served through Django (see ai_assistant_popup_template() in
+     * views.py) rather than fetched as a bare relative static file —
+     * most Django deployments don't serve arbitrary sibling files next
+     * to this dashboard by default, so a relative fetch like
+     * 'ai-assistant-popup.html' would 404 unless static serving happens
+     * to be configured for exactly that path.
+     */
+    const AI_ASSISTANT_POPUP_TEMPLATE_URL = `${API_BASE}/api/ai-assistant/popup-template/`;
+
+    /**
      * Chat endpoint for continuing the conversation inside the AI Assistant
      * popup window. NOT confirmed against a real API — best guess below;
      * this is a placeholder until pointed at a real "My AI Assistant"
@@ -2475,6 +2707,30 @@
         return match ? decodeURIComponent(match.pop()) : '';
     }
 
+    // Django only sets the csrftoken cookie when something actually
+    // triggers it — this page being served as a static file (or by a view
+    // that never touches CSRF) means the browser may never receive it,
+    // leaving every getCookie('csrftoken') call returning '' and every
+    // POST below silently sending a malformed X-CSRFToken header. Calling
+    // this once (cached so it only ever fires one real request) guarantees
+    // the cookie exists before any POST needs it.
+    let csrfBootstrapPromise = null;
+    function ensureCsrfCookie() {
+        if (!csrfBootstrapPromise) {
+            csrfBootstrapPromise = fetch(`${API_BASE}/api/csrf/`, { credentials: 'same-origin' })
+                .catch(err => console.error('CSRF bootstrap failed', err));
+        }
+        return csrfBootstrapPromise;
+    }
+    ensureCsrfCookie(); // fire immediately on load, well ahead of any POST
+
+    function csrfHeaders(extra) {
+        const headers = Object.assign({}, extra);
+        const token = getCookie('csrftoken');
+        if (token) headers['X-CSRFToken'] = token;
+        return headers;
+    }
+
     function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
     async function fetchIncidentDetails(id) {
@@ -2492,12 +2748,6 @@
         return json.data || json; // unwrap the envelope
     }
 
-    async function fetchAssetEvidence(incId, assetId) {
-        const res = await fetch(ASSET_EVIDENCE_URL(incId, assetId), { credentials: 'same-origin' });
-        if (!res.ok) throw new Error(`Evidence fetch failed (HTTP ${res.status})`);
-        return res.json();
-    }
-
     async function fetchAssetDetails(incId, assetId) {
         if (DEMO_MODE) return generateDemoAssetDetails(assetId);
         const res = await fetch(ASSET_DETAILS_URL(incId, assetId), { credentials: 'same-origin' });
@@ -2506,8 +2756,9 @@
     }
 
     async function fetchEvidenceMetric(incId, assetId, metric) {
-        if (DEMO_MODE) return generateDemoMetric(metric, assetId);
-        const res = await fetch(EVIDENCE_METRIC_URL(incId, assetId, metric), { credentials: 'same-origin' });
+        const rangeParams = getLiveRangeParams();
+        if (DEMO_MODE) return generateDemoMetric(metric, assetId, rangeParams);
+        const res = await fetch(EVIDENCE_METRIC_URL(incId, assetId, metric, rangeParams), { credentials: 'same-origin' });
         if (!res.ok) throw new Error(`${metric} metrics fetch failed (HTTP ${res.status})`);
         return res.json();
     }
@@ -2523,6 +2774,83 @@
         const res = await fetch(CHANGES_URL(incId, appId), { credentials: 'same-origin' });
         if (!res.ok) throw new Error(`Changes fetch failed (HTTP ${res.status})`);
         return res.json();
+    }
+
+    async function fetchServiceNowIncidentDetails(incId) {
+        if (DEMO_MODE) return generateDemoSnowIncidentDetails(incId);
+        const res = await fetch(INCIDENT_DETAILS_URL(incId), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`Incident details fetch failed (HTTP ${res.status})`);
+        return res.json();
+    }
+
+    function generateDemoServerName(rand) {
+        // Matches the real naming convention: 3-char prefix (he2/he3/or1/or2)
+        // + 11 or 12 more chars = 14 or 15 total.
+        const prefixes = ['he2', 'he3', 'or1', 'or2'];
+        const prefix = prefixes[Math.floor(rand() * prefixes.length)];
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        const suffixLength = 11 + Math.floor(rand() * 2); // 11 or 12
+        let suffix = '';
+        for (let i = 0; i < suffixLength; i++) suffix += chars[Math.floor(rand() * chars.length)];
+        return prefix + suffix;
+    }
+
+    function generateDemoSnowIncidentDetails(incId) {
+        const rand = seededRandom(`${incId}:snow-incident`);
+        const pick = (arr) => arr[Math.floor(rand() * arr.length)];
+        const callers = ['j.smith', 'a.patel', 'm.garcia', 'r.johnson', 'c.robinson'];
+        const categories = ['Software', 'Hardware', 'Network', 'Database'];
+        const environments = ['Production', 'Staging', 'QA'];
+        const priorities = ['1 - Critical', '2 - High', '3 - Moderate', '4 - Low'];
+        const statuses = ['New', 'In Progress', 'On Hold', 'Resolved', 'Closed'];
+        const groups = ['App-Support-L2', 'Network-Ops', 'DBA-Team', 'GOC_SIT'];
+        const assignees = ['a.chen', 'k.brown', 's.patel', null]; // null -> shows as Unassigned
+
+        // Generate 1-2 real-looking server names — one becomes the main CI
+        // field, and (about half the time) a second gets mentioned only in
+        // the description, mirroring how a real incident's free text might
+        // reference an additional affected host.
+        const primaryServer = generateDemoServerName(rand);
+        const hasSecondServer = rand() > 0.5;
+        const secondaryServer = hasSecondServer ? generateDemoServerName(rand) : null;
+
+        const summaries = [
+            `CPU utilization exceeded threshold on ${primaryServer}`,
+            `Application pool exhaustion on ${primaryServer} causing intermittent 502 errors`,
+            `Disk space critically low on ${primaryServer}`
+        ];
+        const longDescriptions = [
+            `Alert triggered by monitoring: CPU utilization on ${primaryServer} has exceeded 95% for a sustained period of over 15 minutes.${secondaryServer ? ` ${secondaryServer} in the same cluster is also showing elevated load.` : ''} Initial triage suggests this may be correlated with a recent deployment to the same host group. The on-call engineer has been paged. Historical data shows this host has had similar spikes in the past 30 days, typically resolving within 20-30 minutes without intervention, but this occurrence has persisted longer than the usual pattern and is now impacting downstream services that depend on this application, including the checkout and payment processing pipelines. Customer-facing latency has increased by approximately 3x during this window.`,
+            `Users reported intermittent failures when submitting forms through the customer portal. Investigation shows the application connection pool on ${primaryServer} reached its configured maximum and began rejecting new connections, returning HTTP 502 errors to the load balancer.${secondaryServer ? ` ${secondaryServer} was checked as a possible secondary cause but appears unaffected.` : ''} This appears to coincide with a spike in traffic following a marketing campaign that went live earlier today.`
+        ];
+
+        const summary = pick(summaries);
+        const description = pick(longDescriptions);
+
+        // Mirrors what the real backend's regex extraction + dedup would
+        // find across cmdb_ci + summary + description.
+        const servers = secondaryServer ? [primaryServer, secondaryServer] : [primaryServer];
+
+        return new Promise(resolve => {
+            setTimeout(() => {
+                resolve({
+                    number: incId,
+                    caller: pick(callers),
+                    opened_at: new Date(Date.now() - Math.floor(rand() * 90) * 60000).toISOString(),
+                    opened_by: pick(callers),
+                    status: pick(statuses),
+                    environment: pick(environments),
+                    category: pick(categories),
+                    impacted_ci: primaryServer,
+                    priority: pick(priorities),
+                    assignment_group: pick(groups),
+                    assigned_to: pick(assignees),
+                    summary,
+                    description,
+                    servers
+                });
+            }, 300);
+        });
     }
 
     async function fetchAssetHealthCheck(incId, assetId) {
@@ -2573,17 +2901,81 @@
         'logstash.exe', 'dockerd', 'powershell.exe', 'MsMpEng.exe', 'explorer.exe'
     ];
 
-    function generateDemoMetric(metric, assetId) {
+    function generateDemoMetric(metric, assetId, rangeParams) {
         return new Promise(resolve => {
             setTimeout(() => {
-                const rand = seededRandom(`${assetId}:${metric}`);
+                const seedSuffix = rangeParams ? `:${rangeParams.start}:${rangeParams.end}` : '';
+                const rand = seededRandom(`${assetId}:${metric}${seedSuffix}`);
                 if (metric === 'network') { resolve(generateDemoNetwork(rand)); return; }
                 if (metric === 'disk') { resolve(generateDemoDiskMetric(rand)); return; }
                 if (metric === 'raw') { resolve(generateDemoRawLogSections(rand)); return; }
+                if (metric === 'services') {
+                    resolve({ historic: generateDemoServicesSection(rand, true), current: generateDemoServicesSection(rand, false) });
+                    return;
+                }
+                if (metric === 'processes') {
+                    resolve({ historic: generateDemoProcessesSection(rand, true), current: generateDemoProcessesSection(rand, false) });
+                    return;
+                }
+                if (metric === 'netstat') {
+                    resolve({ historic: generateDemoNetstatSection(rand, true), current: generateDemoNetstatSection(rand, false) });
+                    return;
+                }
                 resolve(generateDemoUsageMetric(metric, rand));
             }, 500);
         });
     }
+
+    function stampSectionWindow(section, rand, isHistoric) {
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
+    }
+
+    function generateDemoServicesSection(rand, isHistoric) {
+        const names = ['nginx', 'sshd', 'crond', 'httpd', 'postgresql', 'docker', 'firewalld', 'rsyslog', 'network', 'sssd'];
+        const items = names.map(name => {
+            const isRunning = rand() > 0.15;
+            return {
+                name,
+                state: isRunning ? 'running' : 'failed',
+                sub_state: isRunning ? 'running' : 'failed',
+                last_seen: new Date().toISOString()
+            };
+        });
+        return stampSectionWindow({ items }, rand, isHistoric);
+    }
+
+    function generateDemoProcessesSection(rand, isHistoric) {
+        const items = DEMO_PROCESSES.map(name => ({
+            pid: 1000 + Math.floor(rand() * 30000),
+            ppid: 1,
+            name,
+            user_name: DEMO_USERS[Math.floor(rand() * DEMO_USERS.length)],
+            cmdline: `/usr/bin/${name} --config=/etc/${name}/${name}.conf`,
+            state: rand() > 0.9 ? 'zombie' : 'sleeping'
+        }));
+        return stampSectionWindow({ items }, rand, isHistoric);
+    }
+
+    function generateDemoNetstatSection(rand, isHistoric) {
+        const ports = [22, 80, 443, 5432, 3306, 8080, 9200, 6379, 25, 53];
+        const procs = ['sshd', 'nginx', 'nginx', 'postgres', 'mysqld', 'java', 'elasticsearch', 'redis-server', 'postfix', 'named'];
+        const items = ports.map((port, i) => ({
+            protocol: port === 53 ? 'udp' : 'tcp',
+            local_ip: '0.0.0.0',
+            local_port: port,
+            pid: 1000 + Math.floor(rand() * 30000),
+            process_name: procs[i]
+        }));
+        return stampSectionWindow({ items }, rand, isHistoric);
+    }
+
+    const DEMO_USERS = ['root', 'svc_app', 'svc_sql', 'www-data', 'SYSTEM', 'app_svc', 'postgres'];
 
     function buildUsageSection(rand, metric, isHistoric, minAvg, maxAvg) {
         const avg = Math.round(minAvg + rand() * (maxAvg - minAvg));
@@ -2595,7 +2987,12 @@
         let base = avg * 0.85;
         const top_processes = pool.slice(0, 10).map((proc, i) => {
             const pct = Math.max(1, Math.round((base / Math.pow(1.45, i)) * (0.85 + rand() * 0.3)));
-            return { process: proc, [`${metric}_percent`]: pct };
+            return {
+                process: proc,
+                [`${metric}_percent`]: pct,
+                user_name: DEMO_USERS[Math.floor(rand() * DEMO_USERS.length)],
+                pid: 1000 + Math.floor(rand() * 30000)
+            };
         });
 
         const section = { avg, top_processes };
@@ -2923,6 +3320,14 @@
                     suppression_request_number: suppression === 'Not Suppressed' ? 'N/A' : `SUPP${Math.floor(10000 + rand() * 89999)}`
                 });
             }
+            // Change-level alarm suppression Service Requests — separate
+            // from the per-CI suppression above, matches ServiceNow's
+            // u_alarm_suppression list field on change_request itself.
+            const alarmSuppressionCount = rand() > 0.4 ? 0 : 1 + Math.floor(rand() * 2); // ~60% none, else 1-2
+            const alarmSuppressionRequests = [];
+            for (let i = 0; i < alarmSuppressionCount; i++) {
+                alarmSuppressionRequests.push(`REQ${Math.floor(1000000 + rand() * 8999999)}`);
+            }
             changes.push({
                 change_number: changeNumber,
                 submitter: pick(submitters),
@@ -2933,6 +3338,7 @@
                 status: pick(changeStatuses),
                 app_id: app,
                 change_type: pick(changeTypes),
+                alarm_suppression_requests: alarmSuppressionRequests,
                 impacted_cis: impactedCis
             });
         }
@@ -3036,10 +3442,11 @@
             const record = getOrCreateDemoIncident(incidentNumber);
             return { ...record.session[0], last_update: record.metadata[0].updated_at };
         }
+        await ensureCsrfCookie();
         const res = await fetch(`${API_BASE}/api/triage/trigger/?incident_number=${encodeURIComponent(incidentNumber)}`, {
             method: 'POST',
             credentials: 'same-origin',
-            headers: { 'X-CSRFToken': getCookie('csrftoken') }
+            headers: csrfHeaders({})
         });
         if (!res.ok) throw new Error(`Trigger failed (HTTP ${res.status})`);
         return res.json();
@@ -3051,6 +3458,7 @@
     async function runTriage(query) {
         if (!query) return;
         pendingQuery = query;
+        fetchAndCacheSnowIncidentDetails(query); // fire-and-forget, runs in parallel — does not block or alter anything below
         openTriageLoading(query);
         setTriageStatus('Looking up incident…');
 
@@ -3071,7 +3479,13 @@
             }
 
             if (STATUS_COMPLETED.includes(status)) {
-                showTriageConfirm(data);
+                const forceRetriage = document.getElementById('forceRetriageCheckbox').checked;
+                if (forceRetriage) {
+                    await runFreshTriage(query);
+                } else {
+                    upsertIncidentIntoRepo(data, query);
+                    showTriageResult(true, data, query, true); // true = skippedRerun, reuse existing successful triage
+                }
                 return;
             }
 
@@ -3119,7 +3533,7 @@
             assignedTo: apiData.assigned_to || (existing && existing.assignedTo) || '',
             prio: apiData.priority || apiData.prio || (existing && existing.prio) || 'N/A',
             state: apiData.status || (existing && existing.state) || 'N/A',
-            cis: apiData.cis || apiData.configuration_items || (existing && existing.cis) || [],
+            cis: (existing && existing.cis) || [], // Asset Inventory is ServiceNow-only now — never populated from the lookup/trigger response
             // Real triage metadata straight from the API
             triggered_by: apiData.triggered_by || (existing && existing.triggered_by) || null,
             created_at: apiData.created_at || (existing && existing.created_at) || null,
@@ -3178,20 +3592,6 @@
         }
     }
 
-    async function confirmRedoTriage() {
-        const query = pendingQuery;
-        document.getElementById('triageConfirm').style.display = 'none';
-        openTriageLoading(query);
-        await runFreshTriage(query);
-    }
-
-    function keepTriageSuccessful() {
-        const data = pendingIncidentData;
-        document.getElementById('triageConfirm').style.display = 'none';
-        if (data) upsertIncidentIntoRepo(data, pendingQuery);
-        showTriageResult(true, data, pendingQuery, true);
-    }
-
     function recheckTriageStatus() {
         runTriage(pendingQuery);
     }
@@ -3203,27 +3603,15 @@
 
     function openTriageLoading(query) {
         document.getElementById('triageQueryText').innerText = 'Analyzing ' + query;
-        document.getElementById('triageConfirm').style.display = 'none';
         document.getElementById('triageInfo').style.display = 'none';
         document.getElementById('triageResult').style.display = 'none';
         document.getElementById('triageLoading').style.display = 'block';
         document.getElementById('triageOverlay').classList.add('open');
     }
 
-    function showTriageConfirm(data) {
-        pendingIncidentData = data;
-        document.getElementById('triageLoading').style.display = 'none';
-        document.getElementById('triageInfo').style.display = 'none';
-        document.getElementById('triageResult').style.display = 'none';
-        document.getElementById('triageConfirm').style.display = 'block';
-        document.getElementById('confirmIncidentId').innerText = data.incident_number || pendingQuery;
-        document.getElementById('triageOverlay').classList.add('open');
-    }
-
     function showTriageInfo(data) {
         pendingIncidentData = data;
         document.getElementById('triageLoading').style.display = 'none';
-        document.getElementById('triageConfirm').style.display = 'none';
         document.getElementById('triageResult').style.display = 'none';
         document.getElementById('triageInfo').style.display = 'block';
         const who = data.triggered_by ? ` (started by ${data.triggered_by})` : '';
@@ -3234,7 +3622,6 @@
 
     function showTriageResult(success, data, query, skippedRerun) {
         document.getElementById('triageLoading').style.display = 'none';
-        document.getElementById('triageConfirm').style.display = 'none';
         document.getElementById('triageInfo').style.display = 'none';
         document.getElementById('triageResult').style.display = 'block';
 
@@ -3263,7 +3650,6 @@
 
     function showTriageError(query, message) {
         document.getElementById('triageLoading').style.display = 'none';
-        document.getElementById('triageConfirm').style.display = 'none';
         document.getElementById('triageInfo').style.display = 'none';
         document.getElementById('triageResult').style.display = 'block';
 
