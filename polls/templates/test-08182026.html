@@ -502,7 +502,7 @@ def _query_netstat(asset_id, start, end, size=NETSTAT_MAX_RESULTS):
     return items
 
 
-
+def _format_bytes(num_bytes):
     """
     Formats a raw byte count as a human-readable string (e.g. '128.4 GB'),
     since the frontend displays `used`/`total` as plain strings rather
