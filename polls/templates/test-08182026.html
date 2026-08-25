@@ -132,6 +132,43 @@ LOG_LEVEL_FIELD = "log.level"          # TODO: field holding the log level (erro
 LOG_TIMESTAMP_FIELD = "@timestamp"     # TODO: adjust if your logs use a different timestamp field
 RAW_LOG_MAX_LINES = 100                # cap on how many matching lines to pull per window
 
+# ---------------------------------------------------------------------------
+# Services / Processes / Netstat — equivalents of `systemctl status`,
+# `ps -ef`, and `netstat -tulnp` respectively, sourced from Elasticsearch
+# instead of running commands on the box directly.
+#
+# >>> ADJUST BEFORE USE <<<
+# All three assume Metricbeat's `system` module with the `service`,
+# `process`, and `socket` metricsets enabled (the socket metricset is
+# Linux-only and not enabled by default — confirm it's actually running
+# before relying on the Netstat tab). Field names below are Metricbeat's
+# documented defaults; confirm against your actual index if these were
+# customized.
+# ---------------------------------------------------------------------------
+
+SERVICES_INDEX_PATTERN = "metricbeat-*"       # TODO: adjust if services live in a different index
+SERVICE_NAME_FIELD = "system.service.name"
+SERVICE_STATE_FIELD = "system.service.state"          # e.g. "running", "failed", "dead"
+SERVICE_SUBSTATE_FIELD = "system.service.sub_state"    # e.g. "running", "exited", "failed"
+SERVICES_MAX_RESULTS = 200                              # cap on distinct services returned
+
+PROCESS_LIST_INDEX_PATTERN = "metricbeat-*"   # TODO: adjust if process data lives in a different index
+PROCESS_PPID_FIELD = "system.process.ppid"
+PROCESS_CMDLINE_FIELD = "system.process.cmdline"
+PROCESS_STATE_FIELD = "system.process.state"           # e.g. "running", "sleeping", "zombie"
+PROCESSES_MAX_RESULTS = 500                             # cap on distinct PIDs returned
+
+SOCKET_INDEX_PATTERN = "metricbeat-*"         # TODO: adjust if socket data lives in a different index
+SOCKET_DIRECTION_FIELD = "system.socket.direction"      # filtered to "listening" -> the -l in -tulnp
+SOCKET_TRANSPORT_FIELD = "network.transport"            # "tcp" / "udp" -> the -t/-u in -tulnp
+SOCKET_LOCAL_IP_FIELD = "system.socket.local.ip"
+SOCKET_LOCAL_PORT_FIELD = "system.socket.local.port"    # TODO: confirm this is mapped as a keyword/number
+                                                         # suitable for `collapse` — if not, drop the
+                                                         # collapse clause in _query_netstat() and dedupe
+                                                         # in Python instead
+SOCKET_PROCESS_PID_FIELD = "system.socket.process.pid"
+SOCKET_PROCESS_NAME_FIELD = "system.socket.process.name"  # the -p in -tulnp
+NETSTAT_MAX_RESULTS = 500
 
 # Time windows — tune these to taste.
 HISTORIC_WINDOW = timedelta(minutes=10)  # +/- around incident.created_at
@@ -320,7 +357,152 @@ def _query_top_processes_by_memory(asset_id, start, end, size=10):
     return overall_avg_pct, top_processes
 
 
-def _format_bytes(num_bytes):
+def _query_services(asset_id, start, end, size=SERVICES_MAX_RESULTS):
+    """
+    Terms aggregation over SERVICE_NAME_FIELD, one bucket per distinct
+    service seen in [start, end] for this host, with a top_hits sub-agg
+    (sorted newest-first) to get each service's MOST RECENT state within
+    the window — matching what `systemctl status <service>` would show
+    right now, not an average over the window.
+    """
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {HOST_FIELD: asset_id}},
+                    {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                ]
+            }
+        },
+        "aggs": {
+            "services": {
+                "terms": {"field": SERVICE_NAME_FIELD, "size": size},
+                "aggs": {
+                    "latest": {
+                        "top_hits": {
+                            "size": 1,
+                            "sort": [{"@timestamp": {"order": "desc"}}],
+                            "_source": [SERVICE_STATE_FIELD, SERVICE_SUBSTATE_FIELD, "@timestamp"],
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+    response = _es_search(SERVICES_INDEX_PATTERN, query)
+    aggs = response.get("aggregations", {})
+
+    items = []
+    for bucket in aggs.get("services", {}).get("buckets", []):
+        hits = bucket.get("latest", {}).get("hits", {}).get("hits", [])
+        source = hits[0].get("_source", {}) if hits else {}
+        items.append({
+            "name": bucket.get("key"),
+            "state": _get_nested_field(source, SERVICE_STATE_FIELD),
+            "sub_state": _get_nested_field(source, SERVICE_SUBSTATE_FIELD),
+            "last_seen": source.get("@timestamp"),
+        })
+    return items
+
+
+def _query_processes_list(asset_id, start, end, size=PROCESSES_MAX_RESULTS):
+    """
+    Terms aggregation over PROCESS_PID_FIELD (grouping by individual PID,
+    not process name — matches `ps -ef` showing one row per running
+    process instance, not deduped by command name), with a top_hits
+    sub-agg for each PID's most recent snapshot in the window.
+    """
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {HOST_FIELD: asset_id}},
+                    {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                ]
+            }
+        },
+        "aggs": {
+            "processes": {
+                "terms": {"field": PROCESS_PID_FIELD, "size": size},
+                "aggs": {
+                    "latest": {
+                        "top_hits": {
+                            "size": 1,
+                            "sort": [{"@timestamp": {"order": "desc"}}],
+                            "_source": [
+                                PROCESS_NAME_FIELD, USER_NAME_FIELD, PROCESS_PPID_FIELD,
+                                PROCESS_CMDLINE_FIELD, PROCESS_STATE_FIELD,
+                            ],
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+    response = _es_search(PROCESS_LIST_INDEX_PATTERN, query)
+    aggs = response.get("aggregations", {})
+
+    items = []
+    for bucket in aggs.get("processes", {}).get("buckets", []):
+        hits = bucket.get("latest", {}).get("hits", {}).get("hits", [])
+        source = hits[0].get("_source", {}) if hits else {}
+        items.append({
+            "pid": bucket.get("key"),
+            "ppid": _get_nested_field(source, PROCESS_PPID_FIELD),
+            "name": _get_nested_field(source, PROCESS_NAME_FIELD),
+            "user_name": _get_nested_field(source, USER_NAME_FIELD),
+            "cmdline": _get_nested_field(source, PROCESS_CMDLINE_FIELD),
+            "state": _get_nested_field(source, PROCESS_STATE_FIELD),
+        })
+    return items
+
+
+def _query_netstat(asset_id, start, end, size=NETSTAT_MAX_RESULTS):
+    """
+    Listening TCP/UDP sockets for this host in [start, end] — the -t/-u/-l
+    flags of `netstat -tulnp` (TCP + UDP, listening only). Uses `collapse`
+    on the local port to dedupe repeated snapshots of the same listener
+    down to its most recent one (sorted newest-first, collapse keeps the
+    first/top hit per group). See the TODO on SOCKET_LOCAL_PORT_FIELD if
+    collapse isn't usable against your mapping.
+    """
+    query = {
+        "size": size,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {HOST_FIELD: asset_id}},
+                    {"term": {SOCKET_DIRECTION_FIELD: "listening"}},
+                    {"terms": {SOCKET_TRANSPORT_FIELD: ["tcp", "udp"]}},
+                    {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                ]
+            }
+        },
+        "sort": [{"@timestamp": {"order": "desc"}}],
+        "collapse": {"field": SOCKET_LOCAL_PORT_FIELD},
+    }
+
+    response = _es_search(SOCKET_INDEX_PATTERN, query)
+    hits = response.get("hits", {}).get("hits", [])
+
+    items = []
+    for hit in hits:
+        source = hit.get("_source", {})
+        items.append({
+            "protocol": _get_nested_field(source, SOCKET_TRANSPORT_FIELD),
+            "local_ip": _get_nested_field(source, SOCKET_LOCAL_IP_FIELD),
+            "local_port": _get_nested_field(source, SOCKET_LOCAL_PORT_FIELD),
+            "pid": _get_nested_field(source, SOCKET_PROCESS_PID_FIELD),
+            "process_name": _get_nested_field(source, SOCKET_PROCESS_NAME_FIELD),
+        })
+    return items
+
+
+
     """
     Formats a raw byte count as a human-readable string (e.g. '128.4 GB'),
     since the frontend displays `used`/`total` as plain strings rather
@@ -540,24 +722,79 @@ def _query_raw_log_events(asset_id, start, end, size=RAW_LOG_MAX_LINES):
 
 
 @require_GET
+def _build_list_metrics_response(incident_number, asset_id, query_fn, error_label, range_start=None, range_end=None):
+    """
+    Shared builder for the three "just a list, no average" tabs (Services,
+    Processes, Netstat) — same historic/current window logic as
+    _build_cpu_metrics_response() etc., but a simpler {items: [...]}
+    response shape since there's no percentage to average for these.
+    """
+    try:
+        incident_opened_at = get_incident_opened_at(incident_number)
+    except NotImplementedError as e:
+        logger.error(str(e))
+        return JsonResponse({"error": "Server misconfiguration: incident lookup not implemented"}, status=500)
+
+    if incident_opened_at is None:
+        return JsonResponse({"error": f"Incident '{incident_number}' not found"}, status=404)
+
+    hist_start = incident_opened_at - HISTORIC_WINDOW
+    hist_end = incident_opened_at + HISTORIC_WINDOW
+    try:
+        hist_items = query_fn(asset_id, hist_start, hist_end)
+    except Exception:
+        logger.exception("Elasticsearch query failed for historic %s data (asset=%s)", error_label, asset_id)
+        return JsonResponse({"error": f"Failed to fetch historic {error_label} data from Elasticsearch"}, status=502)
+    historic = {
+        "items": hist_items,
+        "window_start": hist_start.isoformat(),
+        "window_end": hist_end.isoformat(),
+    }
+
+    if range_start and range_end:
+        cur_start, now = range_start, range_end
+    else:
+        now = timezone.now()
+        cur_start = now - CURRENT_WINDOW
+    try:
+        cur_items = query_fn(asset_id, cur_start, now)
+    except Exception:
+        logger.exception("Elasticsearch query failed for current %s data (asset=%s)", error_label, asset_id)
+        return JsonResponse({"error": f"Failed to fetch current {error_label} data from Elasticsearch"}, status=502)
+    current = {
+        "items": cur_items,
+        "captured_at": now.isoformat(),
+    }
+
+    return JsonResponse({"historic": historic, "current": current})
+
+
 def evidence_metrics(request):
     """
-    GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
+    GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network|raw|services|processes|netstat>
         &range_start=<iso>&range_end=<iso>   (both optional — see below)
 
     range_start/range_end come from the frontend's time-range picker on the
-    Live sub-tab (CPU/Memory/Disk/Network only — Raw Log never sends these).
+    Live sub-tab (every metric except Raw Log — Raw Log never sends these).
     When both are present and parse successfully, they replace the default
     CURRENT_WINDOW trailing window for the "current" section. When absent
     or unparseable, behavior is unchanged from before this feature — the
     default trailing window is used, same as always.
 
-    Response shape (matches the frontend's fetchEvidenceMetric() exactly):
+    Response shape for cpu/memory/disk/network (matches the frontend's
+    fetchEvidenceMetric() exactly):
         {
           "historic": { "avg": <pct>, "window_start": "<iso>", "window_end": "<iso>",
                          "top_processes": [{"process": "...", "cpu_percent": <pct>}, ...] },
           "current":  { "avg": <pct>, "captured_at": "<iso>",
                          "top_processes": [{"process": "...", "cpu_percent": <pct>}, ...] }
+        }
+
+    Response shape for services/processes/netstat (no average — just a
+    list, since none of these have a meaningful "percent" to average):
+        {
+          "historic": { "items": [...], "window_start": "<iso>", "window_end": "<iso>" },
+          "current":  { "items": [...], "captured_at": "<iso>" }
         }
     """
     incident_number = request.GET.get('incident_number')
@@ -580,9 +817,15 @@ def evidence_metrics(request):
         return _build_network_metrics_response(incident_number, asset_id, range_start, range_end)
     if metric == 'raw':
         return _build_rawlog_metrics_response(incident_number, asset_id, range_start, range_end)
+    if metric == 'services':
+        return _build_list_metrics_response(incident_number, asset_id, _query_services, 'services', range_start, range_end)
+    if metric == 'processes':
+        return _build_list_metrics_response(incident_number, asset_id, _query_processes_list, 'process', range_start, range_end)
+    if metric == 'netstat':
+        return _build_list_metrics_response(incident_number, asset_id, _query_netstat, 'netstat', range_start, range_end)
 
-    # All five metrics (cpu/memory/disk/network/raw) are implemented above —
-    # anything else is a genuinely bad request, not "not implemented yet".
+    # All eight metrics are implemented above — anything else is a
+    # genuinely bad request, not "not implemented yet".
     return JsonResponse({"error": f"metric='{metric}' is not a recognized metric"}, status=400)
 
 
