@@ -1,24 +1,39 @@
-import asyncio
 import json
+import asyncio
 from typing import Dict, Any
+
+def extract_json_data(tool_result: Any) -> Any:
+    """Safely extracts dictionary or list payload from string, list, or MCP TextContent."""
+    if isinstance(tool_result, str):
+        try:
+            tool_result = json.loads(tool_result)
+        except Exception:
+            return {}
+            
+    # If MCP returned a list like [TextContent(text='{...}')] or [{...}]
+    if isinstance(tool_result, list) and len(tool_result) > 0:
+        first_item = tool_result[0]
+        if hasattr(first_item, 'text'):  # Handle LangChain / MCP TextContent objects
+            return extract_json_data(first_item.text)
+        elif isinstance(first_item, dict):
+            return first_item
+            
+    if isinstance(tool_result, dict):
+        return tool_result
+        
+    return {}
 
 async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
     """
-    AGENT 4: CMDB & Metrics Health Expert (Layer 02 Asset Focus)
-    Queries static metadata properties AND active utilization performance stats.
+    AGENT 4: Metrics Health Expert (Layer 02 Asset Utilization Focus)
     """
     logger.info("-----------Display State - Infrastructure Agent-----------")
-    logger.info(state)
     
     incident_number = state["incident_number"]
     hostname = state["hostname"]
-    app_id = state["app_id"]
     opened_at = state["opened_at"]
 
-    logger.info(f"Health Profile of {hostname} at {opened_at}")
-
-    # 1. Execute all metrics and CMDB tool calls concurrently to minimize latency
-    cmdb_task = tools_dict["query_cmdb_ci_attributes"].ainvoke({"app_id": app_id})
+    # 1. Execute tool calls concurrently
     cpu_task = tools_dict["fetch_asset_cpu_metrics"].ainvoke({
         "incident_number": incident_number, 
         "asset_id": hostname
@@ -32,25 +47,27 @@ async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
         "asset_id": hostname
     })
 
-    # Run tasks in parallel
-    spec, cpu, mem, disk = await asyncio.gather(cmdb_task, cpu_task, mem_task, disk_task)
+    cpu_res, mem_res, disk_res = await asyncio.gather(cpu_task, mem_task, disk_task)
 
-    # 2. Parse JSON strings if returned as text from MCP tools
-    spec_dict = json.loads(spec) if isinstance(spec, str) else spec
-    cpu_dict = json.loads(cpu) if isinstance(cpu, str) else cpu
-    mem_dict = json.loads(mem) if isinstance(mem, str) else mem
-    disk_dict = json.loads(disk) if isinstance(disk, str) else disk
+    # 2. Safely extract dict payloads regardless of return type (list/str/dict)
+    cpu_dict = extract_json_data(cpu_res)
+    mem_dict = extract_json_data(mem_res)
+    disk_dict = extract_json_data(disk_res)
 
-    # 3. Assemble unified health profile payload
+    # 3. Safely extract nested values using isinstance checks
+    cpu_historic = cpu_dict.get("historic", {}) if isinstance(cpu_dict, dict) else {}
+    mem_historic = mem_dict.get("historic", {}) if isinstance(mem_dict, dict) else {}
+
+    cpu_avg = cpu_historic.get("avg", "N/A") if isinstance(cpu_historic, dict) else "N/A"
+    mem_avg = mem_historic.get("avg", "N/A") if isinstance(mem_historic, dict) else "N/A"
+
     health_profile = {
-        **spec_dict,
         "cpu_utilization": cpu_dict,
         "memory_utilization": mem_dict,
         "disk_utilization": disk_dict
     }
 
-    # 4. Return updated fields back to the graph state
     return {
-        "asset_details": json.dumps(health_profile),
-        "technical_evidence": f"CPU Historic Avg: {cpu_dict.get('historic', {}).get('avg', 'N/A')}%, Memory Avg: {mem_dict.get('historic', {}).get('avg', 'N/A')}%"
+        "asset_details": health_profile,
+        "technical_evidence": f"CPU Historic Avg: {cpu_avg}%, Memory Avg: {mem_avg}%"
     }
