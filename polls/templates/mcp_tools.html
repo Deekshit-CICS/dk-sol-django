@@ -1,0 +1,66 @@
+import httpx
+from typing import Literal
+from mcp.server.fastmcp import FastMCP
+
+# Initialize FastMCP Server (or use your existing instance)
+mcp = FastMCP("GOC Triage Evidence Server")
+
+BASE_METRICS_URL = "https://goctoolkit.fmacnp.com/api/triage/evidence/metrics"
+
+
+# ============================================================================
+# OPTION A: UNIFIED METRICS TOOL (Recommended for LLM Agents)
+# ============================================================================
+@mcp.tool()
+async def fetch_asset_metrics(
+    incident_number: str,
+    asset_id: str,
+    metric: Literal["cpu", "memory", "disk"]
+) -> str:
+    """
+    Fetches historic and current telemetry metrics (CPU, Memory, or Disk utilization)
+    along with top processes/mount points for a given asset during an incident triage run.
+    
+    Args:
+        incident_number: ServiceNow Incident ID (e.g., 'INC2326863')
+        asset_id: Hostname or Asset Identifier (e.g., 'he3ilxvdapp7444')
+        metric: Metric type to retrieve ('cpu', 'memory', or 'disk')
+    """
+    params = {
+        "incident_number": incident_number,
+        "asset_id": asset_id,
+        "metric": metric
+    }
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(BASE_METRICS_URL, params=params)
+            response.raise_for_status()
+            # Return raw JSON text so the LLM agent can digest historical vs current trends
+            return response.text
+        except httpx.HTTPStatusError as e:
+            return f"HTTP Error fetching {metric} metrics: {e.response.status_code} - {e.response.text}"
+        except Exception as e:
+            return f"Failed to connect to triage metrics API: {str(e)}"
+
+
+# ============================================================================
+# OPTION B: DISCRETE METRICS TOOLS (If you prefer individual tool functions)
+# ============================================================================
+
+@mcp.tool()
+async def fetch_asset_cpu_metrics(incident_number: str, asset_id: str) -> str:
+    """Fetches historic/current CPU metrics and top resource-consuming PIDs for an asset."""
+    return await fetch_asset_metrics(incident_number, asset_id, "cpu")
+
+
+@mcp.tool()
+async def fetch_asset_memory_metrics(incident_number: str, asset_id: str) -> str:
+    """Fetches historic/current RAM memory usage percentage and process breakdown."""
+    return await fetch_asset_metrics(incident_number, asset_id, "memory")
+
+
+@mcp.tool()
+async def fetch_asset_disk_metrics(incident_number: str, asset_id: str) -> str:
+    """Fetches disk utilization percentage across mount points (/boot, /opt, /var/log, etc.)."""
+    return await fetch_asset_metrics(incident_number, asset_id, "disk")
