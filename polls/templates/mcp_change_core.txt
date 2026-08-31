@@ -1,0 +1,38 @@
+import httpx
+from typing import Optional
+from mcp.server.fastmcp import FastMCP
+
+# Initialize FastMCP Server (or use your existing instance)
+mcp = FastMCP("GOC Triage Changes Server")
+
+CHANGES_API_URL = "https://goctoolkit.fmacnp.com/api/triage/changes"
+
+@mcp.tool()
+async def fetch_incident_changes(incident_number: str, app_id: str) -> str:
+    """
+    Fetches recent Change Requests and Alarm Suppression Requests associated 
+    with a given ServiceNow incident and Application ID (Layer 02/03 Triage).
+    
+    Args:
+        incident_number: ServiceNow Incident ID (e.g., 'INC2312272')
+        app_id: Target Application ID / CI Name (e.g., 'BA0249')
+    
+    Returns:
+        Stringified JSON payload containing change records, coordinator, 
+        and suppression status details.
+    """
+    params = {
+        "incident_number": incident_number,
+        "app_id": app_id
+    }
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(CHANGES_API_URL, params=params)
+            response.raise_for_status()
+            # Return raw JSON string so LLM agent/Infrastructure agent can digest
+            return response.text
+        except httpx.HTTPStatusError as e:
+            return f"HTTP Error fetching change requests: {e.response.status_code} - {e.response.text}"
+        except Exception as e:
+            return f"Failed to connect to triage changes API: {str(e)}"
