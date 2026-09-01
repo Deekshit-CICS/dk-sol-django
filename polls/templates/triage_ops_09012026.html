@@ -952,15 +952,17 @@
 
     const CHANGE_SERVERS_EXPAND_THRESHOLD = 8;
 
-    function renderSingleChangeBlock(chg, idx, total) {
-        const allImpactedNames = (chg.impactedCis || []).map(ci => ci.ciName).filter(Boolean);
+    // Matches the backend's SERVER_NAME_PATTERN exactly (see views.py) —
+    // 14 or 15 characters total, starting with he2/he3/or1/or2. Used to
+    // filter "Servers Under This Change" down to actual server names,
+    // excluding application IDs/names that also show up in ServiceNow's
+    // impacted-CI list for a change.
+    const SERVER_NAME_PATTERN = /^(he2|he3|or1|or2)[a-z0-9]{11,12}$/i;
 
-        // Only show servers that are ALSO in Asset Inventory — unless none
-        // of them match, in which case fall back to showing the full list
-        // (better than showing nothing at all).
-        const assetNames = new Set((currentInc && currentInc.cis || []).map(ci => (ci.name || '').toLowerCase()));
-        const matchingNames = allImpactedNames.filter(name => assetNames.has(name.toLowerCase()));
-        const displayNames = matchingNames.length > 0 ? matchingNames : allImpactedNames;
+    function renderSingleChangeBlock(chg, idx, total) {
+        const displayNames = (chg.impactedCis || [])
+            .map(ci => ci.ciName)
+            .filter(name => name && SERVER_NAME_PATTERN.test(name));
 
         let serversHtml;
         if (displayNames.length === 0) {
@@ -1178,6 +1180,9 @@
         { id: 'memory', label: 'Memory' },
         { id: 'disk', label: 'Disk' },
         { id: 'network', label: 'Network' },
+        { id: 'services', label: 'Services' },
+        { id: 'processes', label: 'Processes' },
+        { id: 'netstat', label: 'Netstat' },
         { id: 'health', label: 'Health Check' },
         { id: 'firewall', label: 'Firewall' },
         { id: 'sslcerts', label: 'SSL Certs' },
@@ -1250,7 +1255,8 @@
     const EVIDENCE_TAB_LABELS = {
         cpu: 'CPU metrics', memory: 'memory metrics', disk: 'disk metrics',
         network: 'network data', health: 'health check', sslcerts: 'SSL certificates',
-        raw: 'raw log data', jobs: 'job execution history'
+        raw: 'raw log data', jobs: 'job execution history',
+        services: 'services', processes: 'processes', netstat: 'listening ports'
     };
 
     function fetchEvidenceTabData(tab, incId, assetId) {
@@ -1309,12 +1315,152 @@
         }
     }
 
+    // Search term state per list-based tab, kept separate from
+    // lastMetricTabType/Data so a search survives switching between
+    // Historic/Live (which re-renders via renderEvidenceTab, reading this
+    // same state back out).
+    const evidenceSearchTerms = { services: '', processes: '', netstat: '' };
+
+    function currentSectionItems(data) {
+        const section = currentMetricSubTab === 'historic' ? data.historic : data.current;
+        return { section: section || {}, items: (section && section.items) || [] };
+    }
+
+    function listWindowNote(section) {
+        return currentMetricSubTab === 'historic'
+            ? (section.window_start ? `<div class="text-muted small" style="margin:-4px 0 12px;">Around incident open (${section.window_start})</div>` : '')
+            : renderLiveWindowNote(section);
+    }
+
+    function renderServicesTab(data) {
+        lastMetricTabType = 'services';
+        lastMetricTabData = data;
+        const { section, items } = currentSectionItems(data);
+        return `
+            ${renderMetricSubTabBar(true)}
+            ${listWindowNote(section)}
+            <input type="text" class="form-control form-control-sm" placeholder="Search services…"
+                   id="searchBox_services" value="${escAttr(evidenceSearchTerms.services)}"
+                   oninput="filterEvidenceList('services')" style="margin-bottom:10px; max-width:280px;">
+            <table class="evidence-table">
+                <thead><tr><th>Service</th><th>State</th><th>Sub-State</th><th>Last Seen</th></tr></thead>
+                <tbody id="listBody_services">${renderServicesRows(items, evidenceSearchTerms.services)}</tbody>
+            </table>
+        `;
+    }
+
+    function renderServicesRows(items, searchTerm) {
+        const term = (searchTerm || '').toLowerCase();
+        const filtered = term ? items.filter(s => (s.name || '').toLowerCase().includes(term)) : items;
+        if (!filtered.length) return `<tr><td colspan="4" class="text-muted small">No services ${term ? 'match your search' : 'found'}.</td></tr>`;
+        return filtered.map(s => {
+            const isRunning = (s.state || '').toLowerCase() === 'running';
+            const color = isRunning ? 'var(--green)' : '#ff3b30';
+            return `
+                <tr>
+                    <td>${s.name || 'N/A'}</td>
+                    <td><span style="color:${color}; font-weight:600;">${s.state || 'Unknown'}</span></td>
+                    <td>${s.sub_state || 'N/A'}</td>
+                    <td>${s.last_seen || 'N/A'}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function renderProcessesTab(data) {
+        lastMetricTabType = 'processes';
+        lastMetricTabData = data;
+        const { section, items } = currentSectionItems(data);
+        return `
+            ${renderMetricSubTabBar(true)}
+            ${listWindowNote(section)}
+            <input type="text" class="form-control form-control-sm" placeholder="Search processes…"
+                   id="searchBox_processes" value="${escAttr(evidenceSearchTerms.processes)}"
+                   oninput="filterEvidenceList('processes')" style="margin-bottom:10px; max-width:280px;">
+            <table class="evidence-table">
+                <thead><tr><th>PID</th><th>PPID</th><th>User</th><th>Command</th><th>State</th></tr></thead>
+                <tbody id="listBody_processes">${renderProcessesRows(items, evidenceSearchTerms.processes)}</tbody>
+            </table>
+        `;
+    }
+
+    function renderProcessesRows(items, searchTerm) {
+        const term = (searchTerm || '').toLowerCase();
+        const filtered = term
+            ? items.filter(p => (p.name || '').toLowerCase().includes(term) || (p.cmdline || '').toLowerCase().includes(term))
+            : items;
+        if (!filtered.length) return `<tr><td colspan="5" class="text-muted small">No processes ${term ? 'match your search' : 'found'}.</td></tr>`;
+        return filtered.map(p => `
+            <tr>
+                <td>${p.pid != null ? p.pid : 'N/A'}</td>
+                <td>${p.ppid != null ? p.ppid : 'N/A'}</td>
+                <td>${p.user_name || 'N/A'}</td>
+                <td style="max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escAttr(p.cmdline || '')}">${p.cmdline || p.name || 'N/A'}</td>
+                <td>${p.state || 'N/A'}</td>
+            </tr>
+        `).join('');
+    }
+
+    function renderNetstatTab(data) {
+        lastMetricTabType = 'netstat';
+        lastMetricTabData = data;
+        const { section, items } = currentSectionItems(data);
+        return `
+            ${renderMetricSubTabBar(true)}
+            ${listWindowNote(section)}
+            <input type="text" class="form-control form-control-sm" placeholder="Search by port or process…"
+                   id="searchBox_netstat" value="${escAttr(evidenceSearchTerms.netstat)}"
+                   oninput="filterEvidenceList('netstat')" style="margin-bottom:10px; max-width:280px;">
+            <table class="evidence-table">
+                <thead><tr><th>Proto</th><th>Local Address</th><th>Port</th><th>PID</th><th>Program</th></tr></thead>
+                <tbody id="listBody_netstat">${renderNetstatRows(items, evidenceSearchTerms.netstat)}</tbody>
+            </table>
+        `;
+    }
+
+    function renderNetstatRows(items, searchTerm) {
+        const term = (searchTerm || '').toLowerCase();
+        const filtered = term
+            ? items.filter(s => String(s.local_port || '').includes(term) || (s.process_name || '').toLowerCase().includes(term))
+            : items;
+        if (!filtered.length) return `<tr><td colspan="5" class="text-muted small">No listening sockets ${term ? 'match your search' : 'found'}.</td></tr>`;
+        return filtered.map(s => `
+            <tr>
+                <td>${(s.protocol || 'N/A').toUpperCase()}</td>
+                <td>${s.local_ip || '0.0.0.0'}</td>
+                <td>${s.local_port != null ? s.local_port : 'N/A'}</td>
+                <td>${s.pid != null ? s.pid : 'N/A'}</td>
+                <td>${s.process_name || 'N/A'}</td>
+            </tr>
+        `).join('');
+    }
+
+    // Shared by all three tabs above — updates the search term and
+    // re-renders ONLY the table body (not the whole tab, which would blow
+    // away input focus mid-keystroke).
+    function filterEvidenceList(tab) {
+        const input = document.getElementById('searchBox_' + tab);
+        if (!input || !lastMetricTabData) return;
+        evidenceSearchTerms[tab] = input.value;
+
+        const { items } = currentSectionItems(lastMetricTabData);
+        const bodyEl = document.getElementById('listBody_' + tab);
+        if (!bodyEl) return;
+
+        if (tab === 'services') bodyEl.innerHTML = renderServicesRows(items, input.value);
+        else if (tab === 'processes') bodyEl.innerHTML = renderProcessesRows(items, input.value);
+        else if (tab === 'netstat') bodyEl.innerHTML = renderNetstatRows(items, input.value);
+    }
+
     const EVIDENCE_TAB_RENDERERS = {
         disk: renderDiskTab,
         network: renderNetworkTab,
         health: renderHealthCheckTab,
         sslcerts: renderSslCertsTab,
-        raw: renderRawLogTab
+        raw: renderRawLogTab,
+        services: renderServicesTab,
+        processes: renderProcessesTab,
+        netstat: renderNetstatTab
     };
 
     function renderEvidenceTab(tab, data) {
@@ -1493,18 +1639,24 @@
         return `${fmt(start)} – ${fmt(end)}`;
     }
 
+    // Metrics that support the Live sub-tab's time-range picker — CPU/
+    // Memory/Disk/Network plus the three new list-based tabs. Raw Log,
+    // Health Check, Firewall, and SSL Certs are NOT in this list (they
+    // keep their existing fixed-window or on-demand behavior).
+    const RANGE_PICKER_METRICS = ['cpu', 'memory', 'disk', 'network', 'services', 'processes', 'netstat'];
+
     function refreshLiveRangeData() {
         if (!currentCi) return;
-        ['cpu', 'memory', 'disk', 'network'].forEach(t => {
+        RANGE_PICKER_METRICS.forEach(t => {
             if (currentCi.metricsCache) delete currentCi.metricsCache[t];
         });
-        if (['cpu', 'memory', 'disk', 'network'].includes(currentEvidenceTab)) {
+        if (RANGE_PICKER_METRICS.includes(currentEvidenceTab)) {
             loadEvidenceTab(currentCi, currentEvidenceTab);
         }
     }
 
     function getLiveRangeParams() {
-        if (!['cpu', 'memory', 'disk', 'network'].includes(currentEvidenceTab)) return null;
+        if (!RANGE_PICKER_METRICS.includes(currentEvidenceTab)) return null;
         if (liveRangeStart && liveRangeEnd) return { start: liveRangeStart, end: liveRangeEnd };
         return null;
     }
@@ -2759,9 +2911,70 @@
                 if (metric === 'network') { resolve(generateDemoNetwork(rand)); return; }
                 if (metric === 'disk') { resolve(generateDemoDiskMetric(rand)); return; }
                 if (metric === 'raw') { resolve(generateDemoRawLogSections(rand)); return; }
+                if (metric === 'services') {
+                    resolve({ historic: generateDemoServicesSection(rand, true), current: generateDemoServicesSection(rand, false) });
+                    return;
+                }
+                if (metric === 'processes') {
+                    resolve({ historic: generateDemoProcessesSection(rand, true), current: generateDemoProcessesSection(rand, false) });
+                    return;
+                }
+                if (metric === 'netstat') {
+                    resolve({ historic: generateDemoNetstatSection(rand, true), current: generateDemoNetstatSection(rand, false) });
+                    return;
+                }
                 resolve(generateDemoUsageMetric(metric, rand));
             }, 500);
         });
+    }
+
+    function stampSectionWindow(section, rand, isHistoric) {
+        if (isHistoric) {
+            section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
+            section.window_end = section.window_start;
+        } else {
+            section.captured_at = new Date().toISOString();
+        }
+        return section;
+    }
+
+    function generateDemoServicesSection(rand, isHistoric) {
+        const names = ['nginx', 'sshd', 'crond', 'httpd', 'postgresql', 'docker', 'firewalld', 'rsyslog', 'network', 'sssd'];
+        const items = names.map(name => {
+            const isRunning = rand() > 0.15;
+            return {
+                name,
+                state: isRunning ? 'running' : 'failed',
+                sub_state: isRunning ? 'running' : 'failed',
+                last_seen: new Date().toISOString()
+            };
+        });
+        return stampSectionWindow({ items }, rand, isHistoric);
+    }
+
+    function generateDemoProcessesSection(rand, isHistoric) {
+        const items = DEMO_PROCESSES.map(name => ({
+            pid: 1000 + Math.floor(rand() * 30000),
+            ppid: 1,
+            name,
+            user_name: DEMO_USERS[Math.floor(rand() * DEMO_USERS.length)],
+            cmdline: `/usr/bin/${name} --config=/etc/${name}/${name}.conf`,
+            state: rand() > 0.9 ? 'zombie' : 'sleeping'
+        }));
+        return stampSectionWindow({ items }, rand, isHistoric);
+    }
+
+    function generateDemoNetstatSection(rand, isHistoric) {
+        const ports = [22, 80, 443, 5432, 3306, 8080, 9200, 6379, 25, 53];
+        const procs = ['sshd', 'nginx', 'nginx', 'postgres', 'mysqld', 'java', 'elasticsearch', 'redis-server', 'postfix', 'named'];
+        const items = ports.map((port, i) => ({
+            protocol: port === 53 ? 'udp' : 'tcp',
+            local_ip: '0.0.0.0',
+            local_port: port,
+            pid: 1000 + Math.floor(rand() * 30000),
+            process_name: procs[i]
+        }));
+        return stampSectionWindow({ items }, rand, isHistoric);
     }
 
     const DEMO_USERS = ['root', 'svc_app', 'svc_sql', 'www-data', 'SYSTEM', 'app_svc', 'postgres'];
