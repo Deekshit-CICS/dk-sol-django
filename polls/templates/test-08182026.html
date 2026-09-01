@@ -1502,7 +1502,10 @@ CHANGE_FIELD_MAP = {
     "change_coordinator": "u_change_coordinator",   # TODO: rarely OOB — or "assigned_to"
     "start_time": "start_date",
     "end_time": "end_date",
-    "status": "state",                              # choice field -> display_value
+    # "status" intentionally NOT here — it's resolved explicitly in
+    # _build_change_response() from u_stage (falling back to the OOB
+    # `state` field), with debug logging so you can confirm u_stage is
+    # actually returning valid stage names on your instance.
 }
 
 # Holds the list of Service Requests raised for alarm suppression on this
@@ -1619,13 +1622,50 @@ def _build_change_response(record, app_id):
         _extract_field(record, ALARM_SUPPRESSION_FIELD)
     )
 
+    # Status is captured under u_stage on this instance, not the OOB
+    # `state` field — falls back to `state` if u_stage is empty (in case
+    # some records predate that field being populated). Logged at INFO so
+    # you can check your server logs and confirm u_stage is actually
+    # returning real stage names (e.g. "Implement", "Review", "Closed")
+    # rather than None/empty for every change.
+    stage_value = _extract_field(record, "u_stage")
+    state_value = _extract_field(record, "state")
+    data["status"] = stage_value or state_value
+    logger.info("----------u_stage debug (change=%s)----------", data.get("change_number"))
+    logger.info("u_stage raw=%r | state raw=%r | resolved status=%r", stage_value, state_value, data["status"])
+
     change_sys_id = record.get("sys_id")  # sys_id is never a reference field, always a plain string
     data["change_url"] = _snow_record_url("change_request", change_sys_id)
+
+    # "Servers Under This Change" is built from BOTH places ServiceNow can
+    # surface a CI name: the Affected CI field directly on the
+    # change_request record itself, AND the task_ci junction table
+    # (possibly several impacted CIs). Previously only the task_ci lookup
+    # fed this list — Affected CI was shown as an isolated field and never
+    # counted. The frontend already pattern-matches (he2/he3/or1/or2) and
+    # cross-checks against Asset Inventory on whatever ends up in
+    # impacted_cis, so folding Affected CI in here needs no frontend change.
+    combined_cis = []
+    affected_ci_name = data.get("affected_ci")
+    if affected_ci_name:
+        combined_cis.append({"ci_name": affected_ci_name})
     try:
-        data["impacted_cis"] = _snow_search_impacted_cis(change_sys_id) if change_sys_id else []
+        combined_cis.extend(_snow_search_impacted_cis(change_sys_id) if change_sys_id else [])
     except Exception:
         logger.exception("Impacted-CI lookup failed for change=%s", data.get("change_number"))
-        data["impacted_cis"] = []
+
+    # Dedupe by ci_name, case-insensitive, preserving first-seen order —
+    # avoids showing the same server twice if it's both the Affected CI
+    # and also listed in the task_ci junction table.
+    seen = set()
+    deduped_cis = []
+    for ci in combined_cis:
+        name = (ci.get("ci_name") or "").strip()
+        key = name.lower()
+        if name and key not in seen:
+            seen.add(key)
+            deduped_cis.append(ci)
+    data["impacted_cis"] = deduped_cis
 
     return data
 
