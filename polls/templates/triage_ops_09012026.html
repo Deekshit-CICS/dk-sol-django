@@ -960,9 +960,14 @@
     const SERVER_NAME_PATTERN = /^(he2|he3|or1|or2)[a-z0-9]{11,12}$/i;
 
     function renderSingleChangeBlock(chg, idx, total) {
+        // Both conditions must hold: the name has to look like a real
+        // server (naming convention) AND actually be present in this
+        // incident's Asset Inventory — not just any server-shaped CI the
+        // change happens to touch, but one relevant to this investigation.
+        const assetNames = new Set((currentInc && currentInc.cis || []).map(ci => (ci.name || '').toLowerCase()));
         const displayNames = (chg.impactedCis || [])
             .map(ci => ci.ciName)
-            .filter(name => name && SERVER_NAME_PATTERN.test(name));
+            .filter(name => name && SERVER_NAME_PATTERN.test(name) && assetNames.has(name.toLowerCase()));
 
         let serversHtml;
         if (displayNames.length === 0) {
