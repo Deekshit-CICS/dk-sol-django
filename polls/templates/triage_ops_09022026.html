@@ -120,6 +120,8 @@
         /* ---------- Technical Evidence: tabbed metrics ---------- */
         .evidence-tab-bar { display: flex; gap: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
         .evidence-tab { border: none; background: transparent; padding: 8px 2px; font-size: 0.8rem; font-weight: 600; color: var(--text-sec); cursor: pointer; border-bottom: 2px solid transparent; transition: 0.2s; }
+        .evidence-tab.disabled { color: var(--text-sec); opacity: 0.4; cursor: not-allowed; }
+        .evidence-tab.disabled:hover { color: var(--text-sec); }
         .evidence-tab:hover { color: var(--text-main); }
         .evidence-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
         .evidence-stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
@@ -952,15 +954,22 @@
 
     const CHANGE_SERVERS_EXPAND_THRESHOLD = 8;
 
-    function renderSingleChangeBlock(chg, idx, total) {
-        const allImpactedNames = (chg.impactedCis || []).map(ci => ci.ciName).filter(Boolean);
+    // Matches the backend's SERVER_NAME_PATTERN exactly (see views.py) —
+    // 14 or 15 characters total, starting with he2/he3/or1/or2. Used to
+    // filter "Servers Under This Change" down to actual server names,
+    // excluding application IDs/names that also show up in ServiceNow's
+    // impacted-CI list for a change.
+    const SERVER_NAME_PATTERN = /^(he2|he3|or1|or2)[a-z0-9]{11,12}$/i;
 
-        // Only show servers that are ALSO in Asset Inventory — unless none
-        // of them match, in which case fall back to showing the full list
-        // (better than showing nothing at all).
+    function renderSingleChangeBlock(chg, idx, total) {
+        // Both conditions must hold: the name has to look like a real
+        // server (naming convention) AND actually be present in this
+        // incident's Asset Inventory — not just any server-shaped CI the
+        // change happens to touch, but one relevant to this investigation.
         const assetNames = new Set((currentInc && currentInc.cis || []).map(ci => (ci.name || '').toLowerCase()));
-        const matchingNames = allImpactedNames.filter(name => assetNames.has(name.toLowerCase()));
-        const displayNames = matchingNames.length > 0 ? matchingNames : allImpactedNames;
+        const displayNames = (chg.impactedCis || [])
+            .map(ci => ci.ciName)
+            .filter(name => name && SERVER_NAME_PATTERN.test(name) && assetNames.has(name.toLowerCase()));
 
         let serversHtml;
         if (displayNames.length === 0) {
@@ -1198,6 +1207,16 @@
         return (ci && ci.type === 'job') ? JOB_EVIDENCE_TABS : EVIDENCE_TABS;
     }
 
+    // Held back for the next deployment phase — visible so people know
+    // they're coming, but not clickable, UNLESS currently in Try Demo
+    // Data mode (DEMO_MODE is checked live, not captured once, since it
+    // toggles at runtime via the Try Demo Data button / Exit link).
+    const PHASE2_TABS = ['netstat', 'health', 'firewall', 'sslcerts', 'raw'];
+
+    function isTabDisabled(tabId) {
+        return PHASE2_TABS.includes(tabId) && !DEMO_MODE;
+    }
+
     let currentEvidenceTab = 'cpu';
 
     function showLogPanel() {
@@ -1214,12 +1233,15 @@
             `);
             return;
         }
-        // Reset to a valid default tab when switching between a job CI and
-        // a server CI (e.g. currentEvidenceTab might still be 'cpu' from a
-        // previously-selected server, which isn't a valid tab for a job).
+        // Reset to a valid, ENABLED default tab when switching CIs — never
+        // land on a Phase 2 tab by default outside Try Demo Data, even if
+        // currentEvidenceTab happens to still be one from a prior demo
+        // session or a job/server switch.
         const tabs = getEvidenceTabsForCi(ci);
-        if (!tabs.some(t => t.id === currentEvidenceTab)) {
-            currentEvidenceTab = tabs[0].id;
+        const enabledTabs = tabs.filter(t => !isTabDisabled(t.id));
+        const availableTabs = enabledTabs.length ? enabledTabs : tabs; // fallback safety net, shouldn't normally trigger
+        if (!availableTabs.some(t => t.id === currentEvidenceTab)) {
+            currentEvidenceTab = availableTabs[0].id;
         }
         openPanel('Technical Evidence', ci.name, renderEvidenceShell(ci));
         bindEvidenceTabHandlers(ci);
@@ -1227,9 +1249,14 @@
     }
 
     function renderEvidenceShell(ci) {
-        const tabButtons = getEvidenceTabsForCi(ci).map(t =>
-            `<button class="evidence-tab${t.id === currentEvidenceTab ? ' active' : ''}" data-evidence-tab="${t.id}">${t.label}</button>`
-        ).join('');
+        const tabButtons = getEvidenceTabsForCi(ci).map(t => {
+            const disabled = isTabDisabled(t.id);
+            const classes = ['evidence-tab'];
+            if (t.id === currentEvidenceTab && !disabled) classes.push('active');
+            if (disabled) classes.push('disabled');
+            const title = disabled ? ' title="Coming in a future release"' : '';
+            return `<button class="${classes.join(' ')}" data-evidence-tab="${t.id}"${disabled ? ' disabled' : ''}${title}>${t.label}</button>`;
+        }).join('');
 
         return `
             <div class="evidence-tab-bar" id="evidenceTabBar">${tabButtons}</div>
@@ -1241,6 +1268,7 @@
 
     function bindEvidenceTabHandlers(ci) {
         document.querySelectorAll('#evidenceTabBar .evidence-tab').forEach(btn => {
+            if (btn.classList.contains('disabled')) return; // no click handler at all for Phase 2 tabs outside demo mode
             btn.onclick = () => {
                 document.querySelectorAll('#evidenceTabBar .evidence-tab').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
