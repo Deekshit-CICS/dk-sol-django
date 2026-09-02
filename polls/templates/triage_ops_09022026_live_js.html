@@ -323,6 +323,16 @@
     const snowIncidentCache = {};
     let currentIncPanelInc = null; // tracks which incident's Incident Record panel is open, to guard async re-renders
 
+    // Set when ServiceNow authoritatively confirms an incident number
+    // doesn't exist (empty result from the incident table) — the
+    // internal triage pipeline's own "not found" can't tell the
+    // difference between "no triage session yet" and "this incident
+    // number doesn't exist at all", so this is the one source of truth
+    // for that distinction. showTriageInfo()/showTriageResult() check
+    // this before rendering, so a slower internal-pipeline response can't
+    // overwrite the error with a misleading "in progress"/"success" state.
+    let invalidIncidentQuery = null;
+
     async function fetchAndCacheSnowIncidentDetails(incidentNumber) {
         const key = incidentNumber.toUpperCase();
         snowIncidentCache[key] = { loading: true, data: null, error: null };
@@ -332,6 +342,15 @@
         } catch (err) {
             console.error('ServiceNow incident details fetch failed', err);
             snowIncidentCache[key] = { loading: false, data: null, error: err.message };
+
+            // Only act on this as "invalid incident number" if it's a genuine
+            // 404 AND still the query the user is currently waiting on (a
+            // slow response for an earlier, already-superseded search
+            // shouldn't pop an error about whatever the user typed next).
+            if (err.status === 404 && pendingQuery && pendingQuery.toUpperCase() === key) {
+                invalidIncidentQuery = key;
+                showTriageError(incidentNumber, `Incident "${incidentNumber}" was not found in ServiceNow. Please check the incident number and try again.`);
+            }
         }
         // Re-render only if the Incident Record panel is still open for
         // this same incident — avoids clobbering the panel if the user
@@ -2391,7 +2410,16 @@
     async function fetchServiceNowIncidentDetails(incId) {
         if (DEMO_MODE) return generateDemoSnowIncidentDetails(incId);
         const res = await fetch(INCIDENT_DETAILS_URL(incId), { credentials: 'same-origin' });
-        if (!res.ok) throw new Error(`Incident details fetch failed (HTTP ${res.status})`);
+        if (!res.ok) {
+            let message = `Incident details fetch failed (HTTP ${res.status})`;
+            try {
+                const body = await res.json();
+                if (body && body.error) message = body.error;
+            } catch (_) { /* response wasn't JSON — keep the generic message */ }
+            const err = new Error(message);
+            err.status = res.status; // lets callers distinguish "not found" (404) from other failures
+            throw err;
+        }
         return res.json();
     }
 
@@ -3070,6 +3098,7 @@
     async function runTriage(query) {
         if (!query) return;
         pendingQuery = query;
+        invalidIncidentQuery = null; // fresh attempt — clear any stale flag from a previous search
         fetchAndCacheSnowIncidentDetails(query); // fire-and-forget, runs in parallel — does not block or alter anything below
         openTriageLoading(query);
         setTriageStatus('Looking up incident…');
@@ -3106,7 +3135,13 @@
             await runFreshTriage(query);
 
         } catch (err) {
-            showTriageError(query, err.message);
+            // If ServiceNow already told the user this incident number
+            // doesn't exist, keep that specific message on screen rather
+            // than replacing it with a more generic internal-pipeline
+            // error that arrives after it.
+            if (!(invalidIncidentQuery && invalidIncidentQuery === query.toUpperCase())) {
+                showTriageError(query, err.message);
+            }
         }
     }
 
@@ -3222,6 +3257,7 @@
     }
 
     function showTriageInfo(data) {
+        if (invalidIncidentQuery && pendingQuery && invalidIncidentQuery === pendingQuery.toUpperCase()) return;
         pendingIncidentData = data;
         document.getElementById('triageLoading').style.display = 'none';
         document.getElementById('triageResult').style.display = 'none';
@@ -3233,6 +3269,7 @@
     }
 
     function showTriageResult(success, data, query, skippedRerun) {
+        if (invalidIncidentQuery && query && invalidIncidentQuery === query.toUpperCase()) return;
         document.getElementById('triageLoading').style.display = 'none';
         document.getElementById('triageInfo').style.display = 'none';
         document.getElementById('triageResult').style.display = 'block';
