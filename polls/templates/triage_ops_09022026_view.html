@@ -2258,3 +2258,38 @@ def autosys_job_instances(request):
         "system": "autosys",
         "instances": _generate_dummy_job_instances(job_name, "autosys"),
     })
+
+
+# ===========================================================================
+# Main dashboard JavaScript — served as a real static file (via view,
+# same pattern as ai_assistant_popup_template() above, rather than
+# assuming Django's static file serving is configured for this exact
+# path). This is the file split out of forensic-rca-live.html's inline
+# <script> block — see the split's summary for why: it was a ~165KB
+# inline blob getting harder to safely edit and re-fetched in full on
+# every page load with no browser caching benefit.
+#
+# >>> ADJUST BEFORE USE <<<
+# DASHBOARD_JS_PATH assumes forensic-rca-live.js sits next to views.py.
+# Adjust if you place it elsewhere (e.g. under a real static/ directory
+# once you wire up STATICFILES_DIRS — see the path note below).
+# ===========================================================================
+
+DASHBOARD_JS_PATH = os.path.join(os.path.dirname(__file__), 'forensic-rca-live.js')  # TODO: adjust path if you move it under static/
+
+
+@require_GET
+def dashboard_script(request):
+    """
+    GET /api/dashboard/script.js
+
+    Returns forensic-rca-live.js's raw contents as application/javascript.
+    forensic-rca-live.html loads this via <script src="...">.
+    """
+    try:
+        with open(DASHBOARD_JS_PATH, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except FileNotFoundError:
+        logger.error("Dashboard JS file not found at %s", DASHBOARD_JS_PATH)
+        return HttpResponseServerError("Dashboard script file is missing on the server.")
+    return HttpResponse(content, content_type='application/javascript; charset=utf-8')
