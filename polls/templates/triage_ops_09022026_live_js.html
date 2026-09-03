@@ -317,23 +317,14 @@
     }
 
     // ServiceNow incident record cache — keyed by incident number
-    // (uppercase). Populated by fetchAndCacheSnowIncidentDetails(), called
-    // from runTriage() in parallel with the existing lookup/trigger flow.
-    // Independent of dataRepo/currentInc so it survives across incidents.
+    // (uppercase). Populated by fetchAndCacheSnowIncidentDetails(), now
+    // AWAITED at the top of runTriage() as a gate — see the note there for
+    // why this changed from a fire-and-forget parallel check.
     const snowIncidentCache = {};
     let currentIncPanelInc = null; // tracks which incident's Incident Record panel is open, to guard async re-renders
 
-    // Set when ServiceNow authoritatively confirms an incident number
-    // doesn't exist (empty result from the incident table) — the
-    // internal triage pipeline's own "not found" can't tell the
-    // difference between "no triage session yet" and "this incident
-    // number doesn't exist at all", so this is the one source of truth
-    // for that distinction. showTriageInfo()/showTriageResult() check
-    // this before rendering, so a slower internal-pipeline response can't
-    // overwrite the error with a misleading "in progress"/"success" state.
-    let invalidIncidentQuery = null;
-
     async function fetchAndCacheSnowIncidentDetails(incidentNumber) {
+        if (!incidentNumber) return; // defensive — never fetch/cache for an empty incident number
         const key = incidentNumber.toUpperCase();
         snowIncidentCache[key] = { loading: true, data: null, error: null };
         try {
@@ -341,16 +332,7 @@
             snowIncidentCache[key] = { loading: false, data, error: null };
         } catch (err) {
             console.error('ServiceNow incident details fetch failed', err);
-            snowIncidentCache[key] = { loading: false, data: null, error: err.message };
-
-            // Only act on this as "invalid incident number" if it's a genuine
-            // 404 AND still the query the user is currently waiting on (a
-            // slow response for an earlier, already-superseded search
-            // shouldn't pop an error about whatever the user typed next).
-            if (err.status === 404 && pendingQuery && pendingQuery.toUpperCase() === key) {
-                invalidIncidentQuery = key;
-                showTriageError(incidentNumber, `Incident "${incidentNumber}" was not found in ServiceNow. Please check the incident number and try again.`);
-            }
+            snowIncidentCache[key] = { loading: false, data: null, error: err.message, status: err.status || null };
         }
         // Re-render only if the Incident Record panel is still open for
         // this same incident — avoids clobbering the panel if the user
@@ -3098,9 +3080,31 @@
     async function runTriage(query) {
         if (!query) return;
         pendingQuery = query;
-        invalidIncidentQuery = null; // fresh attempt — clear any stale flag from a previous search
-        fetchAndCacheSnowIncidentDetails(query); // fire-and-forget, runs in parallel — does not block or alter anything below
         openTriageLoading(query);
+        setTriageStatus('Verifying incident exists…');
+
+        // Gate: confirm this incident actually exists in ServiceNow BEFORE
+        // attempting to trigger triage for it. This used to run in
+        // parallel with the lookup/trigger flow below (for speed), but
+        // that meant the internal triage pipeline — which doesn't itself
+        // validate against ServiceNow — could finish first and show
+        // "Triage Successful" before this check ever got a chance to
+        // catch an invalid incident number. Awaiting it first means triage
+        // is never even attempted for a number that doesn't exist.
+        await fetchAndCacheSnowIncidentDetails(query);
+        if (pendingQuery !== query) return; // superseded by a newer search while this was in flight
+
+        const key = query.toUpperCase();
+        const snowResult = snowIncidentCache[key];
+        if (snowResult && snowResult.status === 404) {
+            showIncidentNotFound(query, snowResult.error);
+            return;
+        }
+        // Any other outcome (found, or the check itself failed for an
+        // unrelated reason like a network/502 error) falls through to the
+        // normal flow below — an inconclusive check isn't treated the same
+        // as a confirmed "doesn't exist".
+
         setTriageStatus('Looking up incident…');
 
         try {
@@ -3135,14 +3139,26 @@
             await runFreshTriage(query);
 
         } catch (err) {
-            // If ServiceNow already told the user this incident number
-            // doesn't exist, keep that specific message on screen rather
-            // than replacing it with a more generic internal-pipeline
-            // error that arrives after it.
-            if (!(invalidIncidentQuery && invalidIncidentQuery === query.toUpperCase())) {
-                showTriageError(query, err.message);
-            }
+            showTriageError(query, err.message);
         }
+    }
+
+    /**
+     * Shown when the ServiceNow existence check (awaited at the top of
+     * runTriage(), before any triage attempt) confirms an incident number
+     * doesn't exist — matches showTriageResult()'s "Triage Failed" wording/
+     * icon rather than showTriageError()'s generic "Error" state, since
+     * this is specifically the "you typed a bad incident number" case.
+     */
+    function showIncidentNotFound(query, message) {
+        document.getElementById('triageLoading').style.display = 'none';
+        document.getElementById('triageInfo').style.display = 'none';
+        document.getElementById('triageResult').style.display = 'block';
+        document.getElementById('resultIconWrap').className = 'result-wrap fail';
+        document.getElementById('resultIcon').className = 'bi bi-x-lg';
+        document.getElementById('resultTitle').innerText = 'Triage Failed';
+        document.getElementById('resultDetail').innerText =
+            message || `Incident "${query}" was not found in ServiceNow. Please check the incident number and try again.`;
     }
 
     /**
