@@ -3273,7 +3273,6 @@
     }
 
     function showTriageInfo(data) {
-        if (invalidIncidentQuery && pendingQuery && invalidIncidentQuery === pendingQuery.toUpperCase()) return;
         pendingIncidentData = data;
         document.getElementById('triageLoading').style.display = 'none';
         document.getElementById('triageResult').style.display = 'none';
@@ -3285,7 +3284,6 @@
     }
 
     function showTriageResult(success, data, query, skippedRerun) {
-        if (invalidIncidentQuery && query && invalidIncidentQuery === query.toUpperCase()) return;
         document.getElementById('triageLoading').style.display = 'none';
         document.getElementById('triageInfo').style.display = 'none';
         document.getElementById('triageResult').style.display = 'block';
