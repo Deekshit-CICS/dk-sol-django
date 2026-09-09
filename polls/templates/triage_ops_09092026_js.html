@@ -240,7 +240,8 @@
             const d = document.createElement('div');
             d.className = 'ci-item';
             const icon = ci.type === 'job' ? 'bi-diagram-3' : 'bi-hdd-rack';
-            d.innerHTML = `<span><i class="bi ${icon} small text-muted" style="margin-right:6px;"></i><b>${ci.name}</b></span> <i class="bi bi-chevron-right small text-muted"></i>`;
+            const statusHtml = renderStatusIndicator(ci);
+            d.innerHTML = `<span><i class="bi ${icon} small text-muted" style="margin-right:6px;"></i><b>${ci.name}</b>${statusHtml}</span> <i class="bi bi-chevron-right small text-muted"></i>`;
             d.onclick = (e) => {
                 e.stopPropagation();
                 document.querySelectorAll('.ci-item').forEach(i => i.classList.remove('active'));
@@ -302,8 +303,24 @@
     }
 
     function closePanel() {
-        document.getElementById('sidePanel').classList.remove('open');
+        const panel = document.getElementById('sidePanel');
+        panel.classList.remove('open');
+        // Always clear 'expanded' too, not just 'open' — the closed-state
+        // offset (right: calc(-1 * var(--panel-width) - 20px)) is
+        // calculated against the BASE width, but 'expanded' sets its own
+        // width (920px) independently of 'open'. Leaving 'expanded' set
+        // meant the panel stayed rendered at 920px while only being
+        // pushed off-screen by the narrower base-width offset — so part
+        // of it stayed visibly poking out until expand was toggled off
+        // separately first.
+        panel.classList.remove('expanded');
         document.getElementById('panelOverlay').classList.remove('open');
+
+        const btn = document.getElementById('panel-expand-btn');
+        if (btn) {
+            btn.innerHTML = '<i class="bi bi-arrows-angle-expand"></i>';
+            btn.title = 'Expand panel';
+        }
     }
 
     function togglePanelExpand() {
@@ -317,13 +334,14 @@
     }
 
     // ServiceNow incident record cache — keyed by incident number
-    // (uppercase). Populated by fetchAndCacheSnowIncidentDetails(), called
-    // from runTriage() in parallel with the existing lookup/trigger flow.
-    // Independent of dataRepo/currentInc so it survives across incidents.
+    // (uppercase). Populated by fetchAndCacheSnowIncidentDetails(), now
+    // AWAITED at the top of runTriage() as a gate — see the note there for
+    // why this changed from a fire-and-forget parallel check.
     const snowIncidentCache = {};
     let currentIncPanelInc = null; // tracks which incident's Incident Record panel is open, to guard async re-renders
 
     async function fetchAndCacheSnowIncidentDetails(incidentNumber) {
+        if (!incidentNumber) return; // defensive — never fetch/cache for an empty incident number
         const key = incidentNumber.toUpperCase();
         snowIncidentCache[key] = { loading: true, data: null, error: null };
         try {
@@ -331,7 +349,7 @@
             snowIncidentCache[key] = { loading: false, data, error: null };
         } catch (err) {
             console.error('ServiceNow incident details fetch failed', err);
-            snowIncidentCache[key] = { loading: false, data: null, error: err.message };
+            snowIncidentCache[key] = { loading: false, data: null, error: err.message, status: err.status || null };
         }
         // Re-render only if the Incident Record panel is still open for
         // this same incident — avoids clobbering the panel if the user
@@ -364,7 +382,9 @@
             details: '',
             fetchedAt: null,
             log: null, // Technical Evidence's card preview no longer sources from the internal triage pipeline — see showAssetEvidencePrompt()
-            metricsCache: {}
+            metricsCache: {},
+            status: 'loading',    // 'loading' | 'up' | 'down' | 'unknown' — see loadAssetStatuses()
+            statusCheckedAt: null
         }));
 
         // Control-M/AutoSys job "assets" — no host, so no metricsCache;
@@ -385,6 +405,7 @@
 
         inc.cis = [...serverCis, ...jobCis];
         renderCiList(inc);
+        loadAssetStatuses(inc, key); // fire-and-forget — list already shows "Checking…", updates in place once resolved
     }
 
     function escAttr(s) {
@@ -1518,6 +1539,90 @@
     }
 
     /**
+     * VM up/down status for Asset Inventory rows — sourced from Elastic
+     * Heartbeat (heartbeat-*), NOT Metricbeat (Heartbeat is specifically
+     * an uptime monitor, separate from the CPU/Memory/etc metrics pipeline).
+     * Batched: one call for the whole Asset Inventory list, not one per
+     * asset — see loadAssetStatuses().
+     *
+     *   GET {API_BASE}/api/triage/assets/status/?asset_ids=host1,host2,host3
+     *   -> { statuses: { host1: {status, last_checked}, ... } }
+     */
+    const ASSET_STATUS_URL = (assetIds) =>
+        `${API_BASE}/api/triage/assets/status/?asset_ids=${encodeURIComponent(assetIds.join(','))}`;
+
+    async function fetchAssetStatuses(assetIds) {
+        if (DEMO_MODE) return generateDemoAssetStatuses(assetIds);
+        const res = await fetch(ASSET_STATUS_URL(assetIds), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`Asset status fetch failed (HTTP ${res.status})`);
+        const data = await res.json();
+        return data.statuses || {};
+    }
+
+    function generateDemoAssetStatuses(assetIds) {
+        const statuses = {};
+        assetIds.forEach(id => {
+            const rand = seededRandom(`${id}:heartbeat-status`);
+            const isUp = rand() > 0.15; // mostly up, occasional down — consistent with the job-instance demo mix
+            statuses[id] = { status: isUp ? 'up' : 'down', last_checked: new Date().toISOString() };
+        });
+        return new Promise(resolve => setTimeout(() => resolve(statuses), 300));
+    }
+
+    /**
+     * Fetches up/down for every server-type CI in one batched call, then
+     * updates each ci.status/statusCheckedAt and re-renders the list.
+     * Fire-and-forget from applySnowServerListToAssetInventory() — the
+     * list already renders (with a "Checking…" indicator) before this
+     * resolves, same progressive-enhancement pattern used elsewhere.
+     */
+    async function loadAssetStatuses(inc, key) {
+        const serverCis = (inc.cis || []).filter(ci => ci.type === 'server');
+        if (!serverCis.length) return;
+
+        let statuses;
+        try {
+            statuses = await fetchAssetStatuses(serverCis.map(ci => ci.id));
+        } catch (err) {
+            console.error('asset status fetch failed', err);
+            serverCis.forEach(ci => { ci.status = 'unknown'; });
+            if (currentInc && currentInc.id.toUpperCase() === key) renderCiList(inc);
+            return;
+        }
+
+        // Guard against a stale/superseded fetch — only apply if this is
+        // still the incident currently on screen.
+        if (!currentInc || currentInc.id.toUpperCase() !== key) return;
+
+        serverCis.forEach(ci => {
+            const result = statuses[ci.id];
+            ci.status = (result && result.status) || 'unknown';
+            ci.statusCheckedAt = (result && result.last_checked) || null;
+        });
+        renderCiList(inc);
+    }
+
+    /**
+     * Small dot + label — green/Up, red/Down, grey/Unknown, pulsing grey
+     * while the batched fetch is still in flight. Job-type CIs (Control-M/
+     * AutoSys) don't have VM heartbeat status, so this renders nothing
+     * for those — only server-type CIs get an indicator.
+     */
+    function renderStatusIndicator(ci) {
+        if (ci.type !== 'server') return '';
+        const status = ci.status || 'loading';
+        let color, label, pulsing = false;
+        if (status === 'up') { color = 'var(--green)'; label = 'Up'; }
+        else if (status === 'down') { color = '#ff3b30'; label = 'Down'; }
+        else if (status === 'unknown') { color = '#a0a0a5'; label = 'Unknown'; }
+        else { color = '#a0a0a5'; label = 'Checking…'; pulsing = true; }
+
+        const dotStyle = `width:7px; height:7px; border-radius:50%; background:${color}; flex-shrink:0;` +
+            (pulsing ? ' animation: statusDotPulse 1.4s ease-in-out infinite;' : '');
+        return `<span style="display:inline-flex; align-items:center; gap:5px; margin-left:8px; font-size:0.7rem; font-weight:700; color:${color};" title="${ci.statusCheckedAt ? 'Last checked: ' + ci.statusCheckedAt : ''}"><span style="${dotStyle}"></span>${label}</span>`;
+    }
+
+    /**
      * Control-M / AutoSys job execution history. DUMMY DATA in the backend
      * for now (no real Control-M/AutoSys API integration yet) — see the
      * module note above controlm_job_instances()/autosys_job_instances()
@@ -2141,7 +2246,7 @@
     // below, but the "Try Demo Data" button flips it on live too (see
     // tryDemoData() / exitDemoMode()). The demo build just starts `true`;
     // the live build starts `false`. No other code differs between them.
-    let DEMO_MODE = true;
+    let DEMO_MODE = false;
 
     const STATUS_IN_PROGRESS = ['in process', 'in progress', 'processing'];
     const STATUS_COMPLETED   = ['completed', 'complete', 'success', 'successful'];
@@ -2391,7 +2496,16 @@
     async function fetchServiceNowIncidentDetails(incId) {
         if (DEMO_MODE) return generateDemoSnowIncidentDetails(incId);
         const res = await fetch(INCIDENT_DETAILS_URL(incId), { credentials: 'same-origin' });
-        if (!res.ok) throw new Error(`Incident details fetch failed (HTTP ${res.status})`);
+        if (!res.ok) {
+            let message = `Incident details fetch failed (HTTP ${res.status})`;
+            try {
+                const body = await res.json();
+                if (body && body.error) message = body.error;
+            } catch (_) { /* response wasn't JSON — keep the generic message */ }
+            const err = new Error(message);
+            err.status = res.status; // lets callers distinguish "not found" (404) from other failures
+            throw err;
+        }
         return res.json();
     }
 
@@ -3070,8 +3184,31 @@
     async function runTriage(query) {
         if (!query) return;
         pendingQuery = query;
-        fetchAndCacheSnowIncidentDetails(query); // fire-and-forget, runs in parallel — does not block or alter anything below
         openTriageLoading(query);
+        setTriageStatus('Verifying incident exists…');
+
+        // Gate: confirm this incident actually exists in ServiceNow BEFORE
+        // attempting to trigger triage for it. This used to run in
+        // parallel with the lookup/trigger flow below (for speed), but
+        // that meant the internal triage pipeline — which doesn't itself
+        // validate against ServiceNow — could finish first and show
+        // "Triage Successful" before this check ever got a chance to
+        // catch an invalid incident number. Awaiting it first means triage
+        // is never even attempted for a number that doesn't exist.
+        await fetchAndCacheSnowIncidentDetails(query);
+        if (pendingQuery !== query) return; // superseded by a newer search while this was in flight
+
+        const key = query.toUpperCase();
+        const snowResult = snowIncidentCache[key];
+        if (snowResult && snowResult.status === 404) {
+            showIncidentNotFound(query, snowResult.error);
+            return;
+        }
+        // Any other outcome (found, or the check itself failed for an
+        // unrelated reason like a network/502 error) falls through to the
+        // normal flow below — an inconclusive check isn't treated the same
+        // as a confirmed "doesn't exist".
+
         setTriageStatus('Looking up incident…');
 
         try {
@@ -3108,6 +3245,24 @@
         } catch (err) {
             showTriageError(query, err.message);
         }
+    }
+
+    /**
+     * Shown when the ServiceNow existence check (awaited at the top of
+     * runTriage(), before any triage attempt) confirms an incident number
+     * doesn't exist — matches showTriageResult()'s "Triage Failed" wording/
+     * icon rather than showTriageError()'s generic "Error" state, since
+     * this is specifically the "you typed a bad incident number" case.
+     */
+    function showIncidentNotFound(query, message) {
+        document.getElementById('triageLoading').style.display = 'none';
+        document.getElementById('triageInfo').style.display = 'none';
+        document.getElementById('triageResult').style.display = 'block';
+        document.getElementById('resultIconWrap').className = 'result-wrap fail';
+        document.getElementById('resultIcon').className = 'bi bi-x-lg';
+        document.getElementById('resultTitle').innerText = 'Triage Failed';
+        document.getElementById('resultDetail').innerText =
+            message || `Incident "${query}" was not found in ServiceNow. Please check the incident number and try again.`;
     }
 
     /**
