@@ -170,6 +170,31 @@ SOCKET_PROCESS_PID_FIELD = "system.socket.process.pid"
 SOCKET_PROCESS_NAME_FIELD = "system.socket.process.name"  # the -p in -tulnp
 NETSTAT_MAX_RESULTS = 500
 
+# ---------------------------------------------------------------------------
+# VM up/down status — Asset Inventory shows a live status indicator on each
+# asset, sourced from Elastic Heartbeat rather than Metricbeat (Heartbeat is
+# specifically an uptime/availability monitor, not a metrics collector).
+#
+# >>> ADJUST BEFORE USE <<<
+# HEARTBEAT_HOST_FIELD is a genuine guess and more likely to need
+# correcting than most other TODOs in this file — how a Heartbeat monitor
+# ties back to a specific host varies a lot by monitor type and how your
+# monitors were configured:
+#   - If Heartbeat runs ON each host and reports its own identity, the
+#     ECS `host.name` field (the default guess below) is probably right.
+#   - If monitors are ICMP/TCP/HTTP checks defined centrally against a
+#     target address, the host might only be identifiable via
+#     `monitor.name` (if monitors are named after the host) or
+#     `url.domain` / `resolve.ip` (for TCP/HTTP checks) instead.
+# Check a sample heartbeat-* document against your actual monitor setup
+# before trusting this.
+# ---------------------------------------------------------------------------
+
+HEARTBEAT_INDEX_PATTERN = "heartbeat-*"
+HEARTBEAT_HOST_FIELD = "host.name"        # TODO: confirm — see note above, may need to be monitor.name or url.domain instead
+HEARTBEAT_STATUS_FIELD = "monitor.status"  # "up" | "down"
+ASSET_STATUS_MAX_HOSTS = 100                # sanity cap on how many hosts one request can ask about
+
 # Time windows — tune these to taste.
 HISTORIC_WINDOW = timedelta(minutes=10)  # +/- around incident.created_at
 CURRENT_WINDOW = timedelta(minutes=5)    # trailing window up to "now"
@@ -500,6 +525,98 @@ def _query_netstat(asset_id, start, end, size=NETSTAT_MAX_RESULTS):
             "process_name": _get_nested_field(source, SOCKET_PROCESS_NAME_FIELD),
         })
     return items
+
+
+def _query_asset_statuses(asset_ids):
+    """
+    Batched up/down lookup for multiple hosts in ONE Elasticsearch query —
+    NOT one query per asset. Asset Inventory can list several VMs at once,
+    so this uses a terms aggregation (one bucket per host) with a
+    top_hits sub-agg (size 1, sorted newest-first) to get each host's
+    MOST RECENT Heartbeat check, all in a single round trip.
+
+    Returns { host_name: {"status": "up"|"down"|None, "last_checked": iso_str|None}, ... }
+    — hosts with no matching Heartbeat data simply won't appear in the
+    dict; the caller/view fills in "unknown" for anything missing.
+    """
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"terms": {HEARTBEAT_HOST_FIELD: asset_ids}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_host": {
+                "terms": {"field": HEARTBEAT_HOST_FIELD, "size": len(asset_ids)},
+                "aggs": {
+                    "latest": {
+                        "top_hits": {
+                            "size": 1,
+                            "sort": [{"@timestamp": {"order": "desc"}}],
+                            "_source": [HEARTBEAT_STATUS_FIELD, "@timestamp"],
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+    response = _es_search(HEARTBEAT_INDEX_PATTERN, query)
+    aggs = response.get("aggregations", {})
+
+    statuses = {}
+    for bucket in aggs.get("by_host", {}).get("buckets", []):
+        hits = bucket.get("latest", {}).get("hits", {}).get("hits", [])
+        source = hits[0].get("_source", {}) if hits else {}
+        statuses[bucket.get("key")] = {
+            "status": _get_nested_field(source, HEARTBEAT_STATUS_FIELD),
+            "last_checked": source.get("@timestamp"),
+        }
+    return statuses
+
+
+@require_GET
+def asset_statuses(request):
+    """
+    GET /api/triage/assets/status/?asset_ids=host1,host2,host3
+
+    Powers the up/down indicator on each Asset Inventory row. Comma-
+    separated list rather than one call per asset — batches the whole
+    Asset Inventory into a single Elasticsearch round trip. Response:
+
+        { "statuses": {
+            "host1": {"status": "up",   "last_checked": "<iso>"},
+            "host2": {"status": "down", "last_checked": "<iso>"},
+            "host3": {"status": "unknown", "last_checked": null}
+          } }
+
+    A host present in the request but missing from Heartbeat entirely
+    (no monitor configured, or genuinely no data yet) comes back as
+    "unknown" rather than being silently dropped, so the frontend always
+    gets one entry per host it asked about.
+    """
+    asset_ids_param = request.GET.get('asset_ids', '')
+    asset_ids = [a.strip() for a in asset_ids_param.split(',') if a.strip()]
+
+    if not asset_ids:
+        return JsonResponse({"error": "asset_ids is required (comma-separated)"}, status=400)
+    if len(asset_ids) > ASSET_STATUS_MAX_HOSTS:
+        return JsonResponse({"error": f"Too many asset_ids (max {ASSET_STATUS_MAX_HOSTS})"}, status=400)
+
+    try:
+        found = _query_asset_statuses(asset_ids)
+    except Exception:
+        logger.exception("Heartbeat status lookup failed for assets=%s", asset_ids)
+        return JsonResponse({"error": "Failed to fetch asset status from Elasticsearch"}, status=502)
+
+    statuses = {
+        asset_id: found.get(asset_id, {"status": "unknown", "last_checked": None})
+        for asset_id in asset_ids
+    }
+    return JsonResponse({"statuses": statuses})
 
 
 def _format_bytes(num_bytes):
@@ -2259,37 +2376,7 @@ def autosys_job_instances(request):
         "instances": _generate_dummy_job_instances(job_name, "autosys"),
     })
 
-
-# ===========================================================================
-# Main dashboard JavaScript — served as a real static file (via view,
-# same pattern as ai_assistant_popup_template() above, rather than
-# assuming Django's static file serving is configured for this exact
-# path). This is the file split out of forensic-rca-live.html's inline
-# <script> block — see the split's summary for why: it was a ~165KB
-# inline blob getting harder to safely edit and re-fetched in full on
-# every page load with no browser caching benefit.
-#
-# >>> ADJUST BEFORE USE <<<
-# DASHBOARD_JS_PATH assumes forensic-rca-live.js sits next to views.py.
-# Adjust if you place it elsewhere (e.g. under a real static/ directory
-# once you wire up STATICFILES_DIRS — see the path note below).
-# ===========================================================================
-
-DASHBOARD_JS_PATH = os.path.join(os.path.dirname(__file__), 'forensic-rca-live.js')  # TODO: adjust path if you move it under static/
-
-
-@require_GET
-def dashboard_script(request):
-    """
-    GET /api/dashboard/script.js
-
-    Returns forensic-rca-live.js's raw contents as application/javascript.
-    forensic-rca-live.html loads this via <script src="...">.
-    """
-    try:
-        with open(DASHBOARD_JS_PATH, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except FileNotFoundError:
-        logger.error("Dashboard JS file not found at %s", DASHBOARD_JS_PATH)
-        return HttpResponseServerError("Dashboard script file is missing on the server.")
-    return HttpResponse(content, content_type='application/javascript; charset=utf-8')
+# forensic-rca-live.js is served directly through Django's staticfiles app
+# now (it lives in static/js/ alongside your other static JS) — no custom
+# view needed for it. See urls.py's comment for the settings.py pieces
+# this depends on.
