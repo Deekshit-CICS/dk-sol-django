@@ -3,7 +3,7 @@ Forensic RCA — Technical Evidence metrics endpoint (function-based views).
 
 Serves GET /api/triage/evidence/metrics/?incident_number=<id>&asset_id=<assetId>&metric=<cpu|memory|disk|network>
 
-This matches the contract already wired up in forensic-rca-live.html's
+This matches the contract already wired up in forensic-rca-live.js's
 fetchEvidenceMetric()/EVIDENCE_METRIC_URL — no frontend changes are needed
 once this view is live; the CPU tab (with its Historic/Current sub-tabs,
 bar chart, and top-10 table) will start rendering real data immediately.
@@ -953,7 +953,7 @@ def _parse_custom_range(request):
     These arrive as naive, no-timezone-suffix strings (e.g.
     "2026-08-21T14:30:00") representing the exact wall-clock time the user
     picked in the browser — the frontend deliberately does NOT convert to
-    UTC before sending (see toLocalIsoString() in forensic-rca-live.html),
+    UTC before sending (see toLocalIsoString() in forensic-rca-live.js),
     since this org's Elasticsearch data is indexed using EST/EDT wall-clock
     timestamps rather than true UTC. parse_datetime() returns a naive
     datetime for a string like this (no tzinfo attached), and that naive
@@ -1306,7 +1306,7 @@ def _get_current_rawlog_section(asset_id, range_start=None, range_end=None):
 #
 # Serves GET /api/triage/asset/details/?incident_number=<id>&asset_id=<assetId>
 #
-# Matches the contract already wired up in forensic-rca-live.html's
+# Matches the contract already wired up in forensic-rca-live.js's
 # fetchAssetDetails()/normalizeAssetDetails() — no frontend changes needed
 # once this view is live.
 #
@@ -1592,7 +1592,7 @@ def asset_details(request):
 # affected_ci, change_coordinator, start_time, end_time, status, app_id,
 # impacted_cis[]) — same field names used for the bundled /details/
 # response's changes[], so no new frontend mapping logic was needed, just
-# a new fetch call. See mapChangesRaw() in forensic-rca-live.html.
+# a new fetch call. See mapChangesRaw() in forensic-rca-live.js.
 #
 # >>> ADJUST BEFORE USE <<<
 #   1. CHANGE_APP_FIELD — how a change ties back to an application/app_id
@@ -1840,7 +1840,7 @@ def changes(request):
 # The OAuth token, JWT token, and Azure connection details must NEVER
 # reach the browser. The frontend only ever talks to this Django endpoint;
 # this endpoint is the only thing that ever talks to Azure OpenAI. That's
-# already how forensic-rca-live.html's popup is built (it POSTs to
+# already how forensic-rca-live.js's popup-opening code is built (it POSTs to
 # AI_ASSISTANT_CHAT_URL, never to Azure directly) — this view is what
 # makes that real. Tokens are fetched fresh on every request rather than
 # cached at import time, since OAuth tokens expire and you don't want a
@@ -1910,7 +1910,7 @@ def _build_chat_messages(system_prompt, history, user_message):
     Builds the OpenAI messages array: system prompt + prior turns (from
     the frontend's chatHistory, which already includes the full incident
     context in the first user turn — see buildAiContextPrompt() in
-    forensic-rca-live.html) + the new message.
+    forensic-rca-live.js) + the new message.
     """
     messages = [{"role": "system", "content": system_prompt}]
     for turn in history or []:
@@ -1928,7 +1928,7 @@ def _stream_chat_chunks(client, config, messages):
     is what actually produces the "real-time" typing effect — the
     frontend's popup reads this via a ReadableStream reader and appends
     each chunk to the reply card as it arrives (see getAssistantReply() in
-    forensic-rca-live.html).
+    ai-assistant-popup.js).
     """
     stream = client.chat.completions.create(
         model=config.get_model(),
@@ -2007,7 +2007,7 @@ def ai_assistant_chat(request):
 #
 # Fix: this endpoint does nothing except force Django to set the cookie.
 # The frontend calls it once, before any POST that needs X-CSRFToken —
-# see ensureCsrfCookie() in forensic-rca-live.html.
+# see ensureCsrfCookie() in forensic-rca-live.js (and the equivalent copy in ai-assistant-popup.js).
 # ===========================================================================
 
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -2027,6 +2027,13 @@ def csrf_bootstrap(request):
 # server happens to serve arbitrary sibling files — most Django
 # deployments don't do this by default, which is exactly the 404 this
 # fixes: GET https://.../goc_rca/ai-assistant-popup.html).
+#
+# This HTML file is now just the markup + a small inline config script (6
+# placeholder-substituted values) — the actual chat logic lives in
+# ai-assistant-popup.js, loaded via a normal <script src="/static/js/ai-assistant-popup.js">
+# tag inside the HTML. That JS file is a genuine static asset (no
+# per-request substitution needed) — place it in static/js/ alongside
+# forensic-rca-live.js, same as any other static JS in your project.
 #
 # Serves GET /api/ai-assistant/popup-template/
 #
@@ -2048,9 +2055,12 @@ POPUP_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), 'ai-assistant-popu
 def ai_assistant_popup_template(request):
     """
     GET /api/ai-assistant/popup-template/
-    Returns ai-assistant-popup.html's raw contents as text/html. The
-    frontend fetches this (see AI_ASSISTANT_POPUP_TEMPLATE_URL in
-    forensic-rca-live.html), substitutes its own placeholders into it, and
+    Returns ai-assistant-popup.html's raw contents as text/html — now just
+    markup + a small inline config script; ai-assistant-popup.js (the
+    actual chat logic) is a separate static file, loaded by the HTML's
+    own <script src="..."> tag once it's written into the popup window.
+    The frontend fetches this (see AI_ASSISTANT_POPUP_TEMPLATE_URL in
+    forensic-rca-live.js), substitutes its own placeholders into it, and
     writes the result into the popup window.
     """
     try:
@@ -2271,7 +2281,7 @@ def incident_details(request):
     GET /api/triage/incident/details/?incident_number=<id>
 
     Fetched in parallel with the existing triage lookup/trigger flow (see
-    fetchAndCacheSnowIncidentDetails() in forensic-rca-live.html, called
+    fetchAndCacheSnowIncidentDetails() in forensic-rca-live.js, called
     from runTriage() without blocking it) — this endpoint is purely
     additive and doesn't affect whether/how a triage re-runs.
     """
