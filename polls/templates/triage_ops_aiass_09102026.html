@@ -114,9 +114,59 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
 .thinking-chip { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--text-sec); font-style:italic; }
 .thinking-chip .pulse { width:6px; height:6px; border-radius:50%; background:var(--blue); animation:pulse 1s infinite ease-in-out; }
 @keyframes pulse { 0%,100% { opacity:0.3; } 50% { opacity:1; } }
-.suggestion-row { display:flex; gap:8px; margin:0 7% 10px; flex-wrap:wrap; }
+.suggestion-label { font-size:11px; font-weight:600; color:var(--text-sec); margin:0 7% 8px; text-transform:uppercase; letter-spacing:0.03em; }
+.suggestion-row { display:flex; gap:8px; margin:0 7% 20px; flex-wrap:wrap; }
 .suggestion-chip { font-size:11.5px; padding:6px 12px; border-radius:20px; border:1px solid var(--border); color:var(--text-sec); cursor:pointer; background:#fff; font-family:var(--font-mono); }
 .suggestion-chip:hover { border-color:var(--blue); color:var(--blue); }
+.suggestion-chip.disabled { opacity:0.4; pointer-events:none; cursor:default; }
+.suggestion-chip.disabled:hover { border-color:var(--border); color:var(--text-sec); }
+
+/* ---------- Prompt bucket: floating toggle + slide-out panel of
+   longer/more complex prompts, separate from the compact suggestion
+   chips above (which stay as they are) ---------- */
+.prompt-bucket-toggle {
+  position:fixed; right:0; top:50%; transform:translateY(-50%);
+  background:var(--blue); color:#fff; border:none; z-index:500;
+  padding:16px 9px; border-radius:12px 0 0 12px; cursor:pointer;
+  box-shadow:-3px 0 14px rgba(0,0,0,0.18);
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  writing-mode:vertical-rl; text-orientation:mixed;
+  font-size:11px; font-weight:700; letter-spacing:0.04em; font-family:var(--font-sans);
+  transition:padding-right 0.2s, background 0.2s;
+}
+.prompt-bucket-toggle:hover { background:#005bc2; padding-right:13px; }
+.prompt-bucket-overlay {
+  position:fixed; inset:0; background:rgba(15,23,42,0.18); z-index:600;
+  opacity:0; pointer-events:none; transition:opacity 0.25s;
+}
+.prompt-bucket-overlay.open { opacity:1; pointer-events:auto; }
+.prompt-bucket-panel {
+  position:fixed; top:0; right:-380px; width:360px; max-width:90vw; height:100vh;
+  background:#fff; box-shadow:-14px 0 44px rgba(0,0,0,0.2); z-index:601;
+  transition:right 0.35s cubic-bezier(0.4,0,0.2,1);
+  display:flex; flex-direction:column; padding:26px 22px;
+}
+.prompt-bucket-panel.open { right:0; }
+.prompt-bucket-head { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:6px; }
+.prompt-bucket-title { font-size:15px; font-weight:700; color:var(--text-main); }
+.prompt-bucket-sub { font-size:11.5px; color:var(--text-sec); margin-bottom:18px; line-height:1.5; }
+.prompt-bucket-close { border:none; background:rgba(0,0,0,0.05); width:28px; height:28px; border-radius:9px; cursor:pointer; color:var(--text-sec); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.prompt-bucket-close:hover { background:rgba(0,0,0,0.1); }
+.prompt-bucket-list { overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-bottom:10px; }
+.prompt-bucket-item {
+  border:1px solid var(--border); border-radius:13px; padding:13px 15px;
+  font-size:12.5px; line-height:1.55; color:var(--text-main); cursor:pointer;
+  background:#fafafa; font-family:var(--font-sans); transition:0.15s;
+}
+.prompt-bucket-item:hover { border-color:var(--blue); background:var(--blue-bg); }
+.prompt-bucket-item.disabled { opacity:0.4; pointer-events:none; cursor:default; }
+
+/* .command-bar (free-text input) is currently unused — prompts are
+   restricted to the prebuilt suggestion chips above, per explicit
+   request. Left in place, not deleted, since this may be re-enabled
+   later; the #chatForm markup and its submit handler were removed from
+   the body/script below, so these rules just aren't applied to anything
+   right now. */
 .command-bar { margin:0 7% 20px; border:1px solid var(--border); border-radius:14px; background:#fff; display:flex; align-items:center; padding:4px 6px 4px 14px; box-shadow:0 1px 2px rgba(15,23,42,0.04); }
 .command-bar input { flex:1; border:none; outline:none; font-size:13px; padding:9px 0; font-family:var(--font-sans); }
 .command-bar-send { width:30px; height:30px; border-radius:10px; background:var(--blue); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; }
@@ -148,16 +198,41 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
     <div class="route-indicator mcp" id="routeBadge"><span class="route-dot"></span><span id="routeBadgeText">Ready</span></div>
   </div>
   <div class="chat-view" id="log"></div>
+  <div class="suggestion-label">Choose a question to continue the investigation:</div>
   <div class="suggestion-row">
     <div class="suggestion-chip" onclick="askSuggestion(this)">Explain the root cause in more detail</div>
     <div class="suggestion-chip" onclick="askSuggestion(this)">Suggest the next remediation step</div>
     <div class="suggestion-chip" onclick="askSuggestion(this)">Any similar past incidents?</div>
+    <div class="suggestion-chip" onclick="askSuggestion(this)">Summarize the evidence collected so far</div>
+    <div class="suggestion-chip" onclick="askSuggestion(this)">What changes might have caused this?</div>
+    <div class="suggestion-chip" onclick="askSuggestion(this)">Assess the business impact</div>
   </div>
-  <form class="command-bar" id="chatForm">
-    <input id="chatInput" type="text" placeholder="Ask a follow-up question…" autocomplete="off">
-    <button type="submit" class="command-bar-send" id="sendBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
-  </form>
 </div>
+
+<button class="prompt-bucket-toggle" id="promptBucketToggle" onclick="togglePromptBucket()" title="More prompts">
+  <span>Prompt Bucket</span>
+</button>
+<div class="prompt-bucket-overlay" id="promptBucketOverlay" onclick="closePromptBucket()"></div>
+<div class="prompt-bucket-panel" id="promptBucketPanel">
+  <div class="prompt-bucket-head">
+    <div>
+      <div class="prompt-bucket-title">Prompt Bucket</div>
+    </div>
+    <button class="prompt-bucket-close" onclick="closePromptBucket()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="prompt-bucket-sub">Longer, more detailed questions for a deeper investigation.</div>
+  <div class="prompt-bucket-list">
+    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Walk me through a full timeline correlation — cross-reference when the alert first fired against the linked change's implementation window, and call out any overlapping timestamps or fields that suggest the change caused this incident.</div>
+    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Compare the current CPU, Memory, and Disk trends against the historical baseline captured at incident open. Flag any metric that has deviated by more than 20%, and explain what that deviation likely indicates.</div>
+    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Draft a concise incident summary suitable for a status update to leadership, covering what happened, current impact, and what's being done about it — keep it under 150 words.</div>
+    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Review the linked change's implementation and rollback plan. Based on the current evidence, would rolling back this change likely resolve the incident, and what are the risks of rolling back at this stage?</div>
+    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Look across all the asset evidence collected so far and identify any process, service, or listening port that appears anomalous compared to what you'd expect on a healthy instance of this type.</div>
+    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Given everything gathered so far, draft a step-by-step remediation plan, ordered by risk (lowest-risk actions first), with an estimated time to resolution for each step.</div>
+    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Does this incident match a known pattern from prior similar incidents, based on the symptoms, affected components, and evidence collected so far?</div>
+    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Identify every server and job asset involved in this incident, and explain how each one's evidence supports or rules out it being the root cause.</div>
+  </div>
+</div>
+
 <script>
   var DEMO_MODE = __AI_POPUP_DEMO_MODE__;
   var CHAT_URL = "__AI_POPUP_CHAT_URL__";
@@ -391,6 +466,19 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
     }
     return acc2 || "No response received.";
   }
+  var responseInFlight = false;
+
+  function setPromptTriggersEnabled(enabled) {
+    // Covers BOTH the compact suggestion chips and the prompt bucket's
+    // longer prompts — one guard, one flag (responseInFlight), applied
+    // consistently across both entry points.
+    var triggers = document.querySelectorAll(".suggestion-chip, .prompt-bucket-item");
+    for (var i = 0; i < triggers.length; i++) {
+      if (enabled) { triggers[i].classList.remove("disabled"); }
+      else { triggers[i].classList.add("disabled"); }
+    }
+  }
+
   function renderInitialExchange() {
     var openerText = "Continue investigating " + (contextSummary.incidentId || "this incident");
     var block = addExchangeShell(openerText);
@@ -414,6 +502,8 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
     if (contextSummary.assets && contextSummary.assets.length) block.appendChild(buildAssetsCard());
     if (contextSummary.evidence) block.appendChild(buildEvidenceChip());
     block.appendChild(buildTrace());
+    responseInFlight = true;
+    setPromptTriggersEnabled(false);
     setRoute(true);
     var thinking = addThinkingChip(block);
     var replyCard = null;
@@ -424,14 +514,20 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
       chatHistory.push({ role: "user", content: initialPrompt });
       chatHistory.push({ role: "assistant", content: reply });
       setRoute(false);
+      responseInFlight = false;
+      setPromptTriggersEnabled(true);
     }).catch(function (err) {
       thinking.remove();
       if (!replyCard) replyCard = addStreamingReplyCard(block);
       replyCard.update("Failed to reach the AI assistant: " + err.message);
       setRoute(false);
+      responseInFlight = false;
+      setPromptTriggersEnabled(true);
     });
   }
   function send(text) {
+    responseInFlight = true;
+    setPromptTriggersEnabled(false);
     var block = addExchangeShell(text);
     setRoute(true);
     var thinking = addThinkingChip(block);
@@ -443,25 +539,39 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
       chatHistory.push({ role: "user", content: text });
       chatHistory.push({ role: "assistant", content: reply });
       setRoute(false);
+      responseInFlight = false;
+      setPromptTriggersEnabled(true);
     }).catch(function (err) {
       thinking.remove();
       if (!replyCard) replyCard = addStreamingReplyCard(block);
       replyCard.update("Failed to reach the AI assistant: " + err.message);
       setRoute(false);
+      responseInFlight = false;
+      setPromptTriggersEnabled(true);
     });
   }
   function askSuggestion(el) {
+    if (responseInFlight) return; // ignore clicks while a response is already streaming — CSS pointer-events:none already blocks this visually, this is the actual logic guard
+    send(el.textContent);
+  }
+  function togglePromptBucket() {
+    var isOpen = document.getElementById("promptBucketPanel").classList.contains("open");
+    if (isOpen) { closePromptBucket(); } else { openPromptBucket(); }
+  }
+  function openPromptBucket() {
+    document.getElementById("promptBucketPanel").classList.add("open");
+    document.getElementById("promptBucketOverlay").classList.add("open");
+  }
+  function closePromptBucket() {
+    document.getElementById("promptBucketPanel").classList.remove("open");
+    document.getElementById("promptBucketOverlay").classList.remove("open");
+  }
+  function askBucketPrompt(el) {
+    if (responseInFlight) return; // same guard as askSuggestion — bucket prompts go through the identical send() path
+    closePromptBucket();
     send(el.textContent);
   }
   renderInitialExchange();
-  document.getElementById("chatForm").addEventListener("submit", function (e) {
-    e.preventDefault();
-    var input = document.getElementById("chatInput");
-    var text = input.value.trim();
-    if (!text) return;
-    input.value = "";
-    send(text);
-  });
 </script>
 </body>
 </html>
