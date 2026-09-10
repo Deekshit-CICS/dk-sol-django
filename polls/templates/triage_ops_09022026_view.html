@@ -2030,7 +2030,7 @@ def csrf_bootstrap(request):
 #
 # This HTML file is now just the markup + a small inline config script (6
 # placeholder-substituted values) — the actual chat logic lives in
-# ai-assistant-popup.js, loaded via a normal <script src="/static/js/ai-assistant-popup.js">
+# ai-assistant-popup.js, loaded via a normal <script src="{% static 'js/ai-assistant-popup.js' %}">
 # tag inside the HTML. That JS file is a genuine static asset (no
 # per-request substitution needed) — place it in static/js/ alongside
 # forensic-rca-live.js, same as any other static JS in your project.
@@ -2038,40 +2038,44 @@ def csrf_bootstrap(request):
 # Serves GET /api/ai-assistant/popup-template/
 #
 # >>> ADJUST BEFORE USE <<<
-# POPUP_TEMPLATE_PATH below assumes ai-assistant-popup.html sits in the
-# same directory as this views.py file. Move the file to wherever makes
-# sense in your project layout and update the path — e.g. if you put it
-# under a `templates/` folder: os.path.join(settings.BASE_DIR, 'templates', 'ai-assistant-popup.html')
+# render() below means ai-assistant-popup.html must live somewhere
+# Django's TEMPLATES loader actually searches — typically an app's
+# templates/ directory (<app>/templates/ai-assistant-popup.html), or a
+# directory listed in TEMPLATES[0]['DIRS'] in settings.py. A bare
+# filesystem path next to views.py (the old approach) doesn't apply once
+# you're going through the template engine instead of a raw file read.
 # ===========================================================================
 
-import os
-
-from django.http import HttpResponse, HttpResponseServerError
-
-POPUP_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), 'ai-assistant-popup.html')  # TODO: adjust path — e.g. os.path.join(settings.BASE_DIR, 'templates', 'ai-assistant-popup.html') if you move it under templates/
+from django.http import HttpResponseServerError
+from django.shortcuts import render
+from django.template import TemplateDoesNotExist
 
 
 @require_GET
 def ai_assistant_popup_template(request):
     """
     GET /api/ai-assistant/popup-template/
-    Returns ai-assistant-popup.html's raw contents as text/html — now just
-    markup + a small inline config script; ai-assistant-popup.js (the
-    actual chat logic) is a separate static file, loaded by the HTML's
-    own <script src="..."> tag once it's written into the popup window.
-    The frontend fetches this (see AI_ASSISTANT_POPUP_TEMPLATE_URL in
-    forensic-rca-live.js), substitutes its own placeholders into it, and
-    writes the result into the popup window.
+    Renders ai-assistant-popup.html through Django's template engine (so
+    {% load static %}/{% static %} resolve correctly) and returns the
+    result as text/html — render(), not a raw open().read(), specifically
+    because Django template tags are only ever processed when a file
+    actually goes through the template engine.
+
+    The 6 custom __AI_POPUP_X__ placeholder tokens (DEMO_MODE, CHAT_URL,
+    FEEDBACK_URL, CSRF_BOOTSTRAP_URL, INITIAL_PROMPT, CONTEXT_SUMMARY)
+    are NOT Django template syntax ({{ }} / {% %}) — the template engine
+    leaves them untouched, so the frontend still substitutes those itself
+    exactly as before (see AI_ASSISTANT_POPUP_TEMPLATE_URL /
+    renderAiAssistantWindow() in forensic-rca-live.js). Only the
+    {% static %} tag is actually resolved server-side here.
     """
     try:
-        with open(POPUP_TEMPLATE_PATH, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except FileNotFoundError:
-        logger.error("AI Assistant popup template not found at %s", POPUP_TEMPLATE_PATH)
+        return render(request, 'ai-assistant-popup.html', content_type='text/html; charset=utf-8')
+    except TemplateDoesNotExist:
+        logger.error("AI Assistant popup template 'ai-assistant-popup.html' not found by Django's template loader")
         return HttpResponseServerError(
             "AI Assistant popup template file is missing on the server."
         )
-    return HttpResponse(content, content_type='text/html; charset=utf-8')
 
 
 # ===========================================================================
