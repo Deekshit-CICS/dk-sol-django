@@ -154,9 +154,25 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
 .prompt-bucket-close { border:none; background:rgba(0,0,0,0.05); width:28px; height:28px; border-radius:9px; cursor:pointer; color:var(--text-sec); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 .prompt-bucket-close:hover { background:rgba(0,0,0,0.1); }
 .prompt-bucket-list { overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-bottom:10px; }
+.prompt-bucket-category { border:1px solid var(--border); border-radius:14px; overflow:hidden; background:#fff; }
+.prompt-bucket-category-head {
+  width:100%; display:flex; align-items:center; justify-content:space-between;
+  padding:13px 15px; border:none; background:#fafafa; cursor:pointer;
+  font-family:var(--font-sans); text-align:left; transition:background 0.15s;
+}
+.prompt-bucket-category-head:hover { background:var(--blue-bg); }
+.prompt-bucket-category-title { font-size:12.5px; font-weight:700; color:var(--text-main); }
+.prompt-bucket-category-count { font-size:10.5px; color:var(--text-sec); font-weight:600; margin-left:6px; }
+.prompt-bucket-chevron { width:12px; height:12px; color:var(--text-sec); flex-shrink:0; transition:transform 0.25s; }
+.prompt-bucket-category.open .prompt-bucket-chevron { transform:rotate(180deg); }
+.prompt-bucket-category-body {
+  max-height:0; overflow:hidden; transition:max-height 0.3s ease;
+  display:flex; flex-direction:column; gap:8px;
+}
+.prompt-bucket-category.open .prompt-bucket-category-body { padding:2px 12px 12px; }
 .prompt-bucket-item {
-  border:1px solid var(--border); border-radius:13px; padding:13px 15px;
-  font-size:12.5px; line-height:1.55; color:var(--text-main); cursor:pointer;
+  border:1px solid var(--border); border-radius:12px; padding:11px 13px;
+  font-size:12px; line-height:1.5; color:var(--text-main); cursor:pointer;
   background:#fafafa; font-family:var(--font-sans); transition:0.15s;
 }
 .prompt-bucket-item:hover { border-color:var(--blue); background:var(--blue-bg); }
@@ -221,16 +237,48 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
     </div>
     <button class="prompt-bucket-close" onclick="closePromptBucket()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
   </div>
-  <div class="prompt-bucket-sub">Longer, more detailed questions for a deeper investigation.</div>
+  <div class="prompt-bucket-sub">Grouped by area — expand a category to see its prompts.</div>
   <div class="prompt-bucket-list">
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Walk me through a full timeline correlation — cross-reference when the alert first fired against the linked change's implementation window, and call out any overlapping timestamps or fields that suggest the change caused this incident.</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Compare the current CPU, Memory, and Disk trends against the historical baseline captured at incident open. Flag any metric that has deviated by more than 20%, and explain what that deviation likely indicates.</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Draft a concise incident summary suitable for a status update to leadership, covering what happened, current impact, and what's being done about it — keep it under 150 words.</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Review the linked change's implementation and rollback plan. Based on the current evidence, would rolling back this change likely resolve the incident, and what are the risks of rolling back at this stage?</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Look across all the asset evidence collected so far and identify any process, service, or listening port that appears anomalous compared to what you'd expect on a healthy instance of this type.</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Given everything gathered so far, draft a step-by-step remediation plan, ordered by risk (lowest-risk actions first), with an estimated time to resolution for each step.</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Does this incident match a known pattern from prior similar incidents, based on the symptoms, affected components, and evidence collected so far?</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Identify every server and job asset involved in this incident, and explain how each one's evidence supports or rules out it being the root cause.</div>
+
+    <div class="prompt-bucket-category" data-category="servicenow">
+      <button class="prompt-bucket-category-head" onclick="toggleBucketCategory(this)">
+        <span><span class="prompt-bucket-category-title">ServiceNow</span><span class="prompt-bucket-category-count">4</span></span>
+        <svg class="prompt-bucket-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="prompt-bucket-category-body">
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Summarize the ServiceNow incident record — priority, status, assignment group, and how long it's been open.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Review the linked change's implementation and rollback plan. Based on the current evidence, would rolling back this change likely resolve the incident, and what are the risks of rolling back at this stage?</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Was this incident opened during an active change window? Cross-reference the incident's opened time against the linked change's schedule.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Identify every server and job asset involved in this incident, and explain how each one's ServiceNow data supports or rules out it being the root cause.</div>
+      </div>
+    </div>
+
+    <div class="prompt-bucket-category" data-category="elastic">
+      <button class="prompt-bucket-category-head" onclick="toggleBucketCategory(this)">
+        <span><span class="prompt-bucket-category-title">Elastic</span><span class="prompt-bucket-category-count">4</span></span>
+        <svg class="prompt-bucket-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="prompt-bucket-category-body">
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Compare the current CPU, Memory, and Disk trends against the historical baseline captured at incident open. Flag any metric that has deviated by more than 20%, and explain what that deviation likely indicates.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Look across all the asset evidence collected so far and identify any process, service, or listening port that appears anomalous compared to what you'd expect on a healthy instance of this type.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Summarize what the raw logs show around the time the alert fired — any recurring error patterns or spikes in log volume worth flagging?</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Check the up/down status of every asset in this incident's inventory and call out anything currently reporting as down.</div>
+      </div>
+    </div>
+
+    <div class="prompt-bucket-category" data-category="troubleshooting">
+      <button class="prompt-bucket-category-head" onclick="toggleBucketCategory(this)">
+        <span><span class="prompt-bucket-category-title">Incident Troubleshooting</span><span class="prompt-bucket-category-count">4</span></span>
+        <svg class="prompt-bucket-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="prompt-bucket-category-body">
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Walk me through a full timeline correlation — cross-reference when the alert first fired against the linked change's implementation window, and call out any overlapping timestamps or fields that suggest the change caused this incident.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Given everything gathered so far, draft a step-by-step remediation plan, ordered by risk (lowest-risk actions first), with an estimated time to resolution for each step.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Does this incident match a known pattern from prior similar incidents, based on the symptoms, affected components, and evidence collected so far?</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Draft a concise incident summary suitable for a status update to leadership, covering what happened, current impact, and what's being done about it — keep it under 150 words.</div>
+      </div>
+    </div>
+
   </div>
 </div>
 
