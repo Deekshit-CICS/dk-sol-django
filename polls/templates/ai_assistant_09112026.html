@@ -1,0 +1,298 @@
+{% load static %}
+<!--
+  AI Assistant popup — "Ops Console / Incident Copilot" chat window.
+
+  This file is a TEMPLATE, not a page you open directly. It's fetched at
+  runtime by renderAiAssistantWindow() in forensic-rca-live.html, which
+  replaces six placeholder tokens (search this file for "AI_POPUP_" to
+  find them, inside the <script> block) with real values for the current
+  incident/session, then writes the result into the popup window via
+  document.write(). Opening this file directly in a browser will just
+  show the placeholder tokens literally instead of real data — that's
+  expected, it's not meant to be a working page on its own.
+
+  IMPORTANT: this comment deliberately does NOT spell out the placeholder
+  tokens verbatim (e.g. with both leading/trailing underscore pairs) —
+  renderAiAssistantWindow() substitutes them via String.replace(token, fn),
+  which only replaces the FIRST occurrence of an exact string match. If
+  this comment repeated a token's exact text above the real one in the
+  <script> block, substitution would silently replace the token here
+  instead of the real one — which is exactly the bug that shipped in an
+  earlier version of this file. Keep it that way if you edit this comment.
+
+  Placeholder purposes (five wrapped in "quotes" already in the template;
+  the context-summary one is NOT quoted, since it needs to be a real JS
+  object literal like {"incidentId":"INC1006",...}, not a quoted string):
+    demo mode flag           -> the literal boolean true/false
+    chat endpoint URL        -> quoted string
+    feedback endpoint URL    -> quoted string
+    CSRF bootstrap URL       -> quoted string
+    initial prompt text      -> quoted string
+    context summary object   -> UNQUOTED raw JSON object literal
+
+  See renderAiAssistantWindow() for exactly how substitution happens —
+  it uses replacer FUNCTIONS (not plain strings) to avoid a real footgun:
+  String.prototype.replace() treats "$" specially in a string replacement
+  (e.g. "$&", "$1"), so if any incident description or prompt text ever
+  contains a literal "$", a naive .replace(token, jsonValue) would corrupt
+  the output silently. A function replacer sidesteps that entirely.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ops Console — Incident Copilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --apple-bg: #f5f5f7; --glass: rgba(255,255,255,0.9);
+  --blue: #0071e3; --blue-bg: rgba(0,113,227,0.08);
+  --green: #28cd41; --green-bg: rgba(40,205,65,0.08);
+  --red: #ff3b30; --red-bg: rgba(255,59,48,0.08);
+  --amber: #ff9f0a; --amber-bg: rgba(255,159,10,0.08);
+  --text-main: #1d1d1f; --text-sec: #6e6e73;
+  --border: rgba(0,0,0,0.08);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color:var(--text-main); background:linear-gradient(135deg, #f5f5f7 0%, #ffffff 100%); font-size:14px; }
+.nav-sidebar { width:212px; background:#fff; border-right:1px solid var(--border); display:flex; flex-direction:column; flex-shrink:0; color:var(--text-sec); }
+.nav-brand { display:flex; align-items:center; gap:10px; padding:18px 18px 14px; border-bottom:1px solid var(--border); }
+.nav-brand-mark { width:26px; height:26px; border-radius:8px; background:linear-gradient(135deg, var(--blue), #34aadc); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.nav-brand-mark svg { width:15px; height:15px; }
+.nav-brand-text { font-size:13px; font-weight:600; color:var(--text-main); line-height:1.3; }
+.nav-brand-sub { font-size:10px; color:var(--text-sec); }
+.nav-section { padding:14px 12px 4px; font-size:9.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:var(--text-sec); }
+.nav-item { display:flex; align-items:center; gap:9px; padding:7px 12px; margin:1px 8px; border-radius:8px; font-size:12.5px; font-weight:500; cursor:default; color:var(--text-sec); }
+.nav-item svg { width:14px; height:14px; flex-shrink:0; opacity:0.75; }
+.nav-item.active { background:var(--blue-bg); color:var(--blue); }
+.nav-item.active svg { opacity:1; }
+.nav-spacer { flex:1; }
+.nav-footer { display:flex; align-items:center; gap:10px; padding:13px 15px; border-top:1px solid var(--border); }
+.avatar { width:24px; height:24px; border-radius:50%; background:var(--blue); color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex-shrink:0; }
+.nav-footer-name { font-size:12px; font-weight:600; color:var(--text-main); }
+.nav-footer-role { font-size:10px; color:var(--text-sec); }
+.main-workspace { flex:1; display:flex; flex-direction:column; min-width:0; }
+.top-bar { height:52px; padding:0 22px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:#fff; flex-shrink:0; }
+.breadcrumb { font-size:12.5px; color:var(--text-sec); display:flex; align-items:center; gap:6px; }
+.breadcrumb strong { color:var(--text-main); font-weight:600; }
+.route-indicator { display:flex; align-items:center; gap:7px; font-size:11.5px; font-weight:600; padding:6px 12px; border-radius:8px; border:1px solid var(--border); }
+.route-indicator.mcp { color:var(--text-sec); background:rgba(0,0,0,0.03); border-color:var(--border); }
+.route-indicator.langgraph { color:var(--blue); background:var(--blue-bg); border-color:rgba(0,113,227,0.25); }
+.route-dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
+.chat-view { flex:1; padding:24px 7%; overflow-y:auto; }
+.exchange { margin-bottom:28px; max-width:100%; }
+.msg-row { display:flex; margin-bottom:4px; }
+.msg-row.user { justify-content:flex-end; }
+.bubble-user { background:var(--blue); color:#fff; border-radius:16px 16px 4px 16px; padding:10px 15px; font-size:13.5px; max-width:80%; white-space:pre-wrap; }
+.msg-meta { font-size:11px; color:var(--text-sec); margin-top:4px; text-align:right; }
+.assistant-block { margin-top:14px; }
+.assistant-block > * + * { margin-top:12px; }
+.tool-chip { display:inline-flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--border); border-radius:10px; padding:6px 12px; font-size:11.5px; font-family:var(--font-mono); color:var(--text-sec); }
+.tool-chip .dot { width:6px; height:6px; border-radius:50%; background:var(--blue); flex-shrink:0; }
+.card { border:1px solid var(--border); border-radius:16px; background:#fff; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.03); }
+.card-header { padding:13px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.card-id { font-family:var(--font-mono); font-size:12px; font-weight:600; color:var(--text-main); }
+.card-body { padding:15px 16px; }
+.card-desc { font-size:13.5px; margin-bottom:14px; color:var(--text-main); line-height:1.5; }
+.field-grid { display:grid; grid-template-columns:1fr 1fr; gap:13px 22px; }
+.field-label { font-size:9.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-sec); font-weight:700; margin-bottom:4px; }
+.field-value { font-size:12.5px; color:var(--text-main); font-weight:500; }
+.pill { display:inline-block; font-size:10px; font-weight:700; padding:3px 9px; border-radius:20px; letter-spacing:0.2px; }
+.pill.p1 { background:var(--red-bg); color:var(--red); border:1px solid rgba(255,59,48,0.25); }
+.pill.p2 { background:var(--amber-bg); color:var(--amber); border:1px solid rgba(255,159,10,0.25); }
+.pill.progress { background:var(--blue-bg); color:var(--blue); border:1px solid rgba(0,113,227,0.25); }
+.pill.done { background:var(--green-bg); color:var(--green); border:1px solid rgba(40,205,65,0.25); }
+.trace { border:1px solid var(--border); border-radius:16px; background:#fff; overflow:hidden; }
+.trace-step { display:flex; align-items:center; gap:10px; padding:9px 16px; font-size:12px; border-bottom:1px solid var(--border); }
+.trace-step:last-child { border-bottom:none; }
+.trace-step .check { width:15px; height:15px; border-radius:50%; background:var(--green-bg); border:1px solid rgba(40,205,65,0.3); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.trace-step .check svg { width:8px; height:8px; }
+.trace-step .label { font-weight:600; color:var(--text-main); }
+.thinking-chip { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--text-sec); font-style:italic; }
+.thinking-chip .pulse { width:6px; height:6px; border-radius:50%; background:var(--blue); animation:pulse 1s infinite ease-in-out; }
+@keyframes pulse { 0%,100% { opacity:0.3; } 50% { opacity:1; } }
+.suggestion-label { font-size:11px; font-weight:600; color:var(--text-sec); margin:0 7% 8px; text-transform:uppercase; letter-spacing:0.03em; }
+.suggestion-row { display:flex; gap:8px; margin:0 7% 20px; flex-wrap:wrap; }
+.suggestion-chip { font-size:11.5px; padding:6px 12px; border-radius:20px; border:1px solid var(--border); color:var(--text-sec); cursor:pointer; background:#fff; font-family:var(--font-mono); }
+.suggestion-chip:hover { border-color:var(--blue); color:var(--blue); }
+.suggestion-chip.disabled { opacity:0.4; pointer-events:none; cursor:default; }
+.suggestion-chip.disabled:hover { border-color:var(--border); color:var(--text-sec); }
+
+/* ---------- Prompt bucket: floating toggle + slide-out panel of
+   longer/more complex prompts, separate from the compact suggestion
+   chips above (which stay as they are) ---------- */
+.prompt-bucket-toggle {
+  position:fixed; right:0; top:50%; transform:translateY(-50%);
+  background:var(--blue); color:#fff; border:none; z-index:500;
+  padding:16px 9px; border-radius:12px 0 0 12px; cursor:pointer;
+  box-shadow:-3px 0 14px rgba(0,0,0,0.18);
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  writing-mode:vertical-rl; text-orientation:mixed;
+  font-size:11px; font-weight:700; letter-spacing:0.04em; font-family:var(--font-sans);
+  transition:padding-right 0.2s, background 0.2s;
+}
+.prompt-bucket-toggle:hover { background:#005bc2; padding-right:13px; }
+.prompt-bucket-overlay {
+  position:fixed; inset:0; background:rgba(15,23,42,0.18); z-index:600;
+  opacity:0; pointer-events:none; transition:opacity 0.25s;
+}
+.prompt-bucket-overlay.open { opacity:1; pointer-events:auto; }
+.prompt-bucket-panel {
+  position:fixed; top:0; right:-380px; width:360px; max-width:90vw; height:100vh;
+  background:#fff; box-shadow:-14px 0 44px rgba(0,0,0,0.2); z-index:601;
+  transition:right 0.35s cubic-bezier(0.4,0,0.2,1);
+  display:flex; flex-direction:column; padding:26px 22px;
+}
+.prompt-bucket-panel.open { right:0; }
+.prompt-bucket-head { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:6px; }
+.prompt-bucket-title { font-size:15px; font-weight:700; color:var(--text-main); }
+.prompt-bucket-sub { font-size:11.5px; color:var(--text-sec); margin-bottom:18px; line-height:1.5; }
+.prompt-bucket-close { border:none; background:rgba(0,0,0,0.05); width:28px; height:28px; border-radius:9px; cursor:pointer; color:var(--text-sec); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.prompt-bucket-close:hover { background:rgba(0,0,0,0.1); }
+.prompt-bucket-list { overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-bottom:10px; }
+.prompt-bucket-category { border:1px solid var(--border); border-radius:14px; overflow:hidden; background:#fff; }
+.prompt-bucket-category-head {
+  width:100%; display:flex; align-items:center; justify-content:space-between;
+  padding:13px 15px; border:none; background:#fafafa; cursor:pointer;
+  font-family:var(--font-sans); text-align:left; transition:background 0.15s;
+}
+.prompt-bucket-category-head:hover { background:var(--blue-bg); }
+.prompt-bucket-category-title { font-size:12.5px; font-weight:700; color:var(--text-main); }
+.prompt-bucket-category-count { font-size:10.5px; color:var(--text-sec); font-weight:600; margin-left:6px; }
+.prompt-bucket-chevron { width:12px; height:12px; color:var(--text-sec); flex-shrink:0; transition:transform 0.25s; }
+.prompt-bucket-category.open .prompt-bucket-chevron { transform:rotate(180deg); }
+.prompt-bucket-category-body {
+  max-height:0; overflow:hidden; transition:max-height 0.3s ease;
+  display:flex; flex-direction:column; gap:8px;
+}
+.prompt-bucket-category.open .prompt-bucket-category-body { padding:2px 12px 12px; }
+.prompt-bucket-item {
+  border:1px solid var(--border); border-radius:12px; padding:11px 13px;
+  font-size:12px; line-height:1.5; color:var(--text-main); cursor:pointer;
+  background:#fafafa; font-family:var(--font-sans); transition:0.15s;
+}
+.prompt-bucket-item:hover { border-color:var(--blue); background:var(--blue-bg); }
+.prompt-bucket-item.disabled { opacity:0.4; pointer-events:none; cursor:default; }
+
+/* .command-bar (free-text input) is currently unused — prompts are
+   restricted to the prebuilt suggestion chips above, per explicit
+   request. Left in place, not deleted, since this may be re-enabled
+   later; the #chatForm markup and its submit handler were removed from
+   the body/script below, so these rules just aren't applied to anything
+   right now. */
+.command-bar { margin:0 7% 20px; border:1px solid var(--border); border-radius:14px; background:#fff; display:flex; align-items:center; padding:4px 6px 4px 14px; box-shadow:0 1px 2px rgba(15,23,42,0.04); }
+.command-bar input { flex:1; border:none; outline:none; font-size:13px; padding:9px 0; font-family:var(--font-sans); }
+.command-bar-send { width:30px; height:30px; border-radius:10px; background:var(--blue); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.command-bar-send:disabled { opacity:0.5; cursor:default; }
+.command-bar-send svg { width:13px; height:13px; color:#fff; }
+.fb-row { display:flex; align-items:center; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
+.fb-btn { border:none; background:rgba(0,0,0,0.04); width:26px; height:26px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text-sec); transition:0.2s; }
+.fb-btn:hover { background:rgba(0,0,0,0.08); }
+.fb-btn.active-like { background:var(--green-bg); color:var(--green); }
+.fb-btn.active-dislike { background:var(--red-bg); color:var(--red); }
+</style>
+</head>
+<body>
+<div class="nav-sidebar">
+  <div class="nav-brand">
+    <div class="nav-brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+    <div><div class="nav-brand-text">Ops Console</div><div class="nav-brand-sub">Incident Copilot</div></div>
+  </div>
+  <div class="nav-section">Workspace</div>
+  <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> Incident copilot</div>
+  <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg> Triage agent</div>
+  <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Run history</div>
+  <div class="nav-spacer"></div>
+  <div class="nav-footer"><div class="avatar" id="userAvatar">AI</div><div><div class="nav-footer-name">Incident Copilot</div><div class="nav-footer-role">Context-aware session</div></div></div>
+</div>
+<div class="main-workspace">
+  <div class="top-bar">
+    <div class="breadcrumb">Ops Console <span>/</span> <strong id="breadcrumbId">Incident Copilot</strong></div>
+    <div class="route-indicator mcp" id="routeBadge"><span class="route-dot"></span><span id="routeBadgeText">Ready</span></div>
+  </div>
+  <div class="chat-view" id="log"></div>
+  <div class="suggestion-label">Choose a question to continue the investigation:</div>
+  <div class="suggestion-row">
+    <div class="suggestion-chip" onclick="askSuggestion(this)">Explain the root cause in more detail</div>
+    <div class="suggestion-chip" onclick="askSuggestion(this)">Suggest the next remediation step</div>
+    <div class="suggestion-chip" onclick="askSuggestion(this)">Any similar past incidents?</div>
+    <div class="suggestion-chip" onclick="askSuggestion(this)">Summarize the evidence collected so far</div>
+    <div class="suggestion-chip" onclick="askSuggestion(this)">What changes might have caused this?</div>
+    <div class="suggestion-chip" onclick="askSuggestion(this)">Assess the business impact</div>
+  </div>
+</div>
+
+<button class="prompt-bucket-toggle" id="promptBucketToggle" onclick="togglePromptBucket()" title="More prompts">
+  <span>Prompt Bucket</span>
+</button>
+<div class="prompt-bucket-overlay" id="promptBucketOverlay" onclick="closePromptBucket()"></div>
+<div class="prompt-bucket-panel" id="promptBucketPanel">
+  <div class="prompt-bucket-head">
+    <div>
+      <div class="prompt-bucket-title">Prompt Bucket</div>
+    </div>
+    <button class="prompt-bucket-close" onclick="closePromptBucket()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="prompt-bucket-sub">Grouped by area — expand a category to see its prompts.</div>
+  <div class="prompt-bucket-list">
+
+    <div class="prompt-bucket-category" data-category="servicenow">
+      <button class="prompt-bucket-category-head" onclick="toggleBucketCategory(this)">
+        <span><span class="prompt-bucket-category-title">ServiceNow</span><span class="prompt-bucket-category-count">4</span></span>
+        <svg class="prompt-bucket-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="prompt-bucket-category-body">
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Summarize the ServiceNow incident record — priority, status, assignment group, and how long it's been open.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Review the linked change's implementation and rollback plan. Based on the current evidence, would rolling back this change likely resolve the incident, and what are the risks of rolling back at this stage?</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Was this incident opened during an active change window? Cross-reference the incident's opened time against the linked change's schedule.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Identify every server and job asset involved in this incident, and explain how each one's ServiceNow data supports or rules out it being the root cause.</div>
+      </div>
+    </div>
+
+    <div class="prompt-bucket-category" data-category="elastic">
+      <button class="prompt-bucket-category-head" onclick="toggleBucketCategory(this)">
+        <span><span class="prompt-bucket-category-title">Elastic</span><span class="prompt-bucket-category-count">4</span></span>
+        <svg class="prompt-bucket-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="prompt-bucket-category-body">
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Compare the current CPU, Memory, and Disk trends against the historical baseline captured at incident open. Flag any metric that has deviated by more than 20%, and explain what that deviation likely indicates.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Look across all the asset evidence collected so far and identify any process, service, or listening port that appears anomalous compared to what you'd expect on a healthy instance of this type.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Summarize what the raw logs show around the time the alert fired — any recurring error patterns or spikes in log volume worth flagging?</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Check the up/down status of every asset in this incident's inventory and call out anything currently reporting as down.</div>
+      </div>
+    </div>
+
+    <div class="prompt-bucket-category" data-category="troubleshooting">
+      <button class="prompt-bucket-category-head" onclick="toggleBucketCategory(this)">
+        <span><span class="prompt-bucket-category-title">Incident Troubleshooting</span><span class="prompt-bucket-category-count">4</span></span>
+        <svg class="prompt-bucket-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="prompt-bucket-category-body">
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Walk me through a full timeline correlation — cross-reference when the alert first fired against the linked change's implementation window, and call out any overlapping timestamps or fields that suggest the change caused this incident.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Given everything gathered so far, draft a step-by-step remediation plan, ordered by risk (lowest-risk actions first), with an estimated time to resolution for each step.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Does this incident match a known pattern from prior similar incidents, based on the symptoms, affected components, and evidence collected so far?</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Draft a concise incident summary suitable for a status update to leadership, covering what happened, current impact, and what's being done about it — keep it under 150 words.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  var DEMO_MODE = __AI_POPUP_DEMO_MODE__;
+  var CHAT_URL = "__AI_POPUP_CHAT_URL__";
+  var FEEDBACK_URL = "__AI_POPUP_FEEDBACK_URL__";
+  var CSRF_BOOTSTRAP_URL = "__AI_POPUP_CSRF_BOOTSTRAP_URL__";
+  var initialPrompt = "__AI_POPUP_INITIAL_PROMPT__";
+  var contextSummary = __AI_POPUP_CONTEXT_SUMMARY__;
+  var chatHistory = [];
+  var logEl = document.getElementById("log");
+  document.getElementById("breadcrumbId").textContent = contextSummary.incidentId || "Incident Copilot";
+</script>
+<script src="{% static 'js/ai-assistant-popup.js' %}"></script>
+</body>
+</html>
