@@ -67,37 +67,6 @@ async def fetch_servicenow_incident_basic(incident_number: str) -> str:
     return json.dumps(clean_output, indent=2)
 
 
-@mcp.tool()
-async def fetch_servicenow_hostnames(incident_number: str) -> str:
-    """
-    Fetches hostnames associated with a ServiceNow incident ticket by evaluating 
-    the short_description regex patterns and primary CMDB configuration items.
-    """
-    url = f"https://{SERVICE_NOW_INSTANCE}.service-now.com/api/now/table/incident"
-    params = {
-        "sysparm_query": f"number={incident_number}",
-        "sysparm_limit": "1",
-        "sysparm_display_value": "true",
-        "sysparm_fields": "short_description,cmdb_ci"
-    }
-
-import json
-import re
-import httpx
-from typing import List, Dict, Any, Optional
-from mcp.server.fastmcp import FastMCP
-
-mcp = FastMCP("ServiceNow Tools Server")
-
-# Define regex pattern for server naming convention (14 chars total starting with he2/he3/or1/or2)
-SERVER_NAME_PATTERN = re.compile(r'\b(?:he2|he3|or1|or2)[a-zA-Z0-9]{11,12}\b', re.IGNORECASE)
-
-# Field definitions corresponding to your ServiceNow schema
-ASSET_INFO_CI_FIELD = "cmdb_ci"
-AFFECTED_CI_FIELD = "u_affected_ci"
-EXTRA_IMPACTED_CI_FIELD = "u_impacted_ci"
-
-
 def _extract_server_names(text: Optional[str]) -> List[str]:
     """
     Finds every server-name-shaped token in free text or CI field value
@@ -117,35 +86,14 @@ def _extract_field(record: Dict[str, Any], field_name: str) -> Optional[str]:
 
 
 @mcp.tool()
+@mcp.tool()
 async def fetch_servicenow_hostnames(incident_number: str) -> str:
     """
-    Collects candidate server names across multiple ServiceNow incident fields:
-    1. Asset Info CI (cmdb_ci)
-    2. Affected CI (u_affected_ci)
-    3. Impacted CI (u_impacted_ci)
-    4. Short Description & Description free-text fields
-    
-    Returns a deduplicated list of primary and secondary hostnames.
+    Collects candidate server names across multiple sources:
+    1. Incident cmdb_ci (Primary CI)
+    2. task_ci table (Affected CIs related list)
+    3. Incident short_description & description (regex match)
     """
-    url = f"https://{SERVICE_NOW_INSTANCE}.service-now.com/api/now/table/incident"
-    
-    # Query all candidate fields in a single ServiceNow call to save bandwidth
-    fields_to_request = [
-        "number",
-        ASSET_INFO_CI_FIELD,
-        AFFECTED_CI_FIELD,
-        EXTRA_IMPACTED_CI_FIELD,
-        "short_description",
-        "description"
-    ]
-    
-    params = {
-        "sysparm_query": f"number={incident_number}",
-        "sysparm_limit": "1",
-        "sysparm_display_value": "true",
-        "sysparm_fields": ",".join(fields_to_request)
-    }
-
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
@@ -153,37 +101,71 @@ async def fetch_servicenow_hostnames(incident_number: str) -> str:
     }
 
     async with httpx.AsyncClient(proxy=SERVICE_NOW_PROXY_HTTP, verify=False) as client:
+        # 1. Fetch Incident Record
+        inc_url = f"https://{SERVICE_NOW_INSTANCE}.service-now.com/api/now/table/incident"
+        inc_params = {
+            "sysparm_query": f"number={incident_number}",
+            "sysparm_limit": "1",
+            "sysparm_display_value": "true",
+            "sysparm_fields": "sys_id,cmdb_ci,short_description,description"
+        }
+
         try:
-            response = await client.get(url, params=params, headers=headers, timeout=10.0)
-            response.raise_for_status()
-            data = response.json()
+            inc_resp = await client.get(inc_url, params=inc_params, headers=headers, timeout=10.0)
+            inc_resp.raise_for_status()
+            inc_data = inc_resp.json().get("result", [])
         except Exception as e:
-            return f"Error connecting to ServiceNow: {str(e)}"
+            return json.dumps({"incident_number": incident_number, "primary_hostname": "N/A", "all_hostnames": []})
 
-    results = data.get("result", [])
-    if not results:
-        return f"Error: Ticket '{incident_number}' not found."
+        if not inc_data:
+            return json.dumps({"incident_number": incident_number, "primary_hostname": "N/A", "all_hostnames": []})
 
-    raw_ticket = results[0]
+        raw_ticket = inc_data[0]
+        inc_sys_id = raw_ticket.get("sys_id")
 
-    # Collect candidate hostnames from all 5 requested sources (preserving order)
-    candidates: List[str] = []
-    candidates.extend(_extract_server_names(_extract_field(raw_ticket, ASSET_INFO_CI_FIELD)))
-    candidates.extend(_extract_server_names(_extract_field(raw_ticket, AFFECTED_CI_FIELD)))
-    candidates.extend(_extract_server_names(_extract_field(raw_ticket, EXTRA_IMPACTED_CI_FIELD)))
+        # 2. Fetch Additional Affected CIs from task_ci table
+        task_ci_names = []
+        if inc_sys_id:
+            task_ci_url = f"https://{SERVICE_NOW_INSTANCE}.service-now.com/api/now/table/task_ci"
+            task_ci_params = {
+                "sysparm_query": f"task={inc_sys_id}",
+                "sysparm_display_value": "true",
+                "sysparm_fields": "ci_item"
+            }
+            try:
+                task_ci_resp = await client.get(task_ci_url, params=task_ci_params, headers=headers, timeout=10.0)
+                if task_ci_resp.status_code == 200:
+                    for item in task_ci_resp.json().get("result", []):
+                        ci_val = item.get("ci_item")
+                        ci_name = ci_val.get("display_value") if isinstance(ci_val, dict) else ci_val
+                        if ci_name:
+                            task_ci_names.append(ci_name)
+            except Exception:
+                pass  # Fall back gracefully if task_ci isn't accessible
+
+    # 3. Aggregate all candidate strings
+    candidates = []
+    
+    # Primary CMDB CI
+    candidates.extend(_extract_server_names(_extract_field(raw_ticket, "cmdb_ci")))
+    
+    # CIs from task_ci related list
+    for ci in task_ci_names:
+        candidates.extend(_extract_server_names(ci))
+        
+    # Free-text regex search in short_description & description
     candidates.extend(_extract_server_names(_extract_field(raw_ticket, "short_description")))
     candidates.extend(_extract_server_names(_extract_field(raw_ticket, "description")))
 
-    # Deduplicate case-insensitively while preserving first-seen order
+    # Deduplicate preserving order
     seen = set()
-    deduped_hostnames: List[str] = []
+    deduped_hostnames = []
     for name in candidates:
         if name not in seen:
             seen.add(name)
             deduped_hostnames.append(name)
 
-    # Primary host is the first deduplicated match found across the order of preference
-    primary_hostname = deduped_hostnames[0] if deduped_hostnames else None
+    primary_hostname = deduped_hostnames[0] if deduped_hostnames else "N/A"
 
     return json.dumps({
         "incident_number": incident_number,
