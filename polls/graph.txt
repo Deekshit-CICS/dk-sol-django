@@ -71,3 +71,27 @@ async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
         "asset_details": health_profile,
         "technical_evidence": f"CPU Historic Avg: {cpu_avg}%, Memory Avg: {mem_avg}%"
     }
+
+import asyncio
+
+async def primary_triage_agent(state: AgentState) -> Dict[str, Any]:
+    inc_num = state["incident_number"]
+
+    # Fire all 3 specialized ServiceNow tools in parallel!
+    basic_task = tools_dict["fetch_servicenow_incident_basic"].ainvoke({"incident_number": inc_num})
+    host_task = tools_dict["fetch_servicenow_hostnames"].ainvoke({"incident_number": inc_num})
+    app_task = tools_dict["fetch_servicenow_app_id"].ainvoke({"incident_number": inc_num})
+
+    basic_res, host_res, app_res = await asyncio.gather(basic_task, host_task, app_task)
+
+    basic_data = parse_mcp_output(basic_res)
+    host_data = parse_mcp_output(host_res)
+    app_data = parse_mcp_output(app_res)
+
+    return {
+        "short_description": basic_data.get("short_description"),
+        "priority": basic_data.get("priority"),
+        "assignment_group": basic_data.get("assignment_group"),
+        "hostname": host_data.get("primary_hostname"),
+        "app_id": app_data.get("app_id")
+    }
