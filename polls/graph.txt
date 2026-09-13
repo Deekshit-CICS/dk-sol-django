@@ -155,7 +155,7 @@ async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
     """
     AGENT 4: CMDB & Metrics Health Expert (Layer 02 Asset Focus)
     Uses LLM decision-making to selectively fetch CPU, Memory, or Disk metrics 
-    based on the incident short_description and description.
+    based on incident details.
     """
     logger.info("-----------Display State - Infrastructure Agent-----------")
     logger.info(state)
@@ -164,7 +164,7 @@ async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
     app_id = state.get("app_id")
     opened_at = state.get("opened_at")
 
-    # Incident text context for the LLM
+    # Incident text context for decision prompt
     short_desc = state.get("short_description", "")
     description = state.get("description", "")
 
@@ -186,40 +186,47 @@ async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
         }
 
     # ---------------------------------------------------------------------
-    # 1. LLM Decision Step: Determine which metrics are required
+    # 1. Prepare Prompt & Call LLM via openai_client
     # ---------------------------------------------------------------------
-    metrics_decision_prompt = f"""
+    metrics_prompt = f"""
     You are an IT infrastructure triage expert. Analyze the following incident details and decide 
-    which telemetry metrics (CPU, Memory, Disk) need to be collected to investigate the issue.
+    which telemetry metrics (cpu, memory, disk) are required to troubleshoot the issue.
 
-    Incident Short Description: {short_desc}
-    Incident Description: {description}
+    Short Description: {short_desc}
+    Description: {description}
 
     Rules:
-    - If the issue is related to high processor load, slowness, hanging, or compute jobs -> fetch "cpu"
-    - If the issue relates to RAM usage, heap/out of memory errors, or system crashes -> fetch "memory"
-    - If the issue relates to full filesystems, mount points, storage, or disk space -> fetch "disk"
-    - If the description is vague, general, or unavailable -> fetch all three ("cpu", "memory", "disk")
+    - Include "cpu" for slowness, high utilization, compute load, or application hanging.
+    - Include "memory" for RAM issues, heap memory, memory leaks, or out-of-memory errors.
+    - Include "disk" for filesystem full, storage, partition space, or mount point issues.
+    - If the issue is generic or unclear, include all three: ["cpu", "memory", "disk"].
 
-    Return ONLY a JSON object with a single array key "required_metrics" containing any combination of: ["cpu", "memory", "disk"].
-    Do not add extra prose or Markdown outside the JSON.
-    Example: {{"required_metrics": ["cpu", "disk"]}}
+    Output JSON format ONLY (no markdown formatting, no extra text):
+    {{"required_metrics": ["cpu", "memory", "disk"]}}
     """
 
     try:
-        # Pass decision prompt to LLM (structured output via JSON)
-        llm_response = await llm.ainvoke(metrics_decision_prompt)
-        res_text = getattr(llm_response, "content", str(llm_response))
-        
-        # Strip codeblock wrappers if present
-        clean_text = res_text.replace("```json", "").replace("```", "").strip()
-        decision_data = json.loads(clean_text)
-        required_metrics = decision_data.get("required_metrics", ["cpu", "memory", "disk"])
+        # Prompting LLM using your openai_client structure
+        response = openai_client.chat.completions.create(
+            model="claude-opus-4-6-v1",
+            messages=[
+                {"role": "user", "content": metrics_prompt}
+            ],
+            temperature=0,  # Set temperature to 0 for deterministic decision-making
+            max_tokens=200,
+            stream=False
+        )
+        response_str = response.choices[0].message.content
+
+        # Clean JSON markdown formatting if present
+        clean_str = response_str.replace("```json", "").replace("```", "").strip()
+        parsed_decision = json.loads(clean_str)
+        required_metrics = parsed_decision.get("required_metrics", ["cpu", "memory", "disk"])
     except Exception as e:
-        logger.warning(f"LLM decision failed, defaulting to all metrics. Error: {e}")
+        logger.warning(f"LLM decision step failed or returned invalid JSON. Defaulting to all metrics. Error: {e}")
         required_metrics = ["cpu", "memory", "disk"]
 
-    logger.info(f"LLM Selected Metrics for {incident_number}: {required_metrics}")
+    logger.info(f"Selected metrics for {incident_number}: {required_metrics}")
 
     # ---------------------------------------------------------------------
     # 2. Build dynamically selected Tool Tasks
@@ -252,14 +259,14 @@ async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
     if not tasks:
         return {
             "asset_details": {},
-            "technical_evidence": f"LLM determined no metric collection needed for context: '{short_desc}'"
+            "technical_evidence": f"No telemetry metrics required based on incident context: '{short_desc}'"
         }
 
-    # 3. Execute requested tool calls concurrently
+    # 3. Execute dynamically selected tasks concurrently
     raw_results = await asyncio.gather(*tasks)
 
     # ---------------------------------------------------------------------
-    # 4. Map returned payloads back to appropriate host and metric type
+    # 4. Process and group metric results by hostname
     # ---------------------------------------------------------------------
     health_profile = {host: {} for host in hostnames}
 
@@ -297,5 +304,4 @@ async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
         "asset_details": health_profile,
         "technical_evidence": " | ".join(evidence_summaries)
     }
-
 
