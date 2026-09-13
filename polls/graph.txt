@@ -147,3 +147,155 @@ async def primary_triage_agent(state: AgentState) -> Dict[str, Any]:
     }
 
 
+import json
+import asyncio
+from typing import Dict, Any, List
+
+async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
+    """
+    AGENT 4: CMDB & Metrics Health Expert (Layer 02 Asset Focus)
+    Uses LLM decision-making to selectively fetch CPU, Memory, or Disk metrics 
+    based on the incident short_description and description.
+    """
+    logger.info("-----------Display State - Infrastructure Agent-----------")
+    logger.info(state)
+    session_id = state["session_id"]
+    incident_number = state["incident_number"]
+    app_id = state.get("app_id")
+    opened_at = state.get("opened_at")
+
+    # Incident text context for the LLM
+    short_desc = state.get("short_description", "")
+    description = state.get("description", "")
+
+    # Safely extract hostnames
+    raw_hostname = state.get("hostname") or state.get("all_hostnames") or []
+    if isinstance(raw_hostname, str):
+        hostnames = [h.strip() for h in raw_hostname.split(",") if h.strip()]
+    elif isinstance(raw_hostname, list):
+        hostnames = raw_hostname
+    else:
+        hostnames = []
+
+    logger.info(f"Health Profile for hostnames {hostnames} at {opened_at}")
+
+    if not hostnames:
+        return {
+            "asset_details": {},
+            "technical_evidence": "No valid hostnames identified for telemetry metrics."
+        }
+
+    # ---------------------------------------------------------------------
+    # 1. LLM Decision Step: Determine which metrics are required
+    # ---------------------------------------------------------------------
+    metrics_decision_prompt = f"""
+    You are an IT infrastructure triage expert. Analyze the following incident details and decide 
+    which telemetry metrics (CPU, Memory, Disk) need to be collected to investigate the issue.
+
+    Incident Short Description: {short_desc}
+    Incident Description: {description}
+
+    Rules:
+    - If the issue is related to high processor load, slowness, hanging, or compute jobs -> fetch "cpu"
+    - If the issue relates to RAM usage, heap/out of memory errors, or system crashes -> fetch "memory"
+    - If the issue relates to full filesystems, mount points, storage, or disk space -> fetch "disk"
+    - If the description is vague, general, or unavailable -> fetch all three ("cpu", "memory", "disk")
+
+    Return ONLY a JSON object with a single array key "required_metrics" containing any combination of: ["cpu", "memory", "disk"].
+    Do not add extra prose or Markdown outside the JSON.
+    Example: {{"required_metrics": ["cpu", "disk"]}}
+    """
+
+    try:
+        # Pass decision prompt to LLM (structured output via JSON)
+        llm_response = await llm.ainvoke(metrics_decision_prompt)
+        res_text = getattr(llm_response, "content", str(llm_response))
+        
+        # Strip codeblock wrappers if present
+        clean_text = res_text.replace("```json", "").replace("```", "").strip()
+        decision_data = json.loads(clean_text)
+        required_metrics = decision_data.get("required_metrics", ["cpu", "memory", "disk"])
+    except Exception as e:
+        logger.warning(f"LLM decision failed, defaulting to all metrics. Error: {e}")
+        required_metrics = ["cpu", "memory", "disk"]
+
+    logger.info(f"LLM Selected Metrics for {incident_number}: {required_metrics}")
+
+    # ---------------------------------------------------------------------
+    # 2. Build dynamically selected Tool Tasks
+    # ---------------------------------------------------------------------
+    tasks = []
+    task_mapping = []  # Tracks (hostname, metric_type) for mapping results back
+
+    for host in hostnames:
+        if "cpu" in required_metrics:
+            tasks.append(tools_dict["fetch_asset_cpu_metrics"].ainvoke({
+                "incident_number": incident_number,
+                "asset_id": host
+            }))
+            task_mapping.append((host, "cpu"))
+
+        if "memory" in required_metrics:
+            tasks.append(tools_dict["fetch_asset_memory_metrics"].ainvoke({
+                "incident_number": incident_number,
+                "asset_id": host
+            }))
+            task_mapping.append((host, "memory"))
+
+        if "disk" in required_metrics:
+            tasks.append(tools_dict["fetch_asset_disk_metrics"].ainvoke({
+                "incident_number": incident_number,
+                "asset_id": host
+            }))
+            task_mapping.append((host, "disk"))
+
+    if not tasks:
+        return {
+            "asset_details": {},
+            "technical_evidence": f"LLM determined no metric collection needed for context: '{short_desc}'"
+        }
+
+    # 3. Execute requested tool calls concurrently
+    raw_results = await asyncio.gather(*tasks)
+
+    # ---------------------------------------------------------------------
+    # 4. Map returned payloads back to appropriate host and metric type
+    # ---------------------------------------------------------------------
+    health_profile = {host: {} for host in hostnames}
+
+    for (host, metric_type), raw_res in zip(task_mapping, raw_results):
+        parsed_data = extract_json_data(raw_res)
+        health_profile[host][f"{metric_type}_utilization"] = parsed_data
+
+    # Build technical evidence summaries dynamically
+    evidence_summaries = []
+    for host, metrics in health_profile.items():
+        host_summary_parts = []
+        
+        if "cpu_utilization" in metrics:
+            c_dict = metrics["cpu_utilization"]
+            c_hist = c_dict.get("historic", {}) if isinstance(c_dict, dict) else {}
+            c_avg = c_hist.get("avg", "N/A") if isinstance(c_hist, dict) else "N/A"
+            host_summary_parts.append(f"CPU Avg: {c_avg}%")
+
+        if "memory_utilization" in metrics:
+            m_dict = metrics["memory_utilization"]
+            m_hist = m_dict.get("historic", {}) if isinstance(m_dict, dict) else {}
+            m_avg = m_hist.get("avg", "N/A") if isinstance(m_hist, dict) else "N/A"
+            host_summary_parts.append(f"Memory Avg: {m_avg}%")
+
+        if "disk_utilization" in metrics:
+            d_dict = metrics["disk_utilization"]
+            d_hist = d_dict.get("historic", {}) if isinstance(d_dict, dict) else {}
+            d_avg = d_hist.get("avg") or (d_dict.get("avg") if isinstance(d_dict, dict) else None) or "N/A"
+            host_summary_parts.append(f"Disk Avg: {d_avg}%")
+
+        if host_summary_parts:
+            evidence_summaries.append(f"[{host}] " + ", ".join(host_summary_parts))
+
+    return {
+        "asset_details": health_profile,
+        "technical_evidence": " | ".join(evidence_summaries)
+    }
+
+
