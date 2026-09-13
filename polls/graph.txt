@@ -95,9 +95,17 @@ async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
         # Extract historic average stats
         cpu_historic = cpu_dict.get("historic", {}) if isinstance(cpu_dict, dict) else {}
         mem_historic = mem_dict.get("historic", {}) if isinstance(mem_dict, dict) else {}
+        disk_historic = disk_dict.get("historic", {}) if isinstance(disk_dict, dict) else {}
 
         cpu_avg = cpu_historic.get("avg", "N/A") if isinstance(cpu_historic, dict) else "N/A"
         mem_avg = mem_historic.get("avg", "N/A") if isinstance(mem_historic, dict) else "N/A"
+
+        # Extract disk_avg (checking 'historic' key or root 'avg' key)
+        disk_avg = (
+            disk_historic.get("avg") 
+            or (disk_dict.get("avg") if isinstance(disk_dict, dict) else None) 
+            or "N/A"
+        )
 
         # Populate host-level health profile
         health_profile[host] = {
@@ -106,12 +114,14 @@ async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
             "disk_utilization": disk_dict
         }
 
-        evidence_summaries.append(f"[{host}] CPU Avg: {cpu_avg}%, Memory Avg: {mem_avg}%")
+        # Added Disk Avg to the technical evidence string
+        evidence_summaries.append(f"[{host}] CPU Avg: {cpu_avg}%, Memory Avg: {mem_avg}%, Disk Avg: {disk_avg}%")
 
     return {
         "asset_details": health_profile,
         "technical_evidence": " | ".join(evidence_summaries)
     }
+
 import asyncio
 
 async def primary_triage_agent(state: AgentState) -> Dict[str, Any]:
