@@ -23,55 +23,95 @@ def extract_json_data(tool_result: Any) -> Any:
         
     return {}
 
+import asyncio
+from typing import Dict, Any, List
+
 async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
     """
-    AGENT 4: Metrics Health Expert (Layer 02 Asset Utilization Focus)
+    AGENT 4: CMDB & Metrics Health Expert (Layer 02 Asset Focus)
+    Queries active utilization performance stats across ALL detected hostnames.
     """
     logger.info("-----------Display State - Infrastructure Agent-----------")
-    
+    logger.info(state)
+    session_id = state["session_id"]
     incident_number = state["incident_number"]
-    hostname = state["hostname"]
-    opened_at = state["opened_at"]
+    app_id = state.get("app_id")
+    opened_at = state.get("opened_at")
 
-    # 1. Execute tool calls concurrently
-    cpu_task = tools_dict["fetch_asset_cpu_metrics"].ainvoke({
-        "incident_number": incident_number, 
-        "asset_id": hostname
-    })
-    mem_task = tools_dict["fetch_asset_memory_metrics"].ainvoke({
-        "incident_number": incident_number, 
-        "asset_id": hostname
-    })
-    disk_task = tools_dict["fetch_asset_disk_metrics"].ainvoke({
-        "incident_number": incident_number, 
-        "asset_id": hostname
-    })
+    # Safely handle either a single string, comma-separated string, or a list of hostnames
+    raw_hostname = state.get("hostname") or state.get("all_hostnames") or []
+    if isinstance(raw_hostname, str):
+        # Handle comma-separated strings or single string
+        hostnames = [h.strip() for h in raw_hostname.split(",") if h.strip()]
+    elif isinstance(raw_hostname, list):
+        hostnames = raw_hostname
+    else:
+        hostnames = []
 
-    cpu_res, mem_res, disk_res = await asyncio.gather(cpu_task, mem_task, disk_task)
+    logger.info(f"Health Profile for hostnames {hostnames} at {opened_at}")
 
-    # 2. Safely extract dict payloads regardless of return type (list/str/dict)
-    cpu_dict = extract_json_data(cpu_res)
-    mem_dict = extract_json_data(mem_res)
-    disk_dict = extract_json_data(disk_res)
+    # Fallback if no hostnames were identified
+    if not hostnames:
+        return {
+            "asset_details": {},
+            "technical_evidence": "No valid hostnames identified for telemetry metrics."
+        }
 
-    # 3. Safely extract nested values using isinstance checks
-    cpu_historic = cpu_dict.get("historic", {}) if isinstance(cpu_dict, dict) else {}
-    mem_historic = mem_dict.get("historic", {}) if isinstance(mem_dict, dict) else {}
+    # 1. Create async tasks for ALL hostnames in parallel
+    tasks = []
+    for host in hostnames:
+        cpu_task = tools_dict["fetch_asset_cpu_metrics"].ainvoke({
+            "incident_number": incident_number,
+            "asset_id": host
+        })
+        mem_task = tools_dict["fetch_asset_memory_metrics"].ainvoke({
+            "incident_number": incident_number,
+            "asset_id": host
+        })
+        disk_task = tools_dict["fetch_asset_disk_metrics"].ainvoke({
+            "incident_number": incident_number,
+            "asset_id": host
+        })
+        tasks.extend([cpu_task, mem_task, disk_task])
 
-    cpu_avg = cpu_historic.get("avg", "N/A") if isinstance(cpu_historic, dict) else "N/A"
-    mem_avg = mem_historic.get("avg", "N/A") if isinstance(mem_historic, dict) else "N/A"
+    # 2. Run all tasks across all hosts concurrently
+    raw_results = await asyncio.gather(*tasks)
 
-    health_profile = {
-        "cpu_utilization": cpu_dict,
-        "memory_utilization": mem_dict,
-        "disk_utilization": disk_dict
-    }
+    # 3. Process results grouped by hostname
+    health_profile = {}
+    evidence_summaries = []
+
+    for i, host in enumerate(hostnames):
+        # Retrieve the 3 corresponding results for this host
+        cpu_res = raw_results[i * 3]
+        mem_res = raw_results[i * 3 + 1]
+        disk_res = raw_results[i * 3 + 2]
+
+        # Extract dictionary payloads
+        cpu_dict = extract_json_data(cpu_res)
+        mem_dict = extract_json_data(mem_res)
+        disk_dict = extract_json_data(disk_res)
+
+        # Extract historic average stats
+        cpu_historic = cpu_dict.get("historic", {}) if isinstance(cpu_dict, dict) else {}
+        mem_historic = mem_dict.get("historic", {}) if isinstance(mem_dict, dict) else {}
+
+        cpu_avg = cpu_historic.get("avg", "N/A") if isinstance(cpu_historic, dict) else "N/A"
+        mem_avg = mem_historic.get("avg", "N/A") if isinstance(mem_historic, dict) else "N/A"
+
+        # Populate host-level health profile
+        health_profile[host] = {
+            "cpu_utilization": cpu_dict,
+            "memory_utilization": mem_dict,
+            "disk_utilization": disk_dict
+        }
+
+        evidence_summaries.append(f"[{host}] CPU Avg: {cpu_avg}%, Memory Avg: {mem_avg}%")
 
     return {
         "asset_details": health_profile,
-        "technical_evidence": f"CPU Historic Avg: {cpu_avg}%, Memory Avg: {mem_avg}%"
+        "technical_evidence": " | ".join(evidence_summaries)
     }
-
 import asyncio
 
 async def primary_triage_agent(state: AgentState) -> Dict[str, Any]:
@@ -95,3 +135,5 @@ async def primary_triage_agent(state: AgentState) -> Dict[str, Any]:
         "hostname": host_data.get("primary_hostname"),
         "app_id": app_data.get("app_id")
     }
+
+
