@@ -305,3 +305,23 @@ async def infrastructure_agent(state: AgentState) -> Dict[str, Any]:
         "technical_evidence": " | ".join(evidence_summaries)
     }
 
+
+
+# Extract whatever list host_data returned
+raw_hosts = host_data.get("hostnames") or host_data.get("all_hostnames") or []
+
+# Clean elements to guarantee a true List[str] (filtering out {} or non-string items)
+clean_hostnames: List[str] = []
+if isinstance(raw_hosts, list):
+    for item in raw_hosts:
+        if isinstance(item, str) and item.strip():
+            clean_hostnames.append(item.strip())
+        elif isinstance(item, dict):
+            val = item.get("name") or item.get("hostname")
+            if val and isinstance(val, str):
+                clean_hostnames.append(val.strip())
+elif isinstance(raw_hosts, str) and raw_hosts.strip():
+    clean_hostnames = [h.strip() for h in raw_hosts.split(",") if h.strip()]
+
+# Assign directly to 'hostname' to match your AgentState type: Optional[List[str]]
+hostname = clean_hostnames
