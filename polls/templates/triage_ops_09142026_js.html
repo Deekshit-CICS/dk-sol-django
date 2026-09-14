@@ -1310,6 +1310,7 @@
         const section = data[currentMetricSubTab] || {};
         const avg = section.avg != null ? `${section.avg}%` : 'N/A';
         const processes = (section.top_processes || section.processes || []).slice(0, 10);
+        const uniqueProcesses = (section.top_unique || []).slice(0, 10);
 
         const rows = processes.map((p, i) => {
             const pct = p[`${tab}_percent`] ?? p.percent ?? p.value ?? 0;
@@ -1324,6 +1325,16 @@
                     <td>${pct}%</td>
                 </tr>`;
         }).join('');
+
+        const uniqueRows = uniqueProcesses.map((p, i) => `
+                <tr>
+                    <td>${i + 1}</td>
+                    <td>${p.process || 'Unknown'}</td>
+                    <td>${p.user_name || 'N/A'}</td>
+                    <td>${p.pid != null ? p.pid : 'N/A'}</td>
+                    <td>${p.actual_percent != null ? p.actual_percent + '%' : 'N/A'}</td>
+                    <td>${p.captured_at || 'N/A'}</td>
+                </tr>`).join('');
 
         const chartItems = processes.map(p => ({
             label: p.process || p.name || 'Unknown',
@@ -1341,10 +1352,18 @@
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Processes by ${label} Usage</div>
+            <div class="text-muted small" style="margin:-4px 0 10px;">Ranked by average ${label} usage across the whole window — multiple instances of the same process name are collapsed into one averaged row.</div>
             ${renderBarChart(chartItems)}
             <table class="evidence-table">
                 <thead><tr><th>#</th><th>Process</th><th>User</th><th>PID</th><th>${label} %</th></tr></thead>
                 <tbody>${rows || `<tr><td colspan="5" class="text-muted small">No process data available.</td></tr>`}</tbody>
+            </table>
+
+            <div class="label" style="margin-top:22px;">Top 10 Unique Processes — Actual Values</div>
+            <div class="text-muted small" style="margin:-4px 0 10px;">Each unique process instance (by PID), showing its single highest actual ${label} reading in this window and the exact moment it happened — not averaged.</div>
+            <table class="evidence-table">
+                <thead><tr><th>#</th><th>Process</th><th>User</th><th>PID</th><th>Actual ${label} %</th><th>Captured At</th></tr></thead>
+                <tbody>${uniqueRows || `<tr><td colspan="6" class="text-muted small">No unique process data available.</td></tr>`}</tbody>
             </table>
         `;
     }
@@ -1383,6 +1402,17 @@
             pct: m.percent_used ?? m.used_percent ?? m.percent ?? 0
         }));
 
+        const uniqueMounts = (section.top_unique || []).slice(0, 10);
+        const uniqueRows = uniqueMounts.map((m, i) => `
+                <tr>
+                    <td>${i + 1}</td>
+                    <td>${m.mount_point || 'Unknown'}</td>
+                    <td>${m.actual_percent != null ? m.actual_percent + '%' : 'N/A'}</td>
+                    <td>${m.used || 'N/A'}</td>
+                    <td>${m.total || 'N/A'}</td>
+                    <td>${m.captured_at || 'N/A'}</td>
+                </tr>`).join('');
+
         return `
             ${renderMetricSubTabBar(true)}
             <div class="evidence-stat-row" style="grid-template-columns:1fr;">
@@ -1390,10 +1420,18 @@
             </div>
             ${windowNote}
             <div class="label" style="margin-top:14px;">Top 10 Mount Points by Storage Consumed</div>
+            <div class="text-muted small" style="margin:-4px 0 10px;">Ranked by average usage across the whole window.</div>
             ${renderBarChart(chartItems)}
             <table class="evidence-table">
                 <thead><tr><th>#</th><th>Mount Point</th><th>Used</th><th>Total</th><th>% Used</th></tr></thead>
                 <tbody>${rows || `<tr><td colspan="5" class="text-muted small">No mount point data available.</td></tr>`}</tbody>
+            </table>
+
+            <div class="label" style="margin-top:22px;">Top 10 Unique Mount Points — Actual Values</div>
+            <div class="text-muted small" style="margin:-4px 0 10px;">Each mount point's single highest actual usage reading in this window and the exact moment it happened — not averaged.</div>
+            <table class="evidence-table">
+                <thead><tr><th>#</th><th>Mount Point</th><th>Actual % Used</th><th>Used</th><th>Total</th><th>Captured At</th></tr></thead>
+                <tbody>${uniqueRows || `<tr><td colspan="6" class="text-muted small">No unique mount point data available.</td></tr>`}</tbody>
             </table>
         `;
     }
@@ -1418,13 +1456,32 @@
             </tr>
         `).join('');
 
+        const uniqueInterfaces = (section.top_unique || []).slice(0, 10);
+        const uniqueRows = uniqueInterfaces.map((n, i) => `
+            <tr>
+                <td>${i + 1}</td>
+                <td>${n.interface || 'Unknown'}</td>
+                <td>${n.traffic_in || 'N/A'}</td>
+                <td>${n.traffic_out || 'N/A'}</td>
+                <td>${n.captured_at || 'N/A'}</td>
+            </tr>
+        `).join('');
+
         return `
             ${renderMetricSubTabBar(true)}
             ${windowNote}
             <div class="label">Network Drivers &amp; Traffic</div>
+            <div class="text-muted small" style="margin:0 0 10px;">Totals summed across the whole window.</div>
             <table class="evidence-table">
                 <thead><tr><th>Driver / Interface</th><th>Traffic In</th><th>Traffic Out</th><th>Flow Count</th></tr></thead>
                 <tbody>${rows || `<tr><td colspan="4" class="text-muted small">No network data available.</td></tr>`}</tbody>
+            </table>
+
+            <div class="label" style="margin-top:22px;">Top 10 Unique Interfaces — Actual Values</div>
+            <div class="text-muted small" style="margin:-4px 0 10px;">Each interface's single highest actual inbound-traffic reading in this window (with the matching outbound value at that same moment) and the exact timestamp — not summed/averaged.</div>
+            <table class="evidence-table">
+                <thead><tr><th>#</th><th>Interface</th><th>Traffic In</th><th>Traffic Out</th><th>Captured At</th></tr></thead>
+                <tbody>${uniqueRows || `<tr><td colspan="5" class="text-muted small">No unique interface data available.</td></tr>`}</tbody>
             </table>
         `;
     }
@@ -2721,7 +2778,28 @@
             };
         });
 
-        const section = { avg, top_processes };
+        // Unique-process-by-peak sample data — each a distinct PID (unlike
+        // top_processes above, no name collisions to worry about here) with
+        // its own actual (not averaged) reading and a specific timestamp
+        // within the window, mirroring what _query_unique_processes_by_peak()
+        // returns from real Elasticsearch data.
+        const windowStartMs = isHistoric
+            ? new Date((currentInc && currentInc.created_at) || Date.now() - 45 * 60000).getTime() - 10 * 60000
+            : Date.now() - 5 * 60000;
+        const windowSpanMs = isHistoric ? 20 * 60000 : 5 * 60000;
+        const top_unique = pool.slice(0, 10).map((proc, i) => {
+            const actualPct = Math.max(1, Math.min(99, Math.round((base / Math.pow(1.3, i)) * (0.9 + rand() * 0.6))));
+            const capturedAt = new Date(windowStartMs + Math.floor(rand() * windowSpanMs)).toISOString();
+            return {
+                pid: 1000 + Math.floor(rand() * 30000),
+                process: proc,
+                user_name: DEMO_USERS[Math.floor(rand() * DEMO_USERS.length)],
+                actual_percent: actualPct,
+                captured_at: capturedAt
+            };
+        }).sort((a, b) => b.actual_percent - a.actual_percent);
+
+        const section = { avg, top_processes, top_unique };
         if (isHistoric) {
             section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
             section.window_end = section.window_start; // point-in-time snapshot around when the incident opened
@@ -2757,7 +2835,19 @@
             return { mount_point: mp, used: `${usedGb} GB`, total: `${totalGb} GB`, percent_used: pct };
         }).sort((a, b) => b.percent_used - a.percent_used);
 
-        const section = { avg, top_mount_points };
+        const windowStartMs = isHistoric
+            ? new Date((currentInc && currentInc.created_at) || Date.now() - 45 * 60000).getTime() - 10 * 60000
+            : Date.now() - 5 * 60000;
+        const windowSpanMs = isHistoric ? 20 * 60000 : 5 * 60000;
+        const top_unique = pool.slice(0, Math.min(mountCount, pool.length)).map((mp, i) => {
+            const totalGb = sizes[Math.floor(rand() * sizes.length)];
+            const actualPct = Math.min(99, Math.max(3, Math.round((avg * (1 - i * 0.05)) * (0.85 + rand() * 0.5))));
+            const usedGb = Math.round(totalGb * actualPct / 100);
+            const capturedAt = new Date(windowStartMs + Math.floor(rand() * windowSpanMs)).toISOString();
+            return { mount_point: mp, actual_percent: actualPct, used: `${usedGb} GB`, total: `${totalGb} GB`, captured_at: capturedAt };
+        }).sort((a, b) => b.actual_percent - a.actual_percent);
+
+        const section = { avg, top_mount_points, top_unique };
         if (isHistoric) {
             section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
             section.window_end = section.window_start;
@@ -2781,7 +2871,22 @@
             traffic_out: `${(Math.round(rand() * 9000 * trafficScale) / 10).toFixed(1)} MB`,
             flow_count: Math.round(rand() * 400 * trafficScale)
         }));
-        const section = { interfaces };
+
+        const windowStartMs = isHistoric
+            ? new Date((currentInc && currentInc.created_at) || Date.now() - 45 * 60000).getTime() - 10 * 60000
+            : Date.now() - 5 * 60000;
+        const windowSpanMs = isHistoric ? 20 * 60000 : 5 * 60000;
+        const top_unique = drivers.map(d => {
+            const capturedAt = new Date(windowStartMs + Math.floor(rand() * windowSpanMs)).toISOString();
+            return {
+                interface: d,
+                traffic_in: `${(Math.round(rand() * 15000 * trafficScale) / 10).toFixed(1)} MB`,
+                traffic_out: `${(Math.round(rand() * 11000 * trafficScale) / 10).toFixed(1)} MB`,
+                captured_at: capturedAt
+            };
+        }).sort((a, b) => parseFloat(b.traffic_in) - parseFloat(a.traffic_in));
+
+        const section = { interfaces, top_unique };
         if (isHistoric) {
             section.window_start = (currentInc && currentInc.created_at) || new Date(Date.now() - 45 * 60000).toISOString();
             section.window_end = section.window_start;
