@@ -382,7 +382,69 @@ def _query_top_processes_by_memory(asset_id, start, end, size=10):
     return overall_avg_pct, top_processes
 
 
-def _query_services(asset_id, start, end, size=SERVICES_MAX_RESULTS):
+def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_field, size=10):
+    """
+    Shared by CPU and Memory. Different question from _query_top_processes_by_cpu()/
+    _by_memory() above: those average each process NAME's usage across the
+    whole window, collapsing multiple PIDs of the same process name into
+    one row. This finds each UNIQUE process INSTANCE (grouped by PID) and
+    its single highest ACTUAL reading within [start, end] — not an
+    average — along with the exact timestamp that peak occurred.
+
+    Returns list[dict] with: pid, process, user_name, actual_percent, captured_at
+    """
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {HOST_FIELD: asset_id}},
+                    {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_pid": {
+                "terms": {
+                    "field": PROCESS_PID_FIELD,
+                    "size": size,
+                    "order": {"peak_value": "desc"},
+                },
+                "aggs": {
+                    "peak_value": {"max": {"field": metric_field}},
+                    "peak_doc": {
+                        "top_hits": {
+                            "size": 1,
+                            "sort": [{metric_field: {"order": "desc"}}],
+                            "_source": [PROCESS_NAME_FIELD, USER_NAME_FIELD, metric_field, "@timestamp"],
+                        }
+                    },
+                },
+            }
+        },
+    }
+
+    response = _es_search(index_pattern, query)
+    aggs = response.get("aggregations", {})
+
+    items = []
+    for bucket in aggs.get("by_pid", {}).get("buckets", []):
+        hits = bucket.get("peak_doc", {}).get("hits", {}).get("hits", [])
+        if not hits:
+            continue
+        source = hits[0].get("_source", {})
+        raw_value = _get_nested_field(source, metric_field)
+        items.append({
+            "pid": bucket.get("key"),
+            "process": _get_nested_field(source, PROCESS_NAME_FIELD),
+            "user_name": _get_nested_field(source, USER_NAME_FIELD),
+            "actual_percent": round(raw_value * 100, 1) if raw_value is not None else None,
+            "captured_at": source.get("@timestamp"),
+        })
+    return items
+
+
+
     """
     Terms aggregation over SERVICE_NAME_FIELD, one bucket per distinct
     service seen in [start, end] for this host, with a top_hits sub-agg
@@ -698,6 +760,64 @@ def _query_top_mount_points_by_disk_usage(asset_id, start, end, size=10):
     return overall_avg_pct, top_mount_points
 
 
+def _query_unique_mounts_by_peak(asset_id, start, end, size=10):
+    """
+    Same idea as _query_unique_processes_by_peak() but for filesystem
+    mount points — each unique mount's single highest ACTUAL used-percent
+    reading within [start, end], not averaged, with the exact timestamp
+    that peak occurred.
+    """
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {HOST_FIELD: asset_id}},
+                    {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_mount": {
+                "terms": {
+                    "field": DISK_MOUNT_POINT_FIELD,
+                    "size": size,
+                    "order": {"peak_value": "desc"},
+                },
+                "aggs": {
+                    "peak_value": {"max": {"field": DISK_USED_PCT_FIELD}},
+                    "peak_doc": {
+                        "top_hits": {
+                            "size": 1,
+                            "sort": [{DISK_USED_PCT_FIELD: {"order": "desc"}}],
+                            "_source": [DISK_USED_PCT_FIELD, DISK_USED_BYTES_FIELD, DISK_TOTAL_BYTES_FIELD, "@timestamp"],
+                        }
+                    },
+                },
+            }
+        },
+    }
+
+    response = _es_search(DISK_INDEX_PATTERN, query)
+    aggs = response.get("aggregations", {})
+
+    items = []
+    for bucket in aggs.get("by_mount", {}).get("buckets", []):
+        hits = bucket.get("peak_doc", {}).get("hits", {}).get("hits", [])
+        if not hits:
+            continue
+        source = hits[0].get("_source", {})
+        raw_value = _get_nested_field(source, DISK_USED_PCT_FIELD)
+        items.append({
+            "mount_point": bucket.get("key"),
+            "actual_percent": round(raw_value * 100, 1) if raw_value is not None else None,
+            "used": _format_bytes(_get_nested_field(source, DISK_USED_BYTES_FIELD)),
+            "total": _format_bytes(_get_nested_field(source, DISK_TOTAL_BYTES_FIELD)),
+            "captured_at": source.get("@timestamp"),
+        })
+    return items
+
+
 def _query_network_interfaces(asset_id, start, end, size=10):
     """
     Terms aggregation on the network interface name field, summing
@@ -757,6 +877,64 @@ def _query_network_interfaces(asset_id, start, end, size=10):
         })
 
     return interfaces
+
+
+def _query_unique_interfaces_by_peak(asset_id, start, end, size=10):
+    """
+    Same idea as _query_unique_processes_by_peak(), for network
+    interfaces. Network doesn't have a meaningful "percentage" the way
+    CPU/Memory/Disk do, so this reports the single highest ACTUAL inbound-
+    traffic reading per interface within [start, end] (used as the sort
+    key — the exact peak moment is what matters for spotting a spike),
+    with that same moment's outbound value and exact timestamp alongside.
+    """
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {HOST_FIELD: asset_id}},
+                    {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_interface": {
+                "terms": {
+                    "field": INTERFACE_NAME_FIELD,
+                    "size": size,
+                    "order": {"peak_in": "desc"},
+                },
+                "aggs": {
+                    "peak_in": {"max": {"field": TRAFFIC_IN_BYTES_FIELD}},
+                    "peak_doc": {
+                        "top_hits": {
+                            "size": 1,
+                            "sort": [{TRAFFIC_IN_BYTES_FIELD: {"order": "desc"}}],
+                            "_source": [TRAFFIC_IN_BYTES_FIELD, TRAFFIC_OUT_BYTES_FIELD, "@timestamp"],
+                        }
+                    },
+                },
+            }
+        },
+    }
+
+    response = _es_search(NETWORK_INDEX_PATTERN, query)
+    aggs = response.get("aggregations", {})
+
+    items = []
+    for bucket in aggs.get("by_interface", {}).get("buckets", []):
+        hits = bucket.get("peak_doc", {}).get("hits", {}).get("hits", [])
+        if not hits:
+            continue
+        source = hits[0].get("_source", {})
+        items.append({
+            "interface": bucket.get("key"),
+            "traffic_in": _format_bytes(_get_nested_field(source, TRAFFIC_IN_BYTES_FIELD)),
+            "traffic_out": _format_bytes(_get_nested_field(source, TRAFFIC_OUT_BYTES_FIELD)),
+            "captured_at": source.get("@timestamp"),
+        })
+    return items
 
 
 def _build_log_category_should_clauses():
@@ -1018,11 +1196,20 @@ def _get_historic_cpu_section(asset_id, incident_opened_at):
         logger.exception("Elasticsearch query failed for historic CPU data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch historic CPU data from Elasticsearch"}, status=502)
 
+    try:
+        hist_unique = _query_unique_processes_by_peak(CPU_INDEX_PATTERN, asset_id, hist_start, hist_end, PROCESS_CPU_FIELD)
+    except Exception:
+        # Non-fatal — the averaged top_processes table above still works
+        # even if this one fails.
+        logger.exception("Elasticsearch query failed for historic CPU unique-peak data (asset=%s)", asset_id)
+        hist_unique = []
+
     return {
         "avg": hist_avg,
         "window_start": hist_start.isoformat(),
         "window_end": hist_end.isoformat(),
         "top_processes": hist_top,
+        "top_unique": hist_unique,
     }
 
 
@@ -1042,10 +1229,17 @@ def _get_current_cpu_section(asset_id, range_start=None, range_end=None):
         logger.exception("Elasticsearch query failed for current CPU data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch current CPU data from Elasticsearch"}, status=502)
 
+    try:
+        cur_unique = _query_unique_processes_by_peak(CPU_INDEX_PATTERN, asset_id, cur_start, now, PROCESS_CPU_FIELD)
+    except Exception:
+        logger.exception("Elasticsearch query failed for current CPU unique-peak data (asset=%s)", asset_id)
+        cur_unique = []
+
     return {
         "avg": cur_avg,
         "captured_at": now.isoformat(),
         "top_processes": cur_top,
+        "top_unique": cur_unique,
     }
 
 
@@ -1081,11 +1275,18 @@ def _get_historic_memory_section(asset_id, incident_opened_at):
         logger.exception("Elasticsearch query failed for historic memory data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch historic memory data from Elasticsearch"}, status=502)
 
+    try:
+        hist_unique = _query_unique_processes_by_peak(MEMORY_INDEX_PATTERN, asset_id, hist_start, hist_end, PROCESS_MEMORY_FIELD)
+    except Exception:
+        logger.exception("Elasticsearch query failed for historic memory unique-peak data (asset=%s)", asset_id)
+        hist_unique = []
+
     return {
         "avg": hist_avg,
         "window_start": hist_start.isoformat(),
         "window_end": hist_end.isoformat(),
         "top_processes": hist_top,
+        "top_unique": hist_unique,
     }
 
 
@@ -1105,10 +1306,17 @@ def _get_current_memory_section(asset_id, range_start=None, range_end=None):
         logger.exception("Elasticsearch query failed for current memory data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch current memory data from Elasticsearch"}, status=502)
 
+    try:
+        cur_unique = _query_unique_processes_by_peak(MEMORY_INDEX_PATTERN, asset_id, cur_start, now, PROCESS_MEMORY_FIELD)
+    except Exception:
+        logger.exception("Elasticsearch query failed for current memory unique-peak data (asset=%s)", asset_id)
+        cur_unique = []
+
     return {
         "avg": cur_avg,
         "captured_at": now.isoformat(),
         "top_processes": cur_top,
+        "top_unique": cur_unique,
     }
 
 
@@ -1144,11 +1352,18 @@ def _get_historic_disk_section(asset_id, incident_opened_at):
         logger.exception("Elasticsearch query failed for historic disk data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch historic disk data from Elasticsearch"}, status=502)
 
+    try:
+        hist_unique = _query_unique_mounts_by_peak(asset_id, hist_start, hist_end)
+    except Exception:
+        logger.exception("Elasticsearch query failed for historic disk unique-peak data (asset=%s)", asset_id)
+        hist_unique = []
+
     return {
         "avg": hist_avg,
         "window_start": hist_start.isoformat(),
         "window_end": hist_end.isoformat(),
         "top_mount_points": hist_top,
+        "top_unique": hist_unique,
     }
 
 
@@ -1168,10 +1383,17 @@ def _get_current_disk_section(asset_id, range_start=None, range_end=None):
         logger.exception("Elasticsearch query failed for current disk data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch current disk data from Elasticsearch"}, status=502)
 
+    try:
+        cur_unique = _query_unique_mounts_by_peak(asset_id, cur_start, now)
+    except Exception:
+        logger.exception("Elasticsearch query failed for current disk unique-peak data (asset=%s)", asset_id)
+        cur_unique = []
+
     return {
         "avg": cur_avg,
         "captured_at": now.isoformat(),
         "top_mount_points": cur_top,
+        "top_unique": cur_unique,
     }
 
 
@@ -1207,10 +1429,17 @@ def _get_historic_network_section(asset_id, incident_opened_at):
         logger.exception("Elasticsearch query failed for historic network data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch historic network data from Elasticsearch"}, status=502)
 
+    try:
+        hist_unique = _query_unique_interfaces_by_peak(asset_id, hist_start, hist_end)
+    except Exception:
+        logger.exception("Elasticsearch query failed for historic network unique-peak data (asset=%s)", asset_id)
+        hist_unique = []
+
     return {
         "window_start": hist_start.isoformat(),
         "window_end": hist_end.isoformat(),
         "interfaces": interfaces,
+        "top_unique": hist_unique,
     }
 
 
@@ -1230,9 +1459,16 @@ def _get_current_network_section(asset_id, range_start=None, range_end=None):
         logger.exception("Elasticsearch query failed for current network data (asset=%s)", asset_id)
         return JsonResponse({"error": "Failed to fetch current network data from Elasticsearch"}, status=502)
 
+    try:
+        cur_unique = _query_unique_interfaces_by_peak(asset_id, cur_start, now)
+    except Exception:
+        logger.exception("Elasticsearch query failed for current network unique-peak data (asset=%s)", asset_id)
+        cur_unique = []
+
     return {
         "captured_at": now.isoformat(),
         "interfaces": interfaces,
+        "top_unique": cur_unique,
     }
 
 
