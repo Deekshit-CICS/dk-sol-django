@@ -386,10 +386,18 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     """
     Shared by CPU and Memory. Different question from _query_top_processes_by_cpu()/
     _by_memory() above: those average each process NAME's usage across the
-    whole window, collapsing multiple PIDs of the same process name into
-    one row. This finds each UNIQUE process INSTANCE (grouped by PID) and
-    its single highest ACTUAL reading within [start, end] — not an
-    average — along with the exact timestamp that peak occurred.
+    whole window. This finds each unique process NAME's single highest
+    ACTUAL reading within [start, end] — not an average — along with the
+    exact timestamp that peak occurred and which specific PID produced it.
+
+    Grouped by process NAME, not PID — PIDs are ephemeral (a restarted
+    process gets a new one, and within a short window a recycled PID can
+    even briefly refer to two unrelated processes), so grouping by PID
+    risked fragmenting the same logical process across multiple rows, or
+    letting several instances of one busy process (e.g. many worker PIDs)
+    dominate the top 10 and crowd out other processes worth seeing. The
+    PID of whichever instance actually produced the peak reading is still
+    included per row — you lose per-instance ROWS, not per-instance DATA.
 
     Returns list[dict] with: pid, process, user_name, actual_percent, captured_at
     """
@@ -404,9 +412,9 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
             }
         },
         "aggs": {
-            "by_pid": {
+            "by_process": {
                 "terms": {
-                    "field": PROCESS_PID_FIELD,
+                    "field": PROCESS_NAME_FIELD,
                     "size": size,
                     "order": {"peak_value": "desc"},
                 },
@@ -416,7 +424,7 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
                         "top_hits": {
                             "size": 1,
                             "sort": [{metric_field: {"order": "desc"}}],
-                            "_source": [PROCESS_NAME_FIELD, USER_NAME_FIELD, metric_field, "@timestamp"],
+                            "_source": [PROCESS_PID_FIELD, USER_NAME_FIELD, metric_field, "@timestamp"],
                         }
                     },
                 },
@@ -428,15 +436,15 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     aggs = response.get("aggregations", {})
 
     items = []
-    for bucket in aggs.get("by_pid", {}).get("buckets", []):
+    for bucket in aggs.get("by_process", {}).get("buckets", []):
         hits = bucket.get("peak_doc", {}).get("hits", {}).get("hits", [])
         if not hits:
             continue
         source = hits[0].get("_source", {})
         raw_value = _get_nested_field(source, metric_field)
         items.append({
-            "pid": bucket.get("key"),
-            "process": _get_nested_field(source, PROCESS_NAME_FIELD),
+            "pid": _get_nested_field(source, PROCESS_PID_FIELD),
+            "process": bucket.get("key"),
             "user_name": _get_nested_field(source, USER_NAME_FIELD),
             "actual_percent": round(raw_value * 100, 1) if raw_value is not None else None,
             "captured_at": source.get("@timestamp"),
