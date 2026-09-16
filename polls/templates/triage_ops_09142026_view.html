@@ -386,21 +386,30 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     """
     Shared by CPU and Memory. Different question from _query_top_processes_by_cpu()/
     _by_memory() above: those average each process NAME's usage across the
-    whole window. This finds each unique process NAME's single highest
-    ACTUAL reading within [start, end] — not an average — along with the
-    exact timestamp that peak occurred and which specific PID produced it.
+    whole window, collapsing multiple PIDs of the same process name into
+    one row. This finds each unique process INSTANCE — grouped by PID, per
+    explicit request — and its single highest ACTUAL reading within
+    [start, end], not an average, along with the exact timestamp that peak
+    occurred.
 
-    Grouped by process NAME, not PID — PIDs are ephemeral (a restarted
-    process gets a new one, and within a short window a recycled PID can
-    even briefly refer to two unrelated processes), so grouping by PID
-    risked fragmenting the same logical process across multiple rows, or
-    letting several instances of one busy process (e.g. many worker PIDs)
-    dominate the top 10 and crowd out other processes worth seeing. The
-    PID of whichever instance actually produced the peak reading is still
-    included per row — you lose per-instance ROWS, not per-instance DATA.
+    shard_size: this aggregation is ORDERED BY A SUB-METRIC (peak_value,
+    a max aggregation), not by document count — a well-documented
+    Elasticsearch accuracy pitfall. Each shard picks its local candidate
+    buckets by DOCUMENT COUNT first, and only computes the sub-metric for
+    those candidates afterward; a process with a genuinely high peak but a
+    low sample count can get excluded from a shard's candidate list
+    before its peak value is ever considered, silently dropping it from
+    results that should include it. Setting shard_size well above `size`
+    makes each shard consider a much larger candidate pool before
+    truncating, which is exactly the fix Elasticsearch's own docs
+    recommend for this situation. If results still look off after this,
+    the next thing to check is whether PROCESS_PID_FIELD is actually
+    mapped as a keyword/numeric field suitable for a terms aggregation on
+    your instance — not a text field, which would behave very differently.
 
     Returns list[dict] with: pid, process, user_name, actual_percent, captured_at
     """
+    shard_size = max(size * 20, 200)
     query = {
         "size": 0,
         "query": {
@@ -412,10 +421,11 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
             }
         },
         "aggs": {
-            "by_process": {
+            "by_pid": {
                 "terms": {
-                    "field": PROCESS_NAME_FIELD,
+                    "field": PROCESS_PID_FIELD,
                     "size": size,
+                    "shard_size": shard_size,
                     "order": {"peak_value": "desc"},
                 },
                 "aggs": {
@@ -424,7 +434,7 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
                         "top_hits": {
                             "size": 1,
                             "sort": [{metric_field: {"order": "desc"}}],
-                            "_source": [PROCESS_PID_FIELD, USER_NAME_FIELD, metric_field, "@timestamp"],
+                            "_source": [PROCESS_NAME_FIELD, USER_NAME_FIELD, metric_field, "@timestamp"],
                         }
                     },
                 },
@@ -436,15 +446,15 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     aggs = response.get("aggregations", {})
 
     items = []
-    for bucket in aggs.get("by_process", {}).get("buckets", []):
+    for bucket in aggs.get("by_pid", {}).get("buckets", []):
         hits = bucket.get("peak_doc", {}).get("hits", {}).get("hits", [])
         if not hits:
             continue
         source = hits[0].get("_source", {})
         raw_value = _get_nested_field(source, metric_field)
         items.append({
-            "pid": _get_nested_field(source, PROCESS_PID_FIELD),
-            "process": bucket.get("key"),
+            "pid": bucket.get("key"),
+            "process": _get_nested_field(source, PROCESS_NAME_FIELD),
             "user_name": _get_nested_field(source, USER_NAME_FIELD),
             "actual_percent": round(raw_value * 100, 1) if raw_value is not None else None,
             "captured_at": source.get("@timestamp"),
@@ -774,7 +784,15 @@ def _query_unique_mounts_by_peak(asset_id, start, end, size=10):
     mount points — each unique mount's single highest ACTUAL used-percent
     reading within [start, end], not averaged, with the exact timestamp
     that peak occurred.
+
+    shard_size: same fix as _query_unique_processes_by_peak() — this is
+    ALSO ordered by a sub-metric (peak_value), so without an explicit
+    shard_size each shard could pick its candidate mount points by
+    document count before the peak value is even computed, silently
+    excluding a mount that genuinely peaked high but wasn't sampled as
+    often. See that function's docstring for the full explanation.
     """
+    shard_size = max(size * 20, 200)
     query = {
         "size": 0,
         "query": {
@@ -790,6 +808,7 @@ def _query_unique_mounts_by_peak(asset_id, start, end, size=10):
                 "terms": {
                     "field": DISK_MOUNT_POINT_FIELD,
                     "size": size,
+                    "shard_size": shard_size,
                     "order": {"peak_value": "desc"},
                 },
                 "aggs": {
@@ -895,7 +914,14 @@ def _query_unique_interfaces_by_peak(asset_id, start, end, size=10):
     traffic reading per interface within [start, end] (used as the sort
     key — the exact peak moment is what matters for spotting a spike),
     with that same moment's outbound value and exact timestamp alongside.
+
+    shard_size: same fix as _query_unique_processes_by_peak() — ordered
+    by a sub-metric (peak_in), so without an explicit shard_size a shard
+    could exclude an interface from its candidates by document count
+    before its peak traffic value is ever computed. See that function's
+    docstring for the full explanation.
     """
+    shard_size = max(size * 20, 200)
     query = {
         "size": 0,
         "query": {
@@ -911,6 +937,7 @@ def _query_unique_interfaces_by_peak(asset_id, start, end, size=10):
                 "terms": {
                     "field": INTERFACE_NAME_FIELD,
                     "size": size,
+                    "shard_size": shard_size,
                     "order": {"peak_in": "desc"},
                 },
                 "aggs": {
