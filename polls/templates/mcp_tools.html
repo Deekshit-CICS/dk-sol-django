@@ -64,3 +64,60 @@ async def fetch_asset_memory_metrics(incident_number: str, asset_id: str) -> str
 async def fetch_asset_disk_metrics(incident_number: str, asset_id: str) -> str:
     """Fetches disk utilization percentage across mount points (/boot, /opt, /var/log, etc.)."""
     return await fetch_asset_metrics(incident_number, asset_id, "disk")
+
+
+@mcp.tool()
+async def fetch_servicenow_server_config(asset_id: str) -> str:
+    """
+    Fetches hardware and OS configuration details for a given server name from CMDB.
+    """
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Basic {SERVICE_NOW_AUTH_KEY}"
+    }
+
+    # Search in cmdb_ci_server (or cmdb_ci_linux_server / cmdb_ci)
+    url = f"https://{SERVICE_NOW_INSTANCE}.service-now.com/api/now/table/cmdb_ci_server"
+    
+    fields = [
+        "name", "manufacturer", "model_id", "virtual", 
+        "category", "location", "environment", "description",
+        "os", "os_version", "u_system_role"
+    ]
+
+    params = {
+        "sysparm_query": f"name={asset_id}",
+        "sysparm_limit": "1",
+        "sysparm_display_value": "true",
+        "sysparm_fields": ",".join(fields)
+    }
+
+    async with httpx.AsyncClient(proxy=SERVICE_NOW_PROXY_HTTP, verify=False) as client:
+        try:
+            resp = await client.get(url, params=params, headers=headers, timeout=10.0)
+            resp.raise_for_status()
+            data = resp.json().get("result", [])
+            
+            if not data:
+                return json.dumps({"asset_id": asset_id, "status": "Not Found"})
+                
+            record = data[0]
+            
+            # Unpack values cleanly
+            return json.dumps({
+                "asset_id": asset_id,
+                "name": record.get("name"),
+                "manufacturer": record.get("manufacturer"),
+                "model_id": record.get("model_id"),
+                "is_virtual": record.get("virtual"),
+                "category": record.get("category"),
+                "location": record.get("location"),
+                "environment": record.get("environment"),
+                "operating_system": record.get("os"),
+                "os_version": record.get("os_version"),
+                "system_role": record.get("u_system_role")
+            }, indent=2)
+
+        except Exception as e:
+            return json.dumps({"asset_id": asset_id, "error": str(e)})
