@@ -92,9 +92,41 @@ def _es_search(index, query_body):
 # ---------------------------------------------------------------------------
 CPU_INDEX_PATTERN = "metricbeat-*"           # TODO: your CPU metrics index/alias
 HOST_FIELD = "host.name"                     # TODO: field that holds the asset/hostname
-PROCESS_NAME_FIELD = "system.process.name"   # TODO: field holding the process name
-PROCESS_CPU_FIELD = "system.process.cpu.total.pct"  # TODO: per-process CPU pct field (0.0-1.0 scale assumed)
+PROCESS_NAME_FIELD = "process.name"          # top-level ECS field, confirmed against real sample data — NOT nested under system.process (that path holds the system.* metricset's OWN fields like cpu/memory, not identity fields like name/pid)
+PROCESS_CPU_FIELD = "system.process.cpu.total.norm.pct"  # normalized 0.0-1.0 scale — confirmed against real sample data (not the raw system.process.cpu.total.pct, which can exceed 1.0 on multi-core hosts)
 HOST_CPU_FIELD = "system.cpu.total.pct"      # TODO: overall host CPU pct field (0.0-1.0 scale assumed)
+
+# ---------------------------------------------------------------------------
+# Kibana document links — lets the "view in Elastic" button on the Top 10
+# Unique table jump straight to the exact document a peak reading came
+# from. Uses _index and _id, which Elasticsearch returns automatically on
+# every hit (no extra _source request needed for these two).
+#
+# >>> ADJUST BEFORE USE <<<
+# Both must be filled in or every doc_url comes back None (the frontend
+# hides/disables the button gracefully in that case, rather than linking
+# to a broken URL):
+#   KIBANA_BASE_URL     — e.g. "https://kibana.mycompany.com"
+#   KIBANA_DATA_VIEW_ID  — the Data View (née "index pattern") ID that
+#                          covers metrics-*/system.process. Find it in
+#                          Kibana under Stack Management > Data Views —
+#                          it's a GUID, not the index pattern's display
+#                          name, visible in that page's URL when you open
+#                          the data view.
+# ---------------------------------------------------------------------------
+KIBANA_BASE_URL = ""       # TODO: fill in
+KIBANA_DATA_VIEW_ID = ""   # TODO: fill in
+
+
+def _build_kibana_doc_url(index, doc_id):
+    """
+    Deep link to a single document in Kibana's Discover app. Returns
+    None if not configured, or if the hit is missing _index/_id for any
+    reason — always check for None before rendering a link.
+    """
+    if not KIBANA_BASE_URL or not KIBANA_DATA_VIEW_ID or not index or not doc_id:
+        return None
+    return f"{KIBANA_BASE_URL}/app/discover#/doc/{KIBANA_DATA_VIEW_ID}/{index}?id={doc_id}"
 
 MEMORY_INDEX_PATTERN = "metricbeat-*"        # TODO: adjust if memory metrics live in a different index
 PROCESS_MEMORY_FIELD = "system.process.memory.rss.pct"  # TODO: per-process memory pct field (0.0-1.0 scale assumed)
@@ -392,22 +424,38 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     [start, end], not an average, along with the exact timestamp that peak
     occurred.
 
-    shard_size: this aggregation is ORDERED BY A SUB-METRIC (peak_value,
-    a max aggregation), not by document count — a well-documented
-    Elasticsearch accuracy pitfall. Each shard picks its local candidate
-    buckets by DOCUMENT COUNT first, and only computes the sub-metric for
-    those candidates afterward; a process with a genuinely high peak but a
-    low sample count can get excluded from a shard's candidate list
-    before its peak value is ever considered, silently dropping it from
-    results that should include it. Setting shard_size well above `size`
-    makes each shard consider a much larger candidate pool before
-    truncating, which is exactly the fix Elasticsearch's own docs
-    recommend for this situation. If results still look off after this,
-    the next thing to check is whether PROCESS_PID_FIELD is actually
-    mapped as a keyword/numeric field suitable for a terms aggregation on
-    your instance — not a text field, which would behave very differently.
+    Query structure matches a validated Dev Tools query run directly
+    against this data (not just a guess at the mapping):
+      - filters out zero/idle readings (metric_field > 0) — without this,
+        idle samples can crowd a shard's candidate list before the peak
+        value is even considered, same underlying issue shard_size (below)
+        addresses from a different angle
+      - requires the PID field to actually exist on the document
+      - host filter uses match_phrase against host.hostname, not term
+        against HOST_FIELD (host.name) — confirmed against real data for
+        this specific query; NOT applied to the rest of this file's
+        queries, which still use HOST_FIELD/term, pending confirmation
+        that the same field/matching applies there too
 
-    Returns list[dict] with: pid, process, user_name, actual_percent, captured_at
+    shard_size: this aggregation is ALSO ordered by a sub-metric
+    (peak_value, a max aggregation), not by document count — a well-
+    documented Elasticsearch accuracy pitfall. Each shard picks its local
+    candidate buckets by DOCUMENT COUNT first, and only computes the
+    sub-metric for those candidates afterward; a process with a
+    genuinely high peak but a low sample count can get excluded from a
+    shard's candidate list before its peak value is ever considered,
+    silently dropping it from results that should include it. Setting
+    shard_size well above `size` makes each shard consider a much larger
+    candidate pool before truncating, which is exactly the fix
+    Elasticsearch's own docs recommend for this situation.
+
+    doc_url: every hit carries _index and _id automatically (Elasticsearch
+    metadata, not something that needs requesting via _source) — used to
+    build a direct Kibana Discover link to the exact document a peak
+    reading came from. None if KIBANA_BASE_URL/KIBANA_DATA_VIEW_ID aren't
+    configured yet.
+
+    Returns list[dict] with: pid, process, user_name, actual_percent, captured_at, doc_url
     """
     shard_size = max(size * 20, 200)
     query = {
@@ -415,8 +463,10 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
+                    {"range": {metric_field: {"gt": 0}}},
+                    {"exists": {"field": PROCESS_PID_FIELD}},
                 ]
             }
         },
@@ -434,7 +484,9 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
                         "top_hits": {
                             "size": 1,
                             "sort": [{metric_field: {"order": "desc"}}],
-                            "_source": [PROCESS_NAME_FIELD, USER_NAME_FIELD, metric_field, "@timestamp"],
+                            "_source": {
+                                "includes": [PROCESS_PID_FIELD, PROCESS_NAME_FIELD, USER_NAME_FIELD, metric_field, "@timestamp"]
+                            },
                         }
                     },
                 },
@@ -450,7 +502,8 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
         hits = bucket.get("peak_doc", {}).get("hits", {}).get("hits", [])
         if not hits:
             continue
-        source = hits[0].get("_source", {})
+        hit = hits[0]
+        source = hit.get("_source", {})
         raw_value = _get_nested_field(source, metric_field)
         items.append({
             "pid": bucket.get("key"),
@@ -458,6 +511,7 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
             "user_name": _get_nested_field(source, USER_NAME_FIELD),
             "actual_percent": round(raw_value * 100, 1) if raw_value is not None else None,
             "captured_at": source.get("@timestamp"),
+            "doc_url": _build_kibana_doc_url(hit.get("_index"), hit.get("_id")),
         })
     return items
 
@@ -833,7 +887,8 @@ def _query_unique_mounts_by_peak(asset_id, start, end, size=10):
         hits = bucket.get("peak_doc", {}).get("hits", {}).get("hits", [])
         if not hits:
             continue
-        source = hits[0].get("_source", {})
+        hit = hits[0]
+        source = hit.get("_source", {})
         raw_value = _get_nested_field(source, DISK_USED_PCT_FIELD)
         items.append({
             "mount_point": bucket.get("key"),
@@ -841,6 +896,7 @@ def _query_unique_mounts_by_peak(asset_id, start, end, size=10):
             "used": _format_bytes(_get_nested_field(source, DISK_USED_BYTES_FIELD)),
             "total": _format_bytes(_get_nested_field(source, DISK_TOTAL_BYTES_FIELD)),
             "captured_at": source.get("@timestamp"),
+            "doc_url": _build_kibana_doc_url(hit.get("_index"), hit.get("_id")),
         })
     return items
 
@@ -962,12 +1018,14 @@ def _query_unique_interfaces_by_peak(asset_id, start, end, size=10):
         hits = bucket.get("peak_doc", {}).get("hits", {}).get("hits", [])
         if not hits:
             continue
-        source = hits[0].get("_source", {})
+        hit = hits[0]
+        source = hit.get("_source", {})
         items.append({
             "interface": bucket.get("key"),
             "traffic_in": _format_bytes(_get_nested_field(source, TRAFFIC_IN_BYTES_FIELD)),
             "traffic_out": _format_bytes(_get_nested_field(source, TRAFFIC_OUT_BYTES_FIELD)),
             "captured_at": source.get("@timestamp"),
+            "doc_url": _build_kibana_doc_url(hit.get("_index"), hit.get("_id")),
         })
     return items
 
