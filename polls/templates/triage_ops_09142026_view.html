@@ -424,30 +424,27 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     [start, end], not an average, along with the exact timestamp that peak
     occurred.
 
-    Query structure matches a validated Dev Tools query run directly
-    against this data (not just a guess at the mapping):
-      - filters out zero/idle readings (metric_field > 0) — without this,
-        idle samples can crowd a shard's candidate list before the peak
-        value is even considered, same underlying issue shard_size (below)
-        addresses from a different angle
-      - requires the PID field to actually exist on the document
-      - host filter uses match_phrase against host.hostname, not term
-        against HOST_FIELD (host.name) — confirmed against real data for
-        this specific query; NOT applied to the rest of this file's
-        queries, which still use HOST_FIELD/term, pending confirmation
-        that the same field/matching applies there too
+    Query below is ported directly from a validated Dev Tools query run
+    against this data — same filter nesting, same aggregation names
+    (top_unique_pids / max_cpu / top_process_hits), same "gt": "0" string
+    value — not restructured or renamed. Two small additions on top of
+    the screenshot, both additive rather than structural: shard_size (see
+    below) and USER_NAME_FIELD in _source.includes — the screenshot's
+    includes list didn't request it, but the "User" column already shown
+    in the frontend table depends on it, so leaving it out would have
+    silently blanked that column rather than actually matching intent.
 
-    shard_size: this aggregation is ALSO ordered by a sub-metric
-    (peak_value, a max aggregation), not by document count — a well-
-    documented Elasticsearch accuracy pitfall. Each shard picks its local
-    candidate buckets by DOCUMENT COUNT first, and only computes the
-    sub-metric for those candidates afterward; a process with a
-    genuinely high peak but a low sample count can get excluded from a
-    shard's candidate list before its peak value is ever considered,
-    silently dropping it from results that should include it. Setting
-    shard_size well above `size` makes each shard consider a much larger
-    candidate pool before truncating, which is exactly the fix
-    Elasticsearch's own docs recommend for this situation.
+    shard_size: this aggregation is ordered by a sub-metric (max_cpu, a
+    max aggregation), not by document count — a well-documented
+    Elasticsearch accuracy pitfall. Each shard picks its local candidate
+    buckets by DOCUMENT COUNT first, and only computes the sub-metric for
+    those candidates afterward; a process with a genuinely high peak but a
+    low sample count can get excluded from a shard's candidate list
+    before its peak value is ever considered, silently dropping it from
+    results that should include it. Setting shard_size well above `size`
+    makes each shard consider a much larger candidate pool before
+    truncating, which is exactly the fix Elasticsearch's own docs
+    recommend for this situation.
 
     doc_url: every hit carries _index and _id automatically (Elasticsearch
     metadata, not something that needs requesting via _source) — used to
@@ -460,32 +457,65 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     shard_size = max(size * 20, 200)
     query = {
         "size": 0,
+        "version": True,
+        "_source": False,
         "query": {
             "bool": {
+                "must": [],
                 "filter": [
+                    {
+                        "bool": {
+                            "filter": [
+                                {
+                                    "bool": {
+                                        "should": [
+                                            {"range": {metric_field: {"gt": "0"}}}
+                                        ],
+                                        "minimum_should_match": 1,
+                                    }
+                                },
+                                {
+                                    "bool": {
+                                        "should": [
+                                            {"exists": {"field": PROCESS_PID_FIELD}}
+                                        ],
+                                        "minimum_should_match": 1,
+                                    }
+                                },
+                            ]
+                        }
+                    },
+                    {
+                        "range": {
+                            "@timestamp": {
+                                "format": "strict_date_optional_time",
+                                "gte": start.isoformat(),
+                                "lte": end.isoformat(),
+                            }
+                        }
+                    },
                     {"match_phrase": {"host.hostname": asset_id}},
-                    {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
-                    {"range": {metric_field: {"gt": 0}}},
-                    {"exists": {"field": PROCESS_PID_FIELD}},
-                ]
+                ],
+                "should": [],
+                "must_not": [],
             }
         },
         "aggs": {
-            "by_pid": {
+            "top_unique_pids": {
                 "terms": {
                     "field": PROCESS_PID_FIELD,
                     "size": size,
                     "shard_size": shard_size,
-                    "order": {"peak_value": "desc"},
+                    "order": {"max_cpu": "desc"},
                 },
                 "aggs": {
-                    "peak_value": {"max": {"field": metric_field}},
-                    "peak_doc": {
+                    "max_cpu": {"max": {"field": metric_field}},
+                    "top_process_hits": {
                         "top_hits": {
                             "size": 1,
                             "sort": [{metric_field: {"order": "desc"}}],
                             "_source": {
-                                "includes": [PROCESS_PID_FIELD, PROCESS_NAME_FIELD, USER_NAME_FIELD, metric_field, "@timestamp"]
+                                "includes": [PROCESS_PID_FIELD, PROCESS_NAME_FIELD, USER_NAME_FIELD, "@timestamp", metric_field]
                             },
                         }
                     },
@@ -498,8 +528,8 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     aggs = response.get("aggregations", {})
 
     items = []
-    for bucket in aggs.get("by_pid", {}).get("buckets", []):
-        hits = bucket.get("peak_doc", {}).get("hits", {}).get("hits", [])
+    for bucket in aggs.get("top_unique_pids", {}).get("buckets", []):
+        hits = bucket.get("top_process_hits", {}).get("hits", {}).get("hits", [])
         if not hits:
             continue
         hit = hits[0]
