@@ -1,0 +1,42 @@
+GET metrics-*/_search
+{
+  "size": 0,
+  "query": {
+    "bool": {
+      "filter": [
+        { 
+          "term": { "host.hostname": "he3ilxvtapp812" } 
+        },
+        { 
+          "exists": { "field": "process.pid" } 
+        },
+        {
+          "range": {
+            "@timestamp": {
+              "gte": "2026-08-20T16:00:00Z",
+              "lte": "2026-08-20T16:06:00Z"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "aggs": {
+    "top_cpu_pids": {
+      "terms": {
+        "field": "process.pid",
+        "size": 10,
+        "order": {
+          "max_cpu": "desc"
+        }
+      },
+      "aggs": {
+        "max_cpu": {
+          "max": {
+            "field": "system.process.cpu.total.norm.pct"
+          }
+        }
+      }
+    }
+  }
+}
