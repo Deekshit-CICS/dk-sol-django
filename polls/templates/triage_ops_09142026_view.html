@@ -418,21 +418,21 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     """
     Shared by CPU and Memory. Different question from _query_top_processes_by_cpu()/
     _by_memory() above: those average each process NAME's usage across the
-    whole window, collapsing multiple PIDs of the same process name into
-    one row. This finds each unique process INSTANCE — grouped by PID, per
-    explicit request — and its single highest ACTUAL reading within
-    [start, end], not an average, along with the exact timestamp that peak
-    occurred.
+    whole window too, but as an AVERAGE — this finds each unique process
+    NAME's single highest ACTUAL reading within [start, end], not an
+    average, along with the exact timestamp that peak occurred and which
+    specific PID produced it.
 
-    Query below is ported directly from a validated Dev Tools query run
-    against this data — same filter nesting, same aggregation names
-    (top_unique_pids / max_cpu / top_process_hits), same "gt": "0" string
-    value — not restructured or renamed. Two small additions on top of
-    the screenshot, both additive rather than structural: shard_size (see
-    below) and USER_NAME_FIELD in _source.includes — the screenshot's
-    includes list didn't request it, but the "User" column already shown
-    in the frontend table depends on it, so leaving it out would have
-    silently blanked that column rather than actually matching intent.
+    Grouped by process NAME (top_unique_names), not PID — per explicit
+    request. The PID of whichever instance actually produced the peak
+    reading is still included per row via _source, same as before this
+    change; you lose per-instance ROWS (multiple PIDs of one process name
+    no longer each get their own row), not per-instance DATA.
+
+    Query still follows the same shape as the validated Dev Tools query
+    from earlier — same filter nesting, same "gt": "0" string value — with
+    the aggregation names adjusted to reflect the new grouping
+    (top_unique_names / max_cpu / top_process_hits, was top_unique_pids).
 
     shard_size: this aggregation is ordered by a sub-metric (max_cpu, a
     max aggregation), not by document count — a well-documented
@@ -501,9 +501,9 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
             }
         },
         "aggs": {
-            "top_unique_pids": {
+            "top_unique_names": {
                 "terms": {
-                    "field": PROCESS_PID_FIELD,
+                    "field": PROCESS_NAME_FIELD,
                     "size": size,
                     "shard_size": shard_size,
                     "order": {"max_cpu": "desc"},
@@ -515,7 +515,7 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
                             "size": 1,
                             "sort": [{metric_field: {"order": "desc"}}],
                             "_source": {
-                                "includes": [PROCESS_PID_FIELD, PROCESS_NAME_FIELD, USER_NAME_FIELD, "@timestamp", metric_field]
+                                "includes": [PROCESS_PID_FIELD, USER_NAME_FIELD, "@timestamp", metric_field]
                             },
                         }
                     },
@@ -528,7 +528,7 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     aggs = response.get("aggregations", {})
 
     items = []
-    for bucket in aggs.get("top_unique_pids", {}).get("buckets", []):
+    for bucket in aggs.get("top_unique_names", {}).get("buckets", []):
         hits = bucket.get("top_process_hits", {}).get("hits", {}).get("hits", [])
         if not hits:
             continue
@@ -536,8 +536,8 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
         source = hit.get("_source", {})
         raw_value = _get_nested_field(source, metric_field)
         items.append({
-            "pid": bucket.get("key"),
-            "process": _get_nested_field(source, PROCESS_NAME_FIELD),
+            "pid": _get_nested_field(source, PROCESS_PID_FIELD),
+            "process": bucket.get("key"),
             "user_name": _get_nested_field(source, USER_NAME_FIELD),
             "actual_percent": round(raw_value * 100, 1) if raw_value is not None else None,
             "captured_at": source.get("@timestamp"),
