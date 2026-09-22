@@ -277,17 +277,37 @@ def _get_nested_field(source, dotted_field):
 
 def _query_top_processes_by_cpu(asset_id, start, end, size=10):
     """
-    Runs a terms aggregation over `PROCESS_NAME_FIELD`, ranked by average
-    CPU usage, within [start, end], filtered to the given asset/host.
-    Also returns the overall host-level average CPU for the same window.
+    overall_avg_cpu: unchanged — host-level average CPU for the window,
+    independent of the per-process breakdown below.
 
-    user.name and process.pid aren't aggregatable metrics — they're
+    top_processes: terms aggregation grouped by PID (PROCESS_PID_FIELD),
+    not process name — per explicit request, "doesn't matter if process
+    names are same". Each bucket's avg_cpu is that SPECIFIC PID's average
+    CPU across its own samples in the window; two different PIDs sharing
+    a process name (e.g. two "java" instances) now get their own row and
+    their own average, rather than being averaged together under one
+    name. Process name is still shown per row — it's just pulled from
+    the sample_doc top_hits now, since PID is the grouping key.
+
+    user.name and process.name aren't aggregatable metrics — they're
     per-process identifying fields — so they're pulled via a `top_hits`
-    sub-aggregation (one sample document per process bucket) rather than
+    sub-aggregation (one sample document per PID bucket) rather than
     avg/sum, and merged into each process's result.
+
+    shard_size: this aggregation is ordered by a sub-metric (avg_cpu, an
+    avg aggregation), not by document count — the same Elasticsearch
+    accuracy pitfall fixed in _query_unique_processes_by_peak() a few
+    turns back, applying here too since this function was already using
+    the same order-by-sub-metric pattern without it. Each shard picks its
+    local candidate buckets by DOCUMENT COUNT first, only computing the
+    sub-metric afterward; a PID with a genuinely high average but a low
+    sample count can get excluded from a shard's candidate list before
+    its average is ever considered. Setting shard_size well above `size`
+    is the fix Elasticsearch's own docs recommend for this.
 
     Returns: (overall_avg_pct: float|None, top_processes: list[dict])
     """
+    shard_size = max(size * 20, 200)
     query = {
         "size": 0,
         "query": {
@@ -304,8 +324,9 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
             },
             "top_processes": {
                 "terms": {
-                    "field": PROCESS_NAME_FIELD,
+                    "field": PROCESS_PID_FIELD,
                     "size": size,
+                    "shard_size": shard_size,
                     "order": {"avg_cpu": "desc"},
                 },
                 "aggs": {
@@ -315,7 +336,7 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
                     "sample_doc": {
                         "top_hits": {
                             "size": 1,
-                            "_source": [USER_NAME_FIELD, PROCESS_PID_FIELD],
+                            "_source": [USER_NAME_FIELD, PROCESS_NAME_FIELD],
                         }
                     },
                 },
@@ -337,10 +358,10 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
         sample_hits = bucket.get("sample_doc", {}).get("hits", {}).get("hits", [])
         sample_source = sample_hits[0].get("_source", {}) if sample_hits else {}
         top_processes.append({
-            "process": bucket.get("key"),
+            "process": _get_nested_field(sample_source, PROCESS_NAME_FIELD),
             "cpu_percent": round(avg_cpu * 100, 1) if avg_cpu is not None else 0,
             "user_name": _get_nested_field(sample_source, USER_NAME_FIELD),
-            "pid": _get_nested_field(sample_source, PROCESS_PID_FIELD),
+            "pid": bucket.get("key"),
         })
 
     return overall_avg_pct, top_processes
