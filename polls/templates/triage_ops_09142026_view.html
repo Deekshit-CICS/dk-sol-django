@@ -314,6 +314,23 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
     which still use HOST_FIELD/term, pending confirmation the same
     field/matching applies there too.
 
+    Metricset pollution: metrics-* is a wildcard spanning every
+    metricset's data stream (process, service, memory, filesystem,
+    network, socket...), all under Elastic Agent's metrics-<module>.<metricset>-*
+    naming. Some OTHER metricsets — confirmed via a real response:
+    linux.service documents — also populate a process.pid field (a
+    service's tracked "main PID") without carrying PROCESS_CPU_FIELD at
+    all, polluting PID-grouped buckets with entries that have avg_cpu:
+    null and an empty _source (none of the requested fields exist on
+    that document type). top_processes below is wrapped in a "filter"
+    sub-aggregation restricted to documents where PROCESS_CPU_FIELD
+    actually exists, so only genuine process-metricset documents are
+    ever considered for bucketing — deliberately NOT applied to the
+    top-level query filter, since that's shared with overall_avg_cpu
+    (which uses the unrelated HOST_CPU_FIELD, from a different metricset
+    entirely, and must stay computed from the full, unrestricted result
+    set exactly as before).
+
     Returns: (overall_avg_pct: float|None, top_processes: list[dict])
     """
     shard_size = max(size * 20, 200)
@@ -331,22 +348,29 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
             "overall_avg_cpu": {
                 "avg": {"field": HOST_CPU_FIELD}
             },
-            "top_processes": {
-                "terms": {
-                    "field": PROCESS_PID_FIELD,
-                    "size": size,
-                    "shard_size": shard_size,
-                    "order": {"avg_cpu": "desc"},
+            "process_docs_only": {
+                "filter": {
+                    "exists": {"field": PROCESS_CPU_FIELD}
                 },
                 "aggs": {
-                    "avg_cpu": {
-                        "avg": {"field": PROCESS_CPU_FIELD}
-                    },
-                    "sample_doc": {
-                        "top_hits": {
-                            "size": 1,
-                            "_source": [USER_NAME_FIELD, PROCESS_NAME_FIELD],
-                        }
+                    "top_processes": {
+                        "terms": {
+                            "field": PROCESS_PID_FIELD,
+                            "size": size,
+                            "shard_size": shard_size,
+                            "order": {"avg_cpu": "desc"},
+                        },
+                        "aggs": {
+                            "avg_cpu": {
+                                "avg": {"field": PROCESS_CPU_FIELD}
+                            },
+                            "sample_doc": {
+                                "top_hits": {
+                                    "size": 1,
+                                    "_source": [USER_NAME_FIELD, PROCESS_NAME_FIELD],
+                                }
+                            },
+                        },
                     },
                 },
             },
@@ -362,7 +386,8 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
     overall_avg_pct = round(overall_avg * 100, 1) if overall_avg is not None else None
 
     top_processes = []
-    for bucket in aggs.get("top_processes", {}).get("buckets", []):
+    process_buckets = aggs.get("process_docs_only", {}).get("top_processes", {}).get("buckets", [])
+    for bucket in process_buckets:
         avg_cpu = bucket.get("avg_cpu", {}).get("value")
         sample_hits = bucket.get("sample_doc", {}).get("hits", {}).get("hits", [])
         sample_source = sample_hits[0].get("_source", {}) if sample_hits else {}
