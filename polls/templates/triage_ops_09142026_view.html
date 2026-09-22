@@ -324,12 +324,15 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
     null and an empty _source (none of the requested fields exist on
     that document type). top_processes below is wrapped in a "filter"
     sub-aggregation restricted to documents where PROCESS_CPU_FIELD
-    actually exists, so only genuine process-metricset documents are
-    ever considered for bucketing — deliberately NOT applied to the
-    top-level query filter, since that's shared with overall_avg_cpu
-    (which uses the unrelated HOST_CPU_FIELD, from a different metricset
-    entirely, and must stay computed from the full, unrestricted result
-    set exactly as before).
+    exists AND is > 0 (excludes idle/zero-CPU samples too, not just
+    metricset pollution) — deliberately NOT applied to the top-level
+    query filter, since that's shared with overall_avg_cpu (which uses
+    the unrelated HOST_CPU_FIELD, from a different metricset entirely,
+    and must stay computed from the full, unrestricted result set
+    exactly as before). Note the range filter alone already implies
+    exists (a missing field can't be > 0) — both are kept since the
+    exists check was already there and this only adds to it, but the
+    exists clause is technically redundant now.
 
     Returns: (overall_avg_pct: float|None, top_processes: list[dict])
     """
@@ -350,7 +353,12 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
             },
             "process_docs_only": {
                 "filter": {
-                    "exists": {"field": PROCESS_CPU_FIELD}
+                    "bool": {
+                        "filter": [
+                            {"exists": {"field": PROCESS_CPU_FIELD}},
+                            {"range": {PROCESS_CPU_FIELD: {"gt": 0}}},
+                        ]
+                    }
                 },
                 "aggs": {
                     "top_processes": {
