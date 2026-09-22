@@ -275,7 +275,7 @@ def _get_nested_field(source, dotted_field):
     return value
 
 
-def _query_top_processes_by_cpu(asset_id, start, end, size=10):
+def _query_top_processes_by_cpu(asset_id, start, end, size=10, process_name=None):
     """
     overall_avg_cpu: unchanged — host-level average CPU for the window,
     independent of the per-process breakdown below.
@@ -334,9 +334,26 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
     exists check was already there and this only adds to it, but the
     exists clause is technically redundant now.
 
+    process_name: optional — when given, narrows top_processes to just
+    that one process name (still grouped/averaged by PID underneath, so
+    multiple instances of that name still get their own rows). Uses
+    match_phrase, not term, matching the host.hostname fix elsewhere in
+    this file — PROCESS_NAME_FIELD's exact mapping type (text vs
+    keyword) hasn't been confirmed, and match_phrase is the safe choice
+    against a text-mapped field. Scoped to process_docs_only, same
+    reasoning as the exists/range filters above — must not touch the
+    top-level query filter shared with overall_avg_cpu.
+
     Returns: (overall_avg_pct: float|None, top_processes: list[dict])
     """
     shard_size = max(size * 20, 200)
+    process_filters = [
+        {"exists": {"field": PROCESS_CPU_FIELD}},
+        {"range": {PROCESS_CPU_FIELD: {"gt": 0}}},
+    ]
+    if process_name:
+        process_filters.append({"match_phrase": {PROCESS_NAME_FIELD: process_name}})
+
     query = {
         "size": 0,
         "query": {
@@ -354,10 +371,7 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
             "process_docs_only": {
                 "filter": {
                     "bool": {
-                        "filter": [
-                            {"exists": {"field": PROCESS_CPU_FIELD}},
-                            {"range": {PROCESS_CPU_FIELD: {"gt": 0}}},
-                        ]
+                        "filter": process_filters
                     }
                 },
                 "aggs": {
