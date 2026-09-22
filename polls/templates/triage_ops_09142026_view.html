@@ -305,6 +305,15 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
     its average is ever considered. Setting shard_size well above `size`
     is the fix Elasticsearch's own docs recommend for this.
 
+    Host filter uses match_phrase against host.hostname, not term against
+    HOST_FIELD (host.name) — same fix applied to _query_unique_processes_by_peak()
+    a couple turns back, based on your own validated Dev Tools query.
+    term against a text-mapped field silently matches zero documents
+    (not an error) — the most likely explanation for this returning no
+    data at all. NOT yet applied to the rest of this file's queries,
+    which still use HOST_FIELD/term, pending confirmation the same
+    field/matching applies there too.
+
     Returns: (overall_avg_pct: float|None, top_processes: list[dict])
     """
     shard_size = max(size * 20, 200)
@@ -313,7 +322,7 @@ def _query_top_processes_by_cpu(asset_id, start, end, size=10):
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
                 ]
             }
@@ -382,7 +391,7 @@ def _query_top_processes_by_memory(asset_id, start, end, size=10):
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
                 ]
             }
@@ -567,7 +576,7 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
     return items
 
 
-
+def _query_services(asset_id, start, end, size=SERVICES_MAX_RESULTS):
     """
     Terms aggregation over SERVICE_NAME_FIELD, one bucket per distinct
     service seen in [start, end] for this host, with a top_hits sub-agg
@@ -580,7 +589,7 @@ def _query_unique_processes_by_peak(index_pattern, asset_id, start, end, metric_
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
                 ]
             }
@@ -629,7 +638,7 @@ def _query_processes_list(asset_id, start, end, size=PROCESSES_MAX_RESULTS):
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
                 ]
             }
@@ -685,7 +694,7 @@ def _query_netstat(asset_id, start, end, size=NETSTAT_MAX_RESULTS):
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"term": {SOCKET_DIRECTION_FIELD: "listening"}},
                     {"terms": {SOCKET_TRANSPORT_FIELD: ["tcp", "udp"]}},
                     {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
@@ -836,7 +845,7 @@ def _query_top_mount_points_by_disk_usage(asset_id, start, end, size=10):
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
                 ]
             }
@@ -903,7 +912,7 @@ def _query_unique_mounts_by_peak(asset_id, start, end, size=10):
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
                 ]
             }
@@ -976,7 +985,7 @@ def _query_network_interfaces(asset_id, start, end, size=10):
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
                 ]
             }
@@ -1034,7 +1043,7 @@ def _query_unique_interfaces_by_peak(asset_id, start, end, size=10):
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"range": {"@timestamp": {"gte": start.isoformat(), "lte": end.isoformat()}}},
                 ]
             }
@@ -1136,7 +1145,7 @@ def _query_raw_log_events(asset_id, start, end, size=RAW_LOG_MAX_LINES):
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {HOST_FIELD: asset_id}},
+                    {"match_phrase": {"host.hostname": asset_id}},
                     {"range": {LOG_TIMESTAMP_FIELD: {"gte": start.isoformat(), "lte": end.isoformat()}}},
                 ],
                 "should": _build_log_category_should_clauses(),
