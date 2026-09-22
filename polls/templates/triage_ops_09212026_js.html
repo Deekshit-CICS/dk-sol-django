@@ -2330,15 +2330,23 @@ const POLL_MAX_ATTEMPTS  = 15;      // ~30s of polling after a fresh trigger bef
 const DETAILS_URL = (id) => `${API_BASE}/api/triage/details/?incident_number=${encodeURIComponent(id)}`;
 
 /**
- * Session-based status polling — not confirmed against a real
- * response yet. Assumes triggerTriage()'s response (from
- * /api/triage/trigger/) includes a session_id field, and that this
- * endpoint accepts that session_id and returns a record with the
- * SAME status conventions as lookupIncident() (values checked against
- * STATUS_IN_PROGRESS/STATUS_COMPLETED/STATUS_FAILED above).
+ * Session-based status polling — confirmed against a real response:
  *
  *   GET {API_BASE}/api/triage/session-status/?session_id=<id>
- *   -> { status, ... }  (same shape lookupIncident() returns)
+ *   -> { status: "success"|"error",   <- API CALL outcome, NOT triage progress
+ *        data: { session_id, triage_status } }
+ *
+ * The top-level "status" is whether the HTTP call itself succeeded —
+ * critically NOT the same thing as the triage's progress. The actual
+ * triage status lives at data.triage_status. Conflating the two would
+ * be a real bug: STATUS_COMPLETED includes 'success', so reading the
+ * outer "status" directly would misread every successful API call as
+ * "triage completed", even while triage_status was still "in
+ * process" — a false positive almost immediately after triggering,
+ * defeating the entire point of this polling. This function
+ * normalizes the response into the {status, session_id} shape
+ * pollUntilDone()/runFreshTriage() already expect, so nothing else
+ * needs to change.
  *
  * runFreshTriage() below only uses this when the trigger response
  * actually contains a session_id — if it doesn't (wrong endpoint
@@ -2353,7 +2361,15 @@ async function checkSessionStatus(sessionId) {
     if (DEMO_MODE) return generateDemoSessionStatus(sessionId);
     const res = await fetch(SESSION_STATUS_URL(sessionId), { credentials: 'same-origin' });
     if (!res.ok) throw new Error(`Session status check failed (HTTP ${res.status})`);
-    return res.json();
+    const body = await res.json();
+    if (body.status !== 'success') {
+        throw new Error(body.message || body.error || 'Session status check returned an error');
+    }
+    const inner = body.data || {};
+    return {
+        status: inner.triage_status,
+        session_id: inner.session_id
+    };
 }
 
 /**
