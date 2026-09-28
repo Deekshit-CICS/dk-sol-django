@@ -1,0 +1,82 @@
+from ldap3 import ALL, Connection, Server, NNTLS, SUBTREE
+from ldap3.core.exceptions import LDAPException
+
+AD_SERVER_URL = "ldap://your-ad-domain-controller.com"
+AD_DOMAIN = "YOURDOMAIN"
+SEARCH_BASE = "DC=yourdomain,DC=com"  # Base Distinguished Name (DN) for search
+
+
+def is_user_in_ad_group(username: str, password: str, required_group_cn: str) -> bool:
+    """
+    Authenticates user and checks if they belong to a specific AD group (including nested groups).
+    `required_group_cn` is the Common Name of the group (e.g., 'Engineering-Team' or 'AdminUsers').
+    """
+    user_principal_name = f"{AD_DOMAIN}\\{username}"
+
+    try:
+        server = Server(AD_SERVER_URL, get_info=ALL)
+        # 1. Bind with user's credentials to authenticate them
+        conn = Connection(server, user=user_principal_name, password=password, auto_bind=True)
+
+        # 2. First find the user's Distinguished Name (DN)
+        user_filter = f"(&(objectClass=user)(sAMAccountName={username}))"
+        conn.search(
+            search_base=SEARCH_BASE,
+            search_filter=user_filter,
+            search_scope=SUBTREE,
+            attributes=["distinguishedName"]
+        )
+
+        if not conn.entries:
+            conn.unbind()
+            return False
+
+        user_dn = conn.entries[0].distinguishedName.value
+
+        # 3. Check for group membership (including nested/transitive groups via LDAP_MATCHING_RULE_IN_CHAIN)
+        # 1.2.840.113556.1.4.1941 is the OID for recursive group matching in Active Directory
+        group_filter = f"(&(objectClass=user)(distinguishedName={user_dn})(memberOf:1.2.840.113556.1.4.1941:=CN={required_group_cn},CN=Users,{SEARCH_BASE}))"
+
+        conn.search(
+            search_base=SEARCH_BASE,
+            search_filter=group_filter,
+            search_scope=SUBTREE,
+            attributes=["sAMAccountName"]
+        )
+
+        is_member = len(conn.entries) > 0
+        conn.unbind()
+        return is_member
+
+    except LDAPException:
+        return False
+
+
+from typing import Annotated
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+security = HTTPBasic()
+
+class RequireADGroup:
+    """Callable class dependency that checks for a specific AD group."""
+    def __init__(self, group_name: str):
+        self.group_name = group_name
+
+    def __call__(
+        self,
+        credentials: Annotated[HTTPBasicCredentials, Depends(security)]
+    ) -> dict:
+        is_member = is_user_in_ad_group(
+            credentials.username,
+            credentials.password,
+            required_group_cn=self.group_name
+        )
+
+        if not is_member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"User is not a member of required AD group: '{self.group_name}'",
+            )
+
+        return {"username": credentials.username, "group": self.group_name}
