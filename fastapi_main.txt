@@ -1,82 +1,114 @@
-from ldap3 import ALL, Connection, Server, NNTLS, SUBTREE
+from typing import Annotated
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from ldap3 import ALL, Connection, Server, SUBTREE
 from ldap3.core.exceptions import LDAPException
 
-AD_SERVER_URL = "ldap://your-ad-domain-controller.com"
-AD_DOMAIN = "YOURDOMAIN"
-SEARCH_BASE = "DC=yourdomain,DC=com"  # Base Distinguished Name (DN) for search
+app = FastAPI()
+security = HTTPBasic()
+
+# Hardcoded Active Directory Configuration
+AUTH_LDAP_SERVER_URI = "ldaps://fmacnp.com"
+AUTH_LDAP_BIND_DN = "CN=gocntkit,OU=Accounts,DC=fmacnp,DC=com"
+AUTH_LDAP_BIND_PASSWORD = "YOUR_SERVICE_ACCOUNT_PASSWORD_HERE"  # Replace with actual password
+SEARCH_BASE = "DC=fmacnp,DC=com"
 
 
-def is_user_in_ad_group(username: str, password: str, required_group_cn: str) -> bool:
+def authenticate_and_check_group(username: str, password: str, required_group: str) -> bool:
     """
-    Authenticates user and checks if they belong to a specific AD group (including nested groups).
-    `required_group_cn` is the Common Name of the group (e.g., 'Engineering-Team' or 'AdminUsers').
+    1. Binds with the Service Account (gocntkit) to locate the user's DN.
+    2. Verifies the user's password by attempting an LDAP bind with user credentials.
+    3. Checks if the user belongs to the required AD group (handles nested groups).
     """
-    user_principal_name = f"{AD_DOMAIN}\\{username}"
+    if not username or not password:
+        return False
 
     try:
-        server = Server(AD_SERVER_URL, get_info=ALL)
-        # 1. Bind with user's credentials to authenticate them
-        conn = Connection(server, user=user_principal_name, password=password, auto_bind=True)
+        # Step 1: Connect to AD using LDAPS
+        server = Server(AUTH_LDAP_SERVER_URI, get_info=ALL)
+        
+        # Service account bind (used to search the directory)
+        admin_conn = Connection(
+            server, 
+            user=AUTH_LDAP_BIND_DN, 
+            password=AUTH_LDAP_BIND_PASSWORD, 
+            auto_bind=True
+        )
 
-        # 2. First find the user's Distinguished Name (DN)
+        # Step 2: Search for the user's full Distinguished Name (DN)
         user_filter = f"(&(objectClass=user)(sAMAccountName={username}))"
-        conn.search(
+        admin_conn.search(
             search_base=SEARCH_BASE,
             search_filter=user_filter,
             search_scope=SUBTREE,
             attributes=["distinguishedName"]
         )
 
-        if not conn.entries:
-            conn.unbind()
+        if not admin_conn.entries:
+            admin_conn.unbind()
             return False
 
-        user_dn = conn.entries[0].distinguishedName.value
+        user_dn = admin_conn.entries[0].distinguishedName.value
 
-        # 3. Check for group membership (including nested/transitive groups via LDAP_MATCHING_RULE_IN_CHAIN)
-        # 1.2.840.113556.1.4.1941 is the OID for recursive group matching in Active Directory
-        group_filter = f"(&(objectClass=user)(distinguishedName={user_dn})(memberOf:1.2.840.113556.1.4.1941:=CN={required_group_cn},CN=Users,{SEARCH_BASE}))"
+        # Step 3: Verify user's password by binding as the user
+        try:
+            user_conn = Connection(server, user=user_dn, password=password, auto_bind=True)
+            user_conn.unbind()
+        except LDAPException:
+            # Invalid user password
+            admin_conn.unbind()
+            return False
 
-        conn.search(
+        # Step 4: Check if user belongs to required group (including nested groups)
+        # OID 1.2.840.113556.1.4.1941 evaluates recursive group membership in Active Directory
+        group_filter = (
+            f"(&(objectClass=user)(distinguishedName={user_dn})"
+            f"(memberOf:1.2.840.113556.1.4.1941:=CN={required_group},{SEARCH_BASE}))"
+        )
+
+        admin_conn.search(
             search_base=SEARCH_BASE,
             search_filter=group_filter,
             search_scope=SUBTREE,
             attributes=["sAMAccountName"]
         )
 
-        is_member = len(conn.entries) > 0
-        conn.unbind()
+        is_member = len(admin_conn.entries) > 0
+        admin_conn.unbind()
         return is_member
 
     except LDAPException:
         return False
 
 
-from typing import Annotated
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-
-security = HTTPBasic()
-
 class RequireADGroup:
-    """Callable class dependency that checks for a specific AD group."""
+    """Dependency factory for checking AD group permissions."""
     def __init__(self, group_name: str):
         self.group_name = group_name
 
     def __call__(
-        self,
+        self, 
         credentials: Annotated[HTTPBasicCredentials, Depends(security)]
     ) -> dict:
-        is_member = is_user_in_ad_group(
-            credentials.username,
-            credentials.password,
-            required_group_cn=self.group_name
+        is_authorized = authenticate_and_check_group(
+            username=credentials.username,
+            password=credentials.password,
+            required_group=self.group_name
         )
 
-        if not is_member:
+        if not is_authorized:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"User is not a member of required AD group: '{self.group_name}'",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Authentication failed or user is not in group '{self.group_name}'",
+                headers={"WWW-Authenticate": "Basic"},
             )
 
         return {"username": credentials.username, "group": self.group_name}
+
+
+# Route Examples
+require_admins = RequireADGroup("App-Admins")
+
+@app.get("/admin/dashboard")
+async def admin_dashboard(user: Annotated[dict, Depends(require_admins)]):
+    return {"message": f"Access granted for Admin: {user['username']}"}
