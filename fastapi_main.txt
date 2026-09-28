@@ -8,8 +8,8 @@ app = FastAPI()
 security = HTTPBasic()
 
 # Hardcoded Active Directory Configuration
-AUTH_LDAP_SERVER_URI = "ldaps://fmacnp.com"
-AUTH_LDAP_BIND_DN = "CN=gocntkit,OU=Accounts,DC=fmacnp,DC=com"
+AUTH_LDAP_SERVER_URI = "ldaps://xxxx.com"
+AUTH_LDAP_BIND_DN = "CN=xxxxx,OU=Accounts,DC=xxxxx,DC=com"
 AUTH_LDAP_BIND_PASSWORD = "YOUR_SERVICE_ACCOUNT_PASSWORD_HERE"  # Replace with actual password
 SEARCH_BASE = "DC=fmacnp,DC=com"
 
