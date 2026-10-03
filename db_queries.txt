@@ -2,3 +2,16 @@
 
 ALTER TABLE [DB_NAME].[TABLE_NAME]
 DROP COLUMN risk_assessment, implementation_window
+
+
+
+// Select Top 1000 records
+
+SELECT TOP (1000) [id]
+  ,[session_id]
+  ,[short_description]
+  ,[assignment_group]
+  ,[assigned_to]
+  ,[updated_at]
+  ,[fredai_rag_historical_resoulution]
+FROM [DB_NAME].[TABLE_NAME].   // ADD MORE [] DIVISIONS IF NAME CONTAINS PERIODS
