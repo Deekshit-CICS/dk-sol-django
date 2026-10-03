@@ -1,0 +1,4 @@
+// DROP COLUMS FROM THE TABLE
+
+ALTER TABLE [DB_NAME].[TABLE_NAME]
+DROP COLUMN risk_assessment, implementation_window
