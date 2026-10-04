@@ -61,8 +61,7 @@
            the page below doesn't jump when the text arrives. The empty
            (nothing selected yet) state stays compact. */
         .reco-hero[data-state="loading"], .reco-hero[data-state="ready"], .reco-hero[data-state="error"] { min-height: 170px; }
-        .reco-summary { font-size: 0.98rem; line-height: 1.6; color: var(--text-main); white-space: pre-line;
-                        display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+        .reco-summary { font-size: 0.98rem; line-height: 1.6; color: var(--text-main); white-space: pre-line; overflow-wrap: anywhere; }
         .reco-hero[data-state="empty"] .reco-summary,
         .reco-hero[data-state="loading"] .reco-summary,
         .reco-hero[data-state="error"] .reco-summary { color: var(--text-sec); font-size: 0.88rem; }
@@ -75,12 +74,14 @@
         .reco-skeleton span:nth-child(2) { width: 78%; }
         .reco-skeleton span:nth-child(3) { width: 55%; }
         @keyframes recoShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-        .reco-footer { display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+        .reco-footer { display: none; flex-direction: column; gap: 12px;
                        margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
         .reco-hero[data-state="ready"] .reco-footer { display: flex; }
         .reco-jump { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; font-size: 0.74rem; color: var(--text-sec); }
         .reco-jump a { color: var(--blue); cursor: pointer; text-decoration: none; font-weight: 600; }
         .reco-jump a:hover { text-decoration: underline; }
+        .reco-bottom { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+        .reco-hero .fb-row { margin: 0; }
         .reco-actions { display: flex; gap: 8px; }
         .node-flash { animation: nodeFlash 1.4s ease; }
         @keyframes nodeFlash {
@@ -208,7 +209,6 @@
         .hc-dot.fail { background: #ff3b30; }
         .btn-fw-check { background: var(--blue); color: #fff; border: none; padding: 8px 18px; border-radius: 10px; font-weight: 600; font-size: 0.82rem; cursor: pointer; transition: 0.2s; }
         .btn-fw-check:hover { opacity: 0.88; }
-        .btn-fw-check.btn-fw-secondary { background: rgba(0,113,227,0.08); color: var(--blue); }
 
         /* ---------- Like / Dislike feedback ---------- */
         .fb-row { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; }
@@ -306,9 +306,9 @@
         <p class="text-secondary small">Enterprise dashboard &amp; troubleshooting</p>
     </div>
 
-    <!-- AI Recommendation: answer-first. Recommendation only - deliberately no
-         action/execute controls. Detail panel + "Continue with AI" are one click away;
-         raw evidence below is reachable via the jump links. -->
+    <!-- AI Recommendation: answer-first, shown in full. Recommendation only -
+         deliberately no action/execute controls. Feedback (thumbs) sits at the
+         bottom of the card; raw evidence below is reachable via the jump links. -->
     <div id="node-fix" class="apple-card reco-hero p-4 mb-2" data-state="empty">
         <div class="d-flex align-items-center justify-content-between mb-2">
             <div class="d-flex align-items-center">
@@ -327,9 +327,15 @@
                 <a onclick="jumpToNode('node-ci')">Assets</a>
                 <a onclick="jumpToNode('node-log')">Technical evidence</a>
             </div>
-            <div class="reco-actions">
-                <button class="btn-fw-check btn-fw-secondary" onclick="showFixPanel()">View full recommendation</button>
-                <button class="btn-fw-check" onclick="openAiChatSetup()"><i class="bi bi-chat-dots"></i> Continue with AI</button>
+            <div class="reco-bottom">
+                <div class="fb-row">
+                    <span class="text-muted small">Was this helpful?</span>
+                    <button class="fb-btn" id="remedLikeBtn" onclick="setRemediationFeedback('like')" title="Helpful"><i class="bi bi-hand-thumbs-up"></i></button>
+                    <button class="fb-btn" id="remedDislikeBtn" onclick="setRemediationFeedback('dislike')" title="Not helpful"><i class="bi bi-hand-thumbs-down"></i></button>
+                </div>
+                <div class="reco-actions">
+                    <button class="btn-fw-check" onclick="openAiChatSetup()"><i class="bi bi-chat-dots"></i> Continue with AI</button>
+                </div>
             </div>
         </div>
     </div>
