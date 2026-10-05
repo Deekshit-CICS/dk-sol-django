@@ -189,14 +189,25 @@ function esc(s) {
     "If none of the above pans out, escalating to the assignment group with this full context bundle is a reasonable next step."
   ];
   var demoReplyIndex = 0;
-  async function getAssistantReply(userText, onChunk) {
+  function makeAbortError() {
+    // DOMException with name "AbortError" is what a real aborted fetch()
+    // throws — constructing the same shape here so the demo path's abort
+    // is indistinguishable from the live path's to the caller's catch
+    // block (both checked via err.name === "AbortError").
+    if (typeof DOMException === "function") return new DOMException("Aborted", "AbortError");
+    var e = new Error("Aborted"); e.name = "AbortError"; return e;
+  }
+
+  async function getAssistantReply(userText, onChunk, signal) {
     if (DEMO_MODE || !CHAT_URL) {
       var reply = DEMO_REPLIES[demoReplyIndex % DEMO_REPLIES.length];
       demoReplyIndex++;
       var words = reply.split(" ");
       var acc = "";
       for (var i = 0; i < words.length; i++) {
+        if (signal && signal.aborted) throw makeAbortError();
         await new Promise(function (r) { setTimeout(r, 35); });
+        if (signal && signal.aborted) throw makeAbortError();
         acc += (i > 0 ? " " : "") + words[i];
         onChunk(acc);
       }
@@ -207,14 +218,15 @@ function esc(s) {
       method: "POST",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ message: userText, history: chatHistory })
+      body: JSON.stringify({ message: userText, history: chatHistory }),
+      signal: signal
     });
     if (!res.ok || !res.body) throw new Error("Assistant request failed (HTTP " + res.status + ")");
     var reader = res.body.getReader();
     var decoder = new TextDecoder();
     var acc2 = "";
     while (true) {
-      var chunk = await reader.read();
+      var chunk = await reader.read(); // rejects with AbortError once signal.abort() fires, even mid-stream
       if (chunk.done) break;
       acc2 += decoder.decode(chunk.value, { stream: true });
       onChunk(acc2);
@@ -222,6 +234,16 @@ function esc(s) {
     return acc2 || "No response received.";
   }
   var responseInFlight = false;
+  var currentAbortController = null;
+
+  function setStopButtonVisible(visible) {
+    var btn = document.getElementById("stopResponseBtn");
+    if (btn) btn.style.display = visible ? "flex" : "none";
+  }
+
+  function stopResponse() {
+    if (currentAbortController) currentAbortController.abort();
+  }
 
   function setPromptTriggersEnabled(enabled) {
     // Covers BOTH the compact suggestion chips and the prompt bucket's
@@ -262,22 +284,38 @@ function esc(s) {
     setRoute(true);
     var thinking = addThinkingChip(block);
     var replyCard = null;
-    getAssistantReply(initialPrompt, function (partial) {
-      if (!replyCard) { thinking.remove(); replyCard = addStreamingReplyCard(block); }
-      replyCard.update(partial);
-    }).then(function (reply) {
-      chatHistory.push({ role: "user", content: initialPrompt });
-      chatHistory.push({ role: "assistant", content: reply });
+    var lastPartialText = "";
+    var controller = new AbortController();
+    currentAbortController = controller;
+    setStopButtonVisible(true);
+
+    function finishInitialExchange() {
       setRoute(false);
       responseInFlight = false;
+      currentAbortController = null;
+      setStopButtonVisible(false);
       setPromptTriggersEnabled(true);
+    }
+
+    getAssistantReply(initialPrompt, function (partial) {
+      lastPartialText = partial;
+      if (!replyCard) { thinking.remove(); replyCard = addStreamingReplyCard(block); }
+      replyCard.update(partial);
+    }, controller.signal).then(function (reply) {
+      chatHistory.push({ role: "user", content: initialPrompt });
+      chatHistory.push({ role: "assistant", content: reply });
+      finishInitialExchange();
     }).catch(function (err) {
       thinking.remove();
       if (!replyCard) replyCard = addStreamingReplyCard(block);
-      replyCard.update("Failed to reach the AI assistant: " + err.message);
-      setRoute(false);
-      responseInFlight = false;
-      setPromptTriggersEnabled(true);
+      if (err.name === "AbortError") {
+        replyCard.update(lastPartialText ? (lastPartialText + "\n\n[Stopped by user]") : "[Stopped before any response was received]");
+        // Deliberately not pushed to chatHistory -- an incomplete answer
+        // isn't reliable context for follow-up questions.
+      } else {
+        replyCard.update("Failed to reach the AI assistant: " + err.message);
+      }
+      finishInitialExchange();
     });
   }
   function send(text) {
@@ -287,22 +325,38 @@ function esc(s) {
     setRoute(true);
     var thinking = addThinkingChip(block);
     var replyCard = null;
-    getAssistantReply(text, function (partial) {
-      if (!replyCard) { thinking.remove(); replyCard = addStreamingReplyCard(block); }
-      replyCard.update(partial);
-    }).then(function (reply) {
-      chatHistory.push({ role: "user", content: text });
-      chatHistory.push({ role: "assistant", content: reply });
+    var lastPartialText = "";
+    var controller = new AbortController();
+    currentAbortController = controller;
+    setStopButtonVisible(true);
+
+    function finishSend() {
       setRoute(false);
       responseInFlight = false;
+      currentAbortController = null;
+      setStopButtonVisible(false);
       setPromptTriggersEnabled(true);
+    }
+
+    getAssistantReply(text, function (partial) {
+      lastPartialText = partial;
+      if (!replyCard) { thinking.remove(); replyCard = addStreamingReplyCard(block); }
+      replyCard.update(partial);
+    }, controller.signal).then(function (reply) {
+      chatHistory.push({ role: "user", content: text });
+      chatHistory.push({ role: "assistant", content: reply });
+      finishSend();
     }).catch(function (err) {
       thinking.remove();
       if (!replyCard) replyCard = addStreamingReplyCard(block);
-      replyCard.update("Failed to reach the AI assistant: " + err.message);
-      setRoute(false);
-      responseInFlight = false;
-      setPromptTriggersEnabled(true);
+      if (err.name === "AbortError") {
+        replyCard.update(lastPartialText ? (lastPartialText + "\n\n[Stopped by user]") : "[Stopped before any response was received]");
+        // Deliberately not pushed to chatHistory -- an incomplete answer
+        // isn't reliable context for follow-up questions.
+      } else {
+        replyCard.update("Failed to reach the AI assistant: " + err.message);
+      }
+      finishSend();
     });
   }
   function askSuggestion(el) {
