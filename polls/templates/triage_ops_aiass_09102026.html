@@ -1,3 +1,4 @@
+{% load static %}
 <!--
   AI Assistant popup — "Ops Console / Incident Copilot" chat window.
 
@@ -81,6 +82,14 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
 .route-indicator { display:flex; align-items:center; gap:7px; font-size:11.5px; font-weight:600; padding:6px 12px; border-radius:8px; border:1px solid var(--border); }
 .route-indicator.mcp { color:var(--text-sec); background:rgba(0,0,0,0.03); border-color:var(--border); }
 .route-indicator.langgraph { color:var(--blue); background:var(--blue-bg); border-color:rgba(0,113,227,0.25); }
+.btn-stop-response {
+  display:flex; align-items:center; gap:6px; padding:6px 12px; border-radius:8px;
+  border:1px solid rgba(255,59,48,0.3); background:rgba(255,59,48,0.08); color:#ff3b30;
+  font-size:11.5px; font-weight:700; font-family:var(--font-sans); cursor:pointer;
+  transition:background 0.15s;
+}
+.btn-stop-response:hover { background:rgba(255,59,48,0.16); }
+.btn-stop-response svg { flex-shrink:0; }
 .route-dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
 .chat-view { flex:1; padding:24px 7%; overflow-y:auto; }
 .exchange { margin-bottom:28px; max-width:100%; }
@@ -153,9 +162,25 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
 .prompt-bucket-close { border:none; background:rgba(0,0,0,0.05); width:28px; height:28px; border-radius:9px; cursor:pointer; color:var(--text-sec); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 .prompt-bucket-close:hover { background:rgba(0,0,0,0.1); }
 .prompt-bucket-list { overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-bottom:10px; }
+.prompt-bucket-category { border:1px solid var(--border); border-radius:14px; overflow:hidden; background:#fff; }
+.prompt-bucket-category-head {
+  width:100%; display:flex; align-items:center; justify-content:space-between;
+  padding:13px 15px; border:none; background:#fafafa; cursor:pointer;
+  font-family:var(--font-sans); text-align:left; transition:background 0.15s;
+}
+.prompt-bucket-category-head:hover { background:var(--blue-bg); }
+.prompt-bucket-category-title { font-size:12.5px; font-weight:700; color:var(--text-main); }
+.prompt-bucket-category-count { font-size:10.5px; color:var(--text-sec); font-weight:600; margin-left:6px; }
+.prompt-bucket-chevron { width:12px; height:12px; color:var(--text-sec); flex-shrink:0; transition:transform 0.25s; }
+.prompt-bucket-category.open .prompt-bucket-chevron { transform:rotate(180deg); }
+.prompt-bucket-category-body {
+  max-height:0; overflow:hidden; transition:max-height 0.3s ease;
+  display:flex; flex-direction:column; gap:8px;
+}
+.prompt-bucket-category.open .prompt-bucket-category-body { padding:2px 12px 12px; }
 .prompt-bucket-item {
-  border:1px solid var(--border); border-radius:13px; padding:13px 15px;
-  font-size:12.5px; line-height:1.55; color:var(--text-main); cursor:pointer;
+  border:1px solid var(--border); border-radius:12px; padding:11px 13px;
+  font-size:12px; line-height:1.5; color:var(--text-main); cursor:pointer;
   background:#fafafa; font-family:var(--font-sans); transition:0.15s;
 }
 .prompt-bucket-item:hover { border-color:var(--blue); background:var(--blue-bg); }
@@ -195,7 +220,13 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
 <div class="main-workspace">
   <div class="top-bar">
     <div class="breadcrumb">Ops Console <span>/</span> <strong id="breadcrumbId">Incident Copilot</strong></div>
-    <div class="route-indicator mcp" id="routeBadge"><span class="route-dot"></span><span id="routeBadgeText">Ready</span></div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <button class="btn-stop-response" id="stopResponseBtn" onclick="stopResponse()" style="display:none;" title="Stop generating">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+        Stop
+      </button>
+      <div class="route-indicator mcp" id="routeBadge"><span class="route-dot"></span><span id="routeBadgeText">Ready</span></div>
+    </div>
   </div>
   <div class="chat-view" id="log"></div>
   <div class="suggestion-label">Choose a question to continue the investigation:</div>
@@ -220,16 +251,48 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
     </div>
     <button class="prompt-bucket-close" onclick="closePromptBucket()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
   </div>
-  <div class="prompt-bucket-sub">Longer, more detailed questions for a deeper investigation.</div>
+  <div class="prompt-bucket-sub">Grouped by area — expand a category to see its prompts.</div>
   <div class="prompt-bucket-list">
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Walk me through a full timeline correlation — cross-reference when the alert first fired against the linked change's implementation window, and call out any overlapping timestamps or fields that suggest the change caused this incident.</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Compare the current CPU, Memory, and Disk trends against the historical baseline captured at incident open. Flag any metric that has deviated by more than 20%, and explain what that deviation likely indicates.</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Draft a concise incident summary suitable for a status update to leadership, covering what happened, current impact, and what's being done about it — keep it under 150 words.</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Review the linked change's implementation and rollback plan. Based on the current evidence, would rolling back this change likely resolve the incident, and what are the risks of rolling back at this stage?</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Look across all the asset evidence collected so far and identify any process, service, or listening port that appears anomalous compared to what you'd expect on a healthy instance of this type.</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Given everything gathered so far, draft a step-by-step remediation plan, ordered by risk (lowest-risk actions first), with an estimated time to resolution for each step.</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Does this incident match a known pattern from prior similar incidents, based on the symptoms, affected components, and evidence collected so far?</div>
-    <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Identify every server and job asset involved in this incident, and explain how each one's evidence supports or rules out it being the root cause.</div>
+
+    <div class="prompt-bucket-category" data-category="servicenow">
+      <button class="prompt-bucket-category-head" onclick="toggleBucketCategory(this)">
+        <span><span class="prompt-bucket-category-title">ServiceNow</span><span class="prompt-bucket-category-count">4</span></span>
+        <svg class="prompt-bucket-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="prompt-bucket-category-body">
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Summarize the ServiceNow incident record — priority, status, assignment group, and how long it's been open.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Review the linked change's implementation and rollback plan. Based on the current evidence, would rolling back this change likely resolve the incident, and what are the risks of rolling back at this stage?</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Was this incident opened during an active change window? Cross-reference the incident's opened time against the linked change's schedule.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Identify every server and job asset involved in this incident, and explain how each one's ServiceNow data supports or rules out it being the root cause.</div>
+      </div>
+    </div>
+
+    <div class="prompt-bucket-category" data-category="elastic">
+      <button class="prompt-bucket-category-head" onclick="toggleBucketCategory(this)">
+        <span><span class="prompt-bucket-category-title">Elastic</span><span class="prompt-bucket-category-count">4</span></span>
+        <svg class="prompt-bucket-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="prompt-bucket-category-body">
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Compare the current CPU, Memory, and Disk trends against the historical baseline captured at incident open. Flag any metric that has deviated by more than 20%, and explain what that deviation likely indicates.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Look across all the asset evidence collected so far and identify any process, service, or listening port that appears anomalous compared to what you'd expect on a healthy instance of this type.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Summarize what the raw logs show around the time the alert fired — any recurring error patterns or spikes in log volume worth flagging?</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Check the up/down status of every asset in this incident's inventory and call out anything currently reporting as down.</div>
+      </div>
+    </div>
+
+    <div class="prompt-bucket-category" data-category="troubleshooting">
+      <button class="prompt-bucket-category-head" onclick="toggleBucketCategory(this)">
+        <span><span class="prompt-bucket-category-title">Incident Troubleshooting</span><span class="prompt-bucket-category-count">4</span></span>
+        <svg class="prompt-bucket-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="prompt-bucket-category-body">
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Walk me through a full timeline correlation — cross-reference when the alert first fired against the linked change's implementation window, and call out any overlapping timestamps or fields that suggest the change caused this incident.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Given everything gathered so far, draft a step-by-step remediation plan, ordered by risk (lowest-risk actions first), with an estimated time to resolution for each step.</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Does this incident match a known pattern from prior similar incidents, based on the symptoms, affected components, and evidence collected so far?</div>
+        <div class="prompt-bucket-item" onclick="askBucketPrompt(this)">Draft a concise incident summary suitable for a status update to leadership, covering what happened, current impact, and what's being done about it — keep it under 150 words.</div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -243,335 +306,7 @@ body { margin:0; display:flex; height:100vh; font-family:var(--font-sans); color
   var chatHistory = [];
   var logEl = document.getElementById("log");
   document.getElementById("breadcrumbId").textContent = contextSummary.incidentId || "Incident Copilot";
-  function esc(s) {
-    var d = document.createElement("div");
-    d.textContent = (s === null || s === undefined) ? "" : String(s);
-    return d.innerHTML;
-  }
-  function nowTime() {
-    var d = new Date();
-    var h = d.getHours(), m = d.getMinutes();
-    var ampm = h >= 12 ? "PM" : "AM";
-    h = h % 12; if (h === 0) h = 12;
-    return h + ":" + (m < 10 ? "0" : "") + m + " " + ampm;
-  }
-  function priorityPillClass(p) {
-    var t = (p || "").toString().toLowerCase();
-    if (t.indexOf("1") !== -1 || t.indexOf("critical") !== -1) return "p1";
-    if (t.indexOf("2") !== -1 || t.indexOf("high") !== -1) return "p2";
-    return "progress";
-  }
-  function statePillClass(s) {
-    var t = (s || "").toString().toLowerCase();
-    if (t.indexOf("complet") !== -1 || t.indexOf("success") !== -1 || t.indexOf("closed") !== -1 || t.indexOf("implement") !== -1) return "done";
-    if (t.indexOf("fail") !== -1) return "p1";
-    return "progress";
-  }
-  function setRoute(busy) {
-    var badge = document.getElementById("routeBadge");
-    var text = document.getElementById("routeBadgeText");
-    if (busy) { badge.className = "route-indicator langgraph"; text.textContent = "Processing…"; }
-    else { badge.className = "route-indicator mcp"; text.textContent = "Ready"; }
-  }
-  function buildIncidentCard() {
-    var inc = contextSummary.incident;
-    var card = document.createElement("div");
-    card.className = "card";
-    card.innerHTML =
-      '<div class="card-header"><span class="card-id">' + esc(contextSummary.incidentId) + '</span><span class="pill ' + statePillClass(inc.state) + '">' + esc(inc.state || "Unknown") + '</span></div>' +
-      '<div class="card-body"><div class="card-desc">' + esc(inc.desc) + '</div><div class="field-grid">' +
-        '<div><div class="field-label">Priority</div><div class="field-value"><span class="pill ' + priorityPillClass(inc.prio) + '">' + esc(inc.prio || "N/A") + '</span></div></div>' +
-        '<div><div class="field-label">Assigned To</div><div class="field-value">' + esc(inc.assignedTo) + '</div></div>' +
-        '<div><div class="field-label">Assignment Group</div><div class="field-value">' + esc(inc.group || "N/A") + '</div></div>' +
-        '<div><div class="field-label">App</div><div class="field-value">' + esc(inc.app || "N/A") + '</div></div>' +
-      '</div></div>';
-    return card;
-  }
-  function buildChangeCard(c) {
-    var card = document.createElement("div");
-    card.className = "card";
-    var impactedHtml = "None listed";
-    if (c.impactedCis && c.impactedCis.length) {
-      impactedHtml = c.impactedCis.map(function (ci) {
-        var supp = (ci.suppressionRequestNumber && ci.suppressionRequestNumber !== "N/A") ? ("Ticket " + ci.suppressionRequestNumber) : "no suppression request raised";
-        return esc(ci.ciName) + ": " + esc(ci.suppressionStatus) + " (" + esc(supp) + ")";
-      }).join("<br>");
-    }
-    card.innerHTML =
-      '<div class="card-header"><span class="card-id">' + esc(c.changeNumber) + '</span><span class="pill ' + statePillClass(c.status) + '">' + esc(c.status || "Unknown") + '</span></div>' +
-      '<div class="card-body"><div class="field-grid">' +
-        '<div><div class="field-label">Submitter</div><div class="field-value">' + esc(c.submitter || "N/A") + '</div></div>' +
-        '<div><div class="field-label">Coordinator</div><div class="field-value">' + esc(c.changeCoordinator || "N/A") + '</div></div>' +
-        '<div><div class="field-label">Start</div><div class="field-value">' + esc(c.startTime || "N/A") + '</div></div>' +
-        '<div><div class="field-label">End</div><div class="field-value">' + esc(c.endTime || "N/A") + '</div></div>' +
-      '</div><div style="margin-top:14px;"><div class="field-label">Impacted Servers</div><div class="field-value" style="font-weight:400; line-height:1.7;">' + impactedHtml + '</div></div></div>';
-    return card;
-  }
-  function buildAssetsCard() {
-    var assets = contextSummary.assets || [];
-    var card = document.createElement("div");
-    card.className = "card";
-    var rows = assets.map(function (ci) {
-      var d = ci.fullDetails;
-      var line = d ? (esc(d.name) + " — " + esc(d.manufacturer || "") + " " + esc(d.modelId || "") + ", " + esc(d.operatingSystem || "N/A")) : esc(ci.name);
-      return '<div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:12px;">' + line + '</div>';
-    }).join("");
-    card.innerHTML = '<div class="card-header"><span class="card-id">Asset Inventory</span></div><div class="card-body" style="padding-top:4px;">' + (rows || '<div class="field-value" style="font-weight:400;">No asset details loaded.</div>') + '</div>';
-    return card;
-  }
-  function buildEvidenceChip() {
-    var ev = contextSummary.evidence;
-    var chip = document.createElement("div");
-    chip.className = "tool-chip";
-    chip.innerHTML = '<span class="dot"></span> Technical evidence (' + esc(ev.assetName || "no asset") + ') &middot; ' + esc((ev.tabs || []).join(", "));
-    return chip;
-  }
-  function buildTrace() {
-    var trace = document.createElement("div");
-    trace.className = "trace";
-    var steps = ["Assembling context"];
-    (contextSummary.included || []).forEach(function (s) { steps.push("Reviewed " + s.toLowerCase()); });
-    steps.push("Generating response");
-    trace.innerHTML = steps.map(function (s) {
-      return '<div class="trace-step"><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#15803d" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><span class="label">' + esc(s) + '</span></div>';
-    }).join("");
-    return trace;
-  }
-  function addExchangeShell(userText) {
-    var exch = document.createElement("div");
-    exch.className = "exchange";
-    var userRow = document.createElement("div");
-    userRow.className = "msg-row user";
-    var bubble = document.createElement("div");
-    bubble.className = "bubble-user";
-    bubble.textContent = userText;
-    userRow.appendChild(bubble);
-    exch.appendChild(userRow);
-    var meta = document.createElement("div");
-    meta.className = "msg-meta";
-    meta.textContent = nowTime();
-    exch.appendChild(meta);
-    var block = document.createElement("div");
-    block.className = "assistant-block";
-    exch.appendChild(block);
-    logEl.appendChild(exch);
-    logEl.scrollTop = logEl.scrollHeight;
-    return block;
-  }
-  function addThinkingChip(block) {
-    var chip = document.createElement("div");
-    chip.className = "thinking-chip";
-    chip.innerHTML = '<span class="pulse"></span>Thinking…';
-    block.appendChild(chip);
-    logEl.scrollTop = logEl.scrollHeight;
-    return chip;
-  }
-  var feedbackCounter = 0;
-  function getCookie(name) {
-    var match = document.cookie.match("(^|;\\s*)" + name + "=([^;]*)");
-    return match ? decodeURIComponent(match[2]) : null;
-  }
-  var csrfBootstrapPromise = null;
-  function ensureCsrfCookie() {
-    if (!csrfBootstrapPromise) {
-      csrfBootstrapPromise = fetch(CSRF_BOOTSTRAP_URL, { credentials: "same-origin" }).catch(function (e) { console.error("CSRF bootstrap failed", e); });
-    }
-    return csrfBootstrapPromise;
-  }
-  function csrfHeaders(extra) {
-    var headers = {};
-    for (var k in extra) headers[k] = extra[k];
-    var token = getCookie("csrftoken");
-    if (token) headers["X-CSRFToken"] = token;
-    return headers;
-  }
-  ensureCsrfCookie();
-  function submitFeedback(msgId, feedback, text) {
-    if (DEMO_MODE || !FEEDBACK_URL) { console.log("[demo] feedback recorded", msgId, feedback); return; }
-    ensureCsrfCookie().then(function () {
-      fetch(FEEDBACK_URL, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: csrfHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ message_id: msgId, feedback: feedback, message: text })
-      }).catch(function (e) { console.error("feedback submit failed", e); });
-    });
-  }
-  function addStreamingReplyCard(block) {
-    var card = document.createElement("div");
-    card.className = "card";
-    var msgId = "msg-" + (feedbackCounter++);
-    card.innerHTML =
-      '<div class="card-body">' +
-      '<div class="field-value" style="font-weight:400; line-height:1.7; white-space:pre-wrap;"></div>' +
-      '<div class="fb-row">' +
-        '<span style="font-size:11px; color:var(--text-sec);">Was this helpful?</span>' +
-        '<button class="fb-btn" data-fb="like" title="Helpful"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M7 22V11M2 13v7a2 2 0 002 2h12.9a2 2 0 002-1.7l1.4-9A2 2 0 0018.3 9H14V4a2 2 0 00-2-2l-3 7v13"/></svg></button>' +
-        '<button class="fb-btn" data-fb="dislike" title="Not helpful"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M17 2v11M22 11V4a2 2 0 00-2-2H7.1a2 2 0 00-2 1.7l-1.4 9A2 2 0 005.7 15H10v5a2 2 0 002 2l3-7V2"/></svg></button>' +
-      '</div></div>';
-    var textEl = card.querySelector(".field-value");
-    var latestText = "";
-    var likeBtn = card.querySelector('[data-fb="like"]');
-    var dislikeBtn = card.querySelector('[data-fb="dislike"]');
-    var current = null;
-    function applyState() {
-      likeBtn.className = "fb-btn" + (current === "like" ? " active-like" : "");
-      dislikeBtn.className = "fb-btn" + (current === "dislike" ? " active-dislike" : "");
-    }
-    likeBtn.addEventListener("click", function () { current = current === "like" ? null : "like"; applyState(); submitFeedback(msgId, current, latestText); });
-    dislikeBtn.addEventListener("click", function () { current = current === "dislike" ? null : "dislike"; applyState(); submitFeedback(msgId, current, latestText); });
-    block.appendChild(card);
-    logEl.scrollTop = logEl.scrollHeight;
-    return {
-      update: function (text) { latestText = text; textEl.textContent = text; logEl.scrollTop = logEl.scrollHeight; }
-    };
-  }
-  var DEMO_REPLIES = [
-    "Based on the context shared, I would start by confirming whether the change window overlapped with the alert timestamps — that is the most common correlation I see in similar cases.",
-    "Have you checked whether the suppression request (if any) was actually active during the incident window? A pending suppression would not have muted alerts.",
-    "Given the asset details, I would also check recent patch history — if the last patch was applied close to the incident time, that is worth ruling in or out.",
-    "It might help to compare the current resource averages against the historical baseline once more — a sustained deviation post-change is a strong signal.",
-    "If none of the above pans out, escalating to the assignment group with this full context bundle is a reasonable next step."
-  ];
-  var demoReplyIndex = 0;
-  async function getAssistantReply(userText, onChunk) {
-    if (DEMO_MODE || !CHAT_URL) {
-      var reply = DEMO_REPLIES[demoReplyIndex % DEMO_REPLIES.length];
-      demoReplyIndex++;
-      var words = reply.split(" ");
-      var acc = "";
-      for (var i = 0; i < words.length; i++) {
-        await new Promise(function (r) { setTimeout(r, 35); });
-        acc += (i > 0 ? " " : "") + words[i];
-        onChunk(acc);
-      }
-      return reply;
-    }
-    await ensureCsrfCookie();
-    var res = await fetch(CHAT_URL, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ message: userText, history: chatHistory })
-    });
-    if (!res.ok || !res.body) throw new Error("Assistant request failed (HTTP " + res.status + ")");
-    var reader = res.body.getReader();
-    var decoder = new TextDecoder();
-    var acc2 = "";
-    while (true) {
-      var chunk = await reader.read();
-      if (chunk.done) break;
-      acc2 += decoder.decode(chunk.value, { stream: true });
-      onChunk(acc2);
-    }
-    return acc2 || "No response received.";
-  }
-  var responseInFlight = false;
-
-  function setPromptTriggersEnabled(enabled) {
-    // Covers BOTH the compact suggestion chips and the prompt bucket's
-    // longer prompts — one guard, one flag (responseInFlight), applied
-    // consistently across both entry points.
-    var triggers = document.querySelectorAll(".suggestion-chip, .prompt-bucket-item");
-    for (var i = 0; i < triggers.length; i++) {
-      if (enabled) { triggers[i].classList.remove("disabled"); }
-      else { triggers[i].classList.add("disabled"); }
-    }
-  }
-
-  function renderInitialExchange() {
-    var openerText = "Continue investigating " + (contextSummary.incidentId || "this incident");
-    var block = addExchangeShell(openerText);
-    if (contextSummary.included && contextSummary.included.length) {
-      var chip = document.createElement("div");
-      chip.className = "tool-chip";
-      chip.innerHTML = '<span class="dot"></span> Context assembled &middot; ' + esc(contextSummary.included.join(", "));
-      block.appendChild(chip);
-    }
-    if (contextSummary.incident) block.appendChild(buildIncidentCard());
-    if (contextSummary.changes) {
-      if (contextSummary.changes.length) {
-        contextSummary.changes.forEach(function (c) { block.appendChild(buildChangeCard(c)); });
-      } else {
-        var noChg = document.createElement("div");
-        noChg.className = "card";
-        noChg.innerHTML = '<div class="card-body"><div class="field-value" style="font-weight:400;">No linked change for this incident.</div></div>';
-        block.appendChild(noChg);
-      }
-    }
-    if (contextSummary.assets && contextSummary.assets.length) block.appendChild(buildAssetsCard());
-    if (contextSummary.evidence) block.appendChild(buildEvidenceChip());
-    block.appendChild(buildTrace());
-    responseInFlight = true;
-    setPromptTriggersEnabled(false);
-    setRoute(true);
-    var thinking = addThinkingChip(block);
-    var replyCard = null;
-    getAssistantReply(initialPrompt, function (partial) {
-      if (!replyCard) { thinking.remove(); replyCard = addStreamingReplyCard(block); }
-      replyCard.update(partial);
-    }).then(function (reply) {
-      chatHistory.push({ role: "user", content: initialPrompt });
-      chatHistory.push({ role: "assistant", content: reply });
-      setRoute(false);
-      responseInFlight = false;
-      setPromptTriggersEnabled(true);
-    }).catch(function (err) {
-      thinking.remove();
-      if (!replyCard) replyCard = addStreamingReplyCard(block);
-      replyCard.update("Failed to reach the AI assistant: " + err.message);
-      setRoute(false);
-      responseInFlight = false;
-      setPromptTriggersEnabled(true);
-    });
-  }
-  function send(text) {
-    responseInFlight = true;
-    setPromptTriggersEnabled(false);
-    var block = addExchangeShell(text);
-    setRoute(true);
-    var thinking = addThinkingChip(block);
-    var replyCard = null;
-    getAssistantReply(text, function (partial) {
-      if (!replyCard) { thinking.remove(); replyCard = addStreamingReplyCard(block); }
-      replyCard.update(partial);
-    }).then(function (reply) {
-      chatHistory.push({ role: "user", content: text });
-      chatHistory.push({ role: "assistant", content: reply });
-      setRoute(false);
-      responseInFlight = false;
-      setPromptTriggersEnabled(true);
-    }).catch(function (err) {
-      thinking.remove();
-      if (!replyCard) replyCard = addStreamingReplyCard(block);
-      replyCard.update("Failed to reach the AI assistant: " + err.message);
-      setRoute(false);
-      responseInFlight = false;
-      setPromptTriggersEnabled(true);
-    });
-  }
-  function askSuggestion(el) {
-    if (responseInFlight) return; // ignore clicks while a response is already streaming — CSS pointer-events:none already blocks this visually, this is the actual logic guard
-    send(el.textContent);
-  }
-  function togglePromptBucket() {
-    var isOpen = document.getElementById("promptBucketPanel").classList.contains("open");
-    if (isOpen) { closePromptBucket(); } else { openPromptBucket(); }
-  }
-  function openPromptBucket() {
-    document.getElementById("promptBucketPanel").classList.add("open");
-    document.getElementById("promptBucketOverlay").classList.add("open");
-  }
-  function closePromptBucket() {
-    document.getElementById("promptBucketPanel").classList.remove("open");
-    document.getElementById("promptBucketOverlay").classList.remove("open");
-  }
-  function askBucketPrompt(el) {
-    if (responseInFlight) return; // same guard as askSuggestion — bucket prompts go through the identical send() path
-    closePromptBucket();
-    send(el.textContent);
-  }
-  renderInitialExchange();
 </script>
+<script src="{% static 'js/ai-assistant-popup.js' %}"></script>
 </body>
 </html>
