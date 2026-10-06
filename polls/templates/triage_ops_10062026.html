@@ -283,10 +283,6 @@
                     <i class="bi bi-search" style="position: absolute; left: 15px; top: 12px; color: var(--text-sec);"></i>
                     <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch(event)">
                 </div>
-                <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;" title="When checked, pressing Enter always starts a fresh triage — even if this incident was already triaged successfully. When unchecked, an existing successful triage is reused automatically.">
-                    <input type="checkbox" id="forceRetriageCheckbox" style="cursor:pointer; margin:0;">
-                    <label for="forceRetriageCheckbox" class="small text-muted" style="cursor:pointer; white-space:nowrap; margin:0;">Force Retriage</label>
-                </div>
                 <button id="tryDemoBtn" class="btn-fw-check" style="white-space:nowrap; flex-shrink:0;" onclick="tryDemoData()">
                     <i class="bi bi-magic"></i> Try Demo Data
                 </button>
