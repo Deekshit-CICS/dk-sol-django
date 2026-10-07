@@ -75,36 +75,33 @@ async function selectIncidentRow(row, incId) {
     setTimeout(draw, 100);
 
     try {
-        let data = await fetchIncidentDetails(incId);
+        const data = await fetchIncidentDetails(incId);
         if (currentInc !== inc) return; // a different row was selected before this resolved
 
         // Set by runFreshTriage when THIS window just finished a run (one-shot).
         const awaitReco = !!inc.awaitRecommendation;
         inc.awaitRecommendation = false;
-        applyIncidentDetails(inc, data, { deferEmptyRecommendation: awaitReco });
-
-        if (awaitReco) {
-            // Only the recommendation is re-fetched/re-applied — NOT the whole
-            // of applyIncidentDetails, which also reloads changes and assets.
-            for (const delay of RECO_RETRY_DELAYS_MS) {
-                if (inc.recoFound) break;
-                await sleep(delay);
-                if (currentInc !== inc) return;
-                try { data = await fetchIncidentDetails(incId); } catch (e) { continue; }
-                if (currentInc !== inc) return;
-                inc.recoFound = applyRecommendation(inc, pickRecommendationRow(data.metadata, inc.triageSessionId), { deferIfEmpty: true });
-            }
-            if (!inc.recoFound) {
-                applyRecommendation(inc, pickRecommendationRow(data.metadata, inc.triageSessionId), {}); // settle: "No recommendation available."
-            }
-        }
+        const firstPick = applyIncidentDetails(inc, data, { deferEmptyRecommendation: awaitReco });
+        if (awaitReco) await waitForRecommendation(inc, incId, firstPick);
     } catch (err) {
         console.error('incident details load failed', err);
         if (currentInc !== inc) return;
         document.getElementById('d-desc').innerText = 'Failed to load incident details.';
         document.getElementById('chg-status-text').innerText = 'Failed to load change details.';
-        document.getElementById('ci-list').innerHTML = '<div class="text-muted small">Failed to load asset inventory.</div>';
-        renderRecommendationHero('error');
+
+        // The asset list is ServiceNow-sourced and does not depend on /details/ — keep
+        // showing it. (Only fall back to the failure text if ServiceNow was never asked.)
+        const snow = snowIncidentCache[(inc.id || '').toUpperCase()];
+        if (snow) {
+            try { applySnowServerListToAssetInventory(inc, inc.id.toUpperCase()); renderCiList(inc); }
+            catch (e2) { document.getElementById('ci-list').innerHTML = '<div class="text-muted small">Failed to load asset inventory.</div>'; }
+        } else {
+            document.getElementById('ci-list').innerHTML = '<div class="text-muted small">Failed to load asset inventory.</div>';
+        }
+
+        // Say WHY, on the card (a bare "Failed" gives nobody anything to act on).
+        const reason = String((err && err.message) || err || 'Unknown error').slice(0, 300);
+        renderRecommendationHero('error', null, reason);
     }
 }
 
@@ -130,10 +127,19 @@ const NO_RECOMMENDATION_TEXT = 'No recommendation available.';
 // time for the text instead of concluding there isn't one (~9s worst case).
 const RECO_RETRY_DELAYS_MS = [1500, 3000, 4500];
 
+// The recommendation is normally a string, but if the backend ever sends a
+// structured value (list of steps, object) show it rather than pretending
+// there is nothing: dropping it would read as "No recommendation available".
+function recommendationTextOf(v) {
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v)) return v.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join('\n');
+    if (v && typeof v === 'object') return JSON.stringify(v, null, 2);
+    return '';   // null/undefined/number/boolean: not a recommendation
+}
+
 function pickRecommendationRow(rows, ownSessionId) {
     const list = Array.isArray(rows) ? rows.filter(r => r && typeof r === 'object') : [];
-    const hasText = r => typeof r.fredai_rag_historical_resolution === 'string'
-                        && r.fredai_rag_historical_resolution.trim() !== '';
+    const hasText = r => recommendationTextOf(r.fredai_rag_historical_resolution).trim() !== '';
     const summary = list.map(r => ({ session_id: r.session_id || null, updated_at: r.updated_at || null, hasText: hasText(r) }));
     const own = ownSessionId ? list.filter(r => r.session_id === ownSessionId) : [];
 
@@ -156,7 +162,7 @@ function pickRecommendationRow(rows, ownSessionId) {
 function applyRecommendation(inc, pick, opts) {
     opts = opts || {};
     if (pick.hasText) {
-        inc.fix = pick.row.fredai_rag_historical_resolution;
+        inc.fix = recommendationTextOf(pick.row.fredai_rag_historical_resolution);
         // We know which run THIS window started. If the text came from a
         // different one, say so rather than passing it off as this run's own.
         inc.fixNote = (inc.triageSessionId && !pick.fromOwnSession)
@@ -177,6 +183,45 @@ function applyRecommendation(inc, pick, opts) {
     }
     renderRecommendationHero('ready', inc);
     return haveText;
+}
+
+/**
+    * Bounded wait for a just-finished run's recommendation (see
+    * RECO_RETRY_DELAYS_MS). Deliberately self-contained: it is an optional
+    * nicety, so NOTHING in here may throw out — the caller's catch blanks
+    * every card, and a page that already loaded fine must never be wiped
+    * because this step hit a problem. On any trouble it just settles the
+    * card on the best answer it already has.
+    */
+async function waitForRecommendation(inc, incId, firstPick) {
+    let lastPick = firstPick;
+    try {
+        for (const delay of RECO_RETRY_DELAYS_MS) {
+            if (inc.recoFound) return;
+            await sleep(delay);
+            if (currentInc !== inc) return;               // user moved on
+            let again;
+            try { again = await fetchIncidentDetails(incId); } catch (e) { continue; }
+            if (currentInc !== inc) return;
+            lastPick = pickRecommendationRow(again && again.metadata, inc.triageSessionId);
+            inc.recoFound = applyRecommendation(inc, lastPick, { deferIfEmpty: true });
+        }
+        // settle: "No recommendation available." (inside the try — see below)
+        if (!inc.recoFound && currentInc === inc) {
+            applyRecommendation(inc, lastPick || { row: null, hasText: false, fromOwnSession: false, summary: [] }, {});
+        }
+    } catch (e) {
+        console.error('waiting for the recommendation failed', e);
+        // Never leave the card stuck on "Generating…", and never let this
+        // optional step blank the rest of the page.
+        try {
+            if (currentInc === inc && !inc.recoFound) {
+                inc.fix = NO_RECOMMENDATION_TEXT;
+                inc.fixNote = null;
+                renderRecommendationHero('ready', inc);
+            }
+        } catch (e2) { /* nothing more we can safely do */ }
+    }
 }
 
 /**
@@ -310,6 +355,7 @@ function applyIncidentDetails(inc, data, opts) {
     }
 
     setTimeout(draw, 50);
+    return reco;
 }
 
 function renderCiList(inc) {
@@ -1949,7 +1995,7 @@ function renderSslCertsTab(data) {
     * Text goes in via textContent (the recommendation is model/RAG output,
     * not trusted markup).
     */
-function renderRecommendationHero(state, inc) {
+function renderRecommendationHero(state, inc, detail) {
     const card = document.getElementById('node-fix');
     if (!card) return;
     card.setAttribute('data-state', state);
@@ -1978,9 +2024,11 @@ function renderRecommendationHero(state, inc) {
     // Provenance note — only when the text came from a different run than ours.
     const note = document.getElementById('reco-note');
     if (note) {
-        const showNote = state === 'ready' && inc && !!inc.fixNote;
-        note.textContent = showNote ? inc.fixNote : '';
-        note.hidden = !showNote;
+        let noteText = '';
+        if (state === 'ready' && inc && inc.fixNote) noteText = inc.fixNote;
+        else if (state === 'error' && detail) noteText = `Reason: ${detail}`;
+        note.textContent = noteText;
+        note.hidden = !noteText;
     }
     // Reflect THIS incident's saved rating; any non-ready state clears it so
     // one incident's thumbs can never bleed onto the next. (updateFeedbackButton
