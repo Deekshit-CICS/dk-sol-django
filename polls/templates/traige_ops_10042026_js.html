@@ -75,9 +75,29 @@ async function selectIncidentRow(row, incId) {
     setTimeout(draw, 100);
 
     try {
-        const data = await fetchIncidentDetails(incId);
+        let data = await fetchIncidentDetails(incId);
         if (currentInc !== inc) return; // a different row was selected before this resolved
-        applyIncidentDetails(inc, data);
+
+        // Set by runFreshTriage when THIS window just finished a run (one-shot).
+        const awaitReco = !!inc.awaitRecommendation;
+        inc.awaitRecommendation = false;
+        applyIncidentDetails(inc, data, { deferEmptyRecommendation: awaitReco });
+
+        if (awaitReco) {
+            // Only the recommendation is re-fetched/re-applied — NOT the whole
+            // of applyIncidentDetails, which also reloads changes and assets.
+            for (const delay of RECO_RETRY_DELAYS_MS) {
+                if (inc.recoFound) break;
+                await sleep(delay);
+                if (currentInc !== inc) return;
+                try { data = await fetchIncidentDetails(incId); } catch (e) { continue; }
+                if (currentInc !== inc) return;
+                inc.recoFound = applyRecommendation(inc, pickRecommendationRow(data.metadata, inc.triageSessionId), { deferIfEmpty: true });
+            }
+            if (!inc.recoFound) {
+                applyRecommendation(inc, pickRecommendationRow(data.metadata, inc.triageSessionId), {}); // settle: "No recommendation available."
+            }
+        }
     } catch (err) {
         console.error('incident details load failed', err);
         if (currentInc !== inc) return;
@@ -86,6 +106,77 @@ async function selectIncidentRow(row, incId) {
         document.getElementById('ci-list').innerHTML = '<div class="text-muted small">Failed to load asset inventory.</div>';
         renderRecommendationHero('error');
     }
+}
+
+// ---------------------------------------------------------------------
+// Which recommendation to show.
+//
+// /details/ returns one session row and one metadata row PER TRIAGE RUN
+// (each metadata row carries its own session_id). An incident triaged
+// more than once — e.g. from several windows at the same time, since every
+// search now starts a fresh run — therefore has several, in no order we can
+// rely on. Reading metadata[0] blindly meant each window showed whatever
+// happened to sit first, which could be another run's still-empty row:
+// "No recommendation available" in every window but one.
+//
+// So choose by identity and content, never by position:
+//   1. this window's OWN run, if its row has text
+//   2. else the newest row, from any run, that actually has text
+//   3. else nothing (row: first row / own row, hasText: false)
+// ---------------------------------------------------------------------
+const NO_RECOMMENDATION_TEXT = 'No recommendation available.';
+// A run can report "completed" a moment before its recommendation row is
+// written. After a run THIS window just finished, wait a short, bounded
+// time for the text instead of concluding there isn't one (~9s worst case).
+const RECO_RETRY_DELAYS_MS = [1500, 3000, 4500];
+
+function pickRecommendationRow(rows, ownSessionId) {
+    const list = Array.isArray(rows) ? rows.filter(r => r && typeof r === 'object') : [];
+    const hasText = r => typeof r.fredai_rag_historical_resolution === 'string'
+                        && r.fredai_rag_historical_resolution.trim() !== '';
+    const summary = list.map(r => ({ session_id: r.session_id || null, updated_at: r.updated_at || null, hasText: hasText(r) }));
+    const own = ownSessionId ? list.filter(r => r.session_id === ownSessionId) : [];
+
+    const ownWithText = own.find(hasText);
+    if (ownWithText) return { row: ownWithText, hasText: true, fromOwnSession: true, summary };
+
+    // Array#sort is stable, so rows with equal/missing timestamps keep the API's order.
+    const newestFirst = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
+    const withText = list.filter(hasText).sort(newestFirst);
+    if (withText.length) return { row: withText[0], hasText: true, fromOwnSession: false, summary };
+
+    return { row: own[0] || list[0] || null, hasText: false, fromOwnSession: false, summary };
+}
+
+/**
+    * Puts the chosen recommendation on the card. Returns true if there is
+    * text to show. With deferIfEmpty the card stays in its loading state
+    * instead of declaring "No recommendation available" (used while retrying).
+    */
+function applyRecommendation(inc, pick, opts) {
+    opts = opts || {};
+    if (pick.hasText) {
+        inc.fix = pick.row.fredai_rag_historical_resolution;
+        // We know which run THIS window started. If the text came from a
+        // different one, say so rather than passing it off as this run's own.
+        inc.fixNote = (inc.triageSessionId && !pick.fromOwnSession)
+            ? `Showing the latest recommendation from another triage run of this incident${pick.row.updated_at ? ` (updated ${pick.row.updated_at})` : ''}.`
+            : null;
+    }
+    const haveText = !!(inc.fix && inc.fix !== NO_RECOMMENDATION_TEXT);
+    if (!haveText && opts.deferIfEmpty) {
+        renderRecommendationHero('loading');
+        return false;
+    }
+    if (!haveText) {
+        inc.fix = NO_RECOMMENDATION_TEXT;
+        inc.fixNote = null;
+        // Self-diagnosing: shows exactly what the API returned for this incident.
+        console.warn('[AI recommendation] none available for', inc.id,
+            { ownSession: inc.triageSessionId || null, metadataRows: pick.summary });
+    }
+    renderRecommendationHero('ready', inc);
+    return haveText;
 }
 
 /**
@@ -148,9 +239,13 @@ function mapChangesRaw(changesRaw, inc) {
     }));
 }
 
-function applyIncidentDetails(inc, data) {
-    const session  = (data.session && data.session[0]) || {};
-    const metadata = (data.metadata && data.metadata[0]) || {};
+function applyIncidentDetails(inc, data, opts) {
+    // Several runs of one incident can be listed (see pickRecommendationRow):
+    // prefer the session THIS window started, fall back to the first.
+    const sessions = Array.isArray(data.session) ? data.session : [];
+    const session  = (inc.triageSessionId && sessions.find(x => x && x.id === inc.triageSessionId)) || sessions[0] || {};
+    const reco     = pickRecommendationRow(data.metadata, inc.triageSessionId);
+    const metadata = reco.row || {};
 
     // Incident
     inc.app = session.app_id || inc.app;
@@ -190,10 +285,9 @@ function applyIncidentDetails(inc, data) {
     }
     syncRecoJumpLinks();
 
-    // AI Remediation — the RAG-generated recommendation text
-    inc.fix = metadata.fredai_rag_historical_resolution || inc.fix || 'No recommendation available.';
+    // AI Recommendation — the RAG-generated text
     inc.action = inc.action || 'Review Manually'; // no explicit action field in this response
-    renderRecommendationHero('ready', inc);
+    inc.recoFound = applyRecommendation(inc, reco, { deferIfEmpty: !!(opts && opts.deferEmptyRecommendation) });
 
     // Asset Inventory is exclusively ServiceNow-sourced now — see
     // applySnowServerListToAssetInventory(), triggered by the parallel
@@ -1881,6 +1975,13 @@ function renderRecommendationHero(state, inc) {
             chip.style.display = 'none';
         }
     }
+    // Provenance note — only when the text came from a different run than ours.
+    const note = document.getElementById('reco-note');
+    if (note) {
+        const showNote = state === 'ready' && inc && !!inc.fixNote;
+        note.textContent = showNote ? inc.fixNote : '';
+        note.hidden = !showNote;
+    }
     // Reflect THIS incident's saved rating; any non-ready state clears it so
     // one incident's thumbs can never bleed onto the next. (updateFeedbackButton
     // is a no-op if the buttons are absent, e.g. stale cached HTML.)
@@ -2315,8 +2416,10 @@ document.getElementById('triageOverlay').addEventListener('click', function(e) {
             fetchIncidentDetails() unwraps the {status, data} envelope, so
             applyIncidentDetails() receives { session, metadata, evidence }
             directly. Note: session[0].id is the session/run UUID, not the
-            incident number. The AI recommendation lives at
-            metadata[0].fredai_rag_historical_resolution.
+            incident number. The AI recommendation lives in each metadata
+            row's fredai_rag_historical_resolution — and there is one
+            metadata row (and one session row) PER TRIAGE RUN, so never
+            assume [0]; see pickRecommendationRow().
             `hostname` is the asset identifier, `technical_evidence` is
             that asset's evidence text — an incident with multiple
             assets has multiple evidence entries with different
@@ -3665,7 +3768,15 @@ async function runFreshTriage(query) {
         }
 
         const success = STATUS_COMPLETED.includes(status);
-        if (success) upsertIncidentIntoRepo(data, query);
+        if (success) {
+            const merged = upsertIncidentIntoRepo(data, query);
+            if (merged) {
+                // /details/ lists every run of this incident; remember which one is OURS
+                // so its recommendation is the one shown (see pickRecommendationRow).
+                merged.triageSessionId = sessionId;
+                merged.awaitRecommendation = true;
+            }
+        }
         setTimeout(() => showTriageResult(success, data, query), 250);
 
     } catch (err) {
