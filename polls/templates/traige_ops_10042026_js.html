@@ -3394,12 +3394,53 @@ function generateDemoSessionStatus(sessionId) {
 let pendingQuery = null;
 let pendingIncidentData = null;
 
+// ---------------------------------------------------------------------
+// Developer shortcut: reuse an existing COMPLETED triage instead of
+// re-running it (triage takes a while, which makes UI iteration slow).
+//
+// Deliberately invisible to normal users: the checkbox is hidden unless
+// the page is opened with ?dev=1, and the behaviour is ONLY honoured in
+// that same mode. So a tick saved in this browser can never quietly
+// serve stale results in a normal session (e.g. while demoing) — drop
+// ?dev=1 from the URL and it's inert again.
+// ---------------------------------------------------------------------
+const DEV_REUSE_STORAGE_KEY = 'rcaDevReuseTriage';
+
+function isDevMode() {
+    try { return new URLSearchParams(window.location.search).get('dev') === '1'; }
+    catch (e) { return false; }
+}
+
+function devReuseEnabled() {
+    if (!isDevMode()) return false;
+    const cb = document.getElementById('devReuseTriage');
+    return !!(cb && cb.checked);
+}
+
+function persistDevReuse(cb) {
+    try { localStorage.setItem(DEV_REUSE_STORAGE_KEY, cb.checked ? '1' : '0'); }
+    catch (e) { /* storage blocked — the tick just won't survive a reload */ }
+}
+
+function initDevMode() {
+    if (!isDevMode()) return;
+    document.body.classList.add('dev-mode');
+    const cb = document.getElementById('devReuseTriage');
+    if (!cb) return;
+    try { cb.checked = localStorage.getItem(DEV_REUSE_STORAGE_KEY) === '1'; }
+    catch (e) { /* storage blocked — start unticked */ }
+}
+
 /**
  * Entered via Enter in the search box (or Try Demo Data): ALWAYS ends in
  * a fresh triage, even if this incident was already triaged successfully
  * — there is deliberately no "reuse the previous result" shortcut any
  * more (the old "Force Retriage" checkbox is gone; its checked state is
  * now simply how every search behaves).
+ *
+ * (Developer-only exception: with ?dev=1 and the hidden "Reuse existing
+ * triage" box ticked, an already-COMPLETED triage is shown as-is; with
+ * no record, or a failed one, it triages as normal.)
  *
  * One safeguard is kept on purpose: if a triage for this incident is
  * ALREADY RUNNING, we don't start a second concurrent one — we show the
@@ -3460,7 +3501,11 @@ async function runTriage(query, opts) {
                 // "Check Again" on an in-progress run that has now finished:
                 // show THAT run's result instead of starting another one.
                 upsertIncidentIntoRepo(data, query);
-                showTriageResult(true, data, query, true); // true = fromExistingRun
+                showTriageResult(true, data, query, 'finished');
+            } else if (devReuseEnabled()) {
+                // Developer shortcut (see devReuseEnabled): skip the slow re-triage.
+                upsertIncidentIntoRepo(data, query);
+                showTriageResult(true, data, query, 'reused');
             } else {
                 await runFreshTriage(query);
             }
@@ -3656,7 +3701,7 @@ function showTriageInfo(data) {
     document.getElementById('triageOverlay').classList.add('open');
 }
 
-function showTriageResult(success, data, query, fromExistingRun) {
+function showTriageResult(success, data, query, source) {   // source: undefined (fresh run) | 'finished' | 'reused'
     document.getElementById('triageLoading').style.display = 'none';
     document.getElementById('triageInfo').style.display = 'none';
     document.getElementById('triageResult').style.display = 'block';
@@ -3672,9 +3717,11 @@ function showTriageResult(success, data, query, fromExistingRun) {
     if (success) {
         title.innerText = 'Triage Successful';
         const label = data && data.incident_number ? data.incident_number : query;
-        detail.innerText = fromExistingRun
+        detail.innerText = source === 'finished'
             ? `Incident ${label} finished triaging — showing the completed result.`
-            : `Incident ${label} correlated successfully.`;
+            : source === 'reused'
+                ? `Incident ${label} was already triaged — showing the existing result (dev mode).`
+                : `Incident ${label} correlated successfully.`;
         // dataRepo was just upserted with real data for this incident — load it into the dashboard
         const localMatch = dataRepo.find(i => i.id.toLowerCase() === (label || '').toLowerCase());
         if (localMatch) selectIncidentById(localMatch.id);
@@ -3731,6 +3778,7 @@ function draw() {
 
 window.onload = () => renderTable(dataRepo);
 window.onresize = draw;
+initDevMode();
 // The hero sits above the connector layers; when its height changes
 // (skeleton -> text) every endpoint below it moves, so redraw.
 if (typeof ResizeObserver !== 'undefined') {
