@@ -54,11 +54,14 @@
         .node-disabled { opacity: 0.4; filter: grayscale(1); cursor: not-allowed; }
         .node-disabled:hover { transform: none; box-shadow: 0 8px 32px rgba(0,0,0,0.04); }
 
-        /* ---------- Developer-only controls: invisible unless the URL has ?dev=1 ---------- */
-        .dev-only { display: none; }
-        body.dev-mode .dev-only { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin: 0;
-                                  font-size: 0.74rem; color: var(--text-sec); cursor: pointer; white-space: nowrap; }
-        body.dev-mode .dev-only input { cursor: pointer; margin: 0; }
+        /* ---------- Developer-only controls: invisible unless the URL has ?dev=1 ----------
+           initDevMode() puts .dev-mode on <body> for ?dev=1. This rule ONLY hides: a revealed
+           element keeps its own look, so any control (label, button, ...) can be marked .dev-only.
+           Hidden by default, so if the script never runs they simply stay hidden. */
+        body:not(.dev-mode) .dev-only { display: none; }
+        .dev-reuse { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin: 0;
+                     font-size: 0.74rem; color: var(--text-sec); cursor: pointer; white-space: nowrap; }
+        .dev-reuse input { cursor: pointer; margin: 0; }
         .dev-tag { font-size: 0.58rem; font-weight: 800; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 6px;
                    background: rgba(255,149,0,0.16); color: #b36200; }
 
@@ -293,11 +296,11 @@
                     <i class="bi bi-search" style="position: absolute; left: 15px; top: 12px; color: var(--text-sec);"></i>
                     <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch(event)">
                 </div>
-                <label class="dev-only" for="devReuseTriage" title="Developer option (only exists when the URL contains ?dev=1). When ticked, Enter reuses an existing COMPLETED triage instead of starting a new one. If there is none, or it failed, it triages as normal.">
+                <label class="dev-only dev-reuse" for="devReuseTriage" title="Developer option (only exists when the URL contains ?dev=1). When ticked, Enter reuses an existing COMPLETED triage instead of starting a new one. If there is none, or it failed, it triages as normal.">
                     <input type="checkbox" id="devReuseTriage" onchange="persistDevReuse(this)">
                     <span>Reuse existing triage</span><span class="dev-tag">DEV</span>
                 </label>
-                <button id="tryDemoBtn" class="btn-fw-check" style="white-space:nowrap; flex-shrink:0;" onclick="tryDemoData()">
+                <button id="tryDemoBtn" class="btn-fw-check dev-only" style="white-space:nowrap; flex-shrink:0;" title="Developer option (only exists when the URL contains ?dev=1). Switch into demo mode with generated sample data." onclick="tryDemoData()">
                     <i class="bi bi-magic"></i> Try Demo Data
                 </button>
                 <span id="exitDemoLink" class="text-muted small" style="display:none; cursor:pointer; flex-shrink:0; text-decoration:underline;" onclick="exitDemoMode()">Exit</span>
@@ -436,7 +439,13 @@
             <div class="result-wrap" id="resultIconWrap"><i class="bi" id="resultIcon"></i></div>
             <div class="fw-bold mb-1" id="resultTitle" style="font-size:1.15rem;">Triage Successful</div>
             <div class="text-muted small mb-2" id="resultDetail">Incident correlated successfully.</div>
-            <button class="btn-triage-done" style="width:100%;" onclick="closeTriage()">Done</button>
+            <div id="resultActionsSuccess">
+                <button class="btn-triage-done" style="width:100%;" onclick="closeTriage()">Done</button>
+            </div>
+            <div id="resultActionsFailure" class="triage-btn-row" style="display:none;">
+                <button class="btn-triage-secondary" onclick="closeTriage()">Done</button>
+                <button class="btn-triage-done" style="margin-top:0;" onclick="retryTriage()"><i class="bi bi-arrow-repeat"></i> Retry</button>
+            </div>
         </div>
         <div id="triageInfo" style="display:none;">
             <div class="confirm-icon-wrap" style="background: rgba(0,113,227,0.12);">

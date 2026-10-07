@@ -3544,6 +3544,9 @@ function generateDemoSessionStatus(sessionId) {
 
 let pendingQuery = null;
 let pendingIncidentData = null;
+// A run the backend ACCEPTED but that we stopped waiting for (timeout / polling
+// error). Retry resumes waiting on THIS run instead of starting a second one.
+let resumableRun = null;   // { query, sessionId } | null
 
 // ---------------------------------------------------------------------
 // Developer shortcut: reuse an existing COMPLETED triage instead of
@@ -3604,6 +3607,7 @@ async function runTriage(query, opts) {
     opts = opts || {};
     if (!query) return;
     pendingQuery = query;
+    resumableRun = null;
     openTriageLoading(query);
     setTriageStatus('Verifying incident exists…');
 
@@ -3683,6 +3687,7 @@ function showIncidentNotFound(query, message) {
     document.getElementById('triageLoading').style.display = 'none';
     document.getElementById('triageInfo').style.display = 'none';
     document.getElementById('triageResult').style.display = 'block';
+    setResultActions(true);
     document.getElementById('resultIconWrap').className = 'result-wrap fail';
     document.getElementById('resultIcon').className = 'bi bi-x-lg';
     document.getElementById('resultTitle').innerText = 'Triage Failed';
@@ -3787,49 +3792,103 @@ async function pollUntilDone(fetchFn) {
 }
 
 async function runFreshTriage(query) {
+    let startedRun = null;   // set once the backend has ACCEPTED a run — from then on a failure is resumable
     try {
         setTriageStatus('No active triage found — triggering new triage…');
-        let data = await triggerTriage(query);
+        const data = await triggerTriage(query);
         pendingIncidentData = data;
 
-        let status = (data.status || '').toLowerCase().trim();
         const sessionId = data.session_id || null;
-
-        if (!STATUS_COMPLETED.includes(status) && !STATUS_FAILED.includes(status)) {
-            setTriageStatus('Triage in progress…');
-
-            const result = sessionId
-                ? await pollUntilDone(() => checkSessionStatus(sessionId))
-                : await pollUntilDone(() => lookupIncident(query));
-
-            data = result.data || data;
-            status = result.status;
-
-            // Session status only confirms WHEN it's done, not the full
-            // incident record — fetch that separately via the existing,
-            // proven lookup rather than assuming the session-status
-            // response has every field showTriageResult()/
-            // upsertIncidentIntoRepo() expect.
-            if (sessionId && STATUS_COMPLETED.includes(status)) {
-                data = (await lookupIncident(query)) || data;
-            }
-        }
-
-        const success = STATUS_COMPLETED.includes(status);
-        if (success) {
-            const merged = upsertIncidentIntoRepo(data, query);
-            if (merged) {
-                // /details/ lists every run of this incident; remember which one is OURS
-                // so its recommendation is the one shown (see pickRecommendationRow).
-                merged.triageSessionId = sessionId;
-                merged.awaitRecommendation = true;
-            }
-        }
-        setTimeout(() => showTriageResult(success, data, query), 250);
+        startedRun = { query, sessionId };
+        await finishTriageRun(query, data, sessionId);
 
     } catch (err) {
+        // null when the trigger itself failed (nothing is running, so Retry starts afresh);
+        // otherwise Retry keeps waiting on this same run — see retryTriage().
+        resumableRun = startedRun;
         showTriageError(query, err.message);
     }
+}
+
+/**
+ * Everything after the backend has accepted a run: wait for it to finish,
+ * load the full record, then show the result. Shared by the first attempt
+ * and by Retry-after-timeout (resumeTriage), so both behave identically.
+ */
+async function finishTriageRun(query, data, sessionId) {
+    let status = (data.status || '').toLowerCase().trim();
+
+    if (!STATUS_COMPLETED.includes(status) && !STATUS_FAILED.includes(status)) {
+        setTriageStatus('Triage in progress…');
+
+        const result = sessionId
+            ? await pollUntilDone(() => checkSessionStatus(sessionId))
+            : await pollUntilDone(() => lookupIncident(query));
+
+        data = result.data || data;
+        status = result.status;
+
+        // Session status only confirms WHEN it's done, not the full
+        // incident record — fetch that separately via the existing,
+        // proven lookup rather than assuming the session-status
+        // response has every field showTriageResult()/
+        // upsertIncidentIntoRepo() expect.
+        if (sessionId && STATUS_COMPLETED.includes(status)) {
+            data = (await lookupIncident(query)) || data;
+        }
+    }
+
+    const success = STATUS_COMPLETED.includes(status);
+    if (success) {
+        const merged = upsertIncidentIntoRepo(data, query);
+        if (merged) {
+            // /details/ lists every run of this incident; remember which one is OURS
+            // so its recommendation is the one shown (see pickRecommendationRow).
+            merged.triageSessionId = sessionId;
+            merged.awaitRecommendation = true;
+        }
+    }
+    setTimeout(() => showTriageResult(success, data, query), 250);
+}
+
+/**
+ * Retry button (every failure screen).
+ *  - Failed AFTER the backend accepted a run (e.g. "taking longer than
+ *    expected"): that run is very likely still going — or has just finished
+ *    while the person was reading the message. Starting another would repeat
+ *    a long triage for nothing (and add a second run to the incident), so
+ *    keep waiting on the SAME run.
+ *  - Anything else (couldn't start, the run itself failed, incident not
+ *    found): start again exactly as pressing Enter does.
+ */
+function retryTriage() {
+    if (!pendingQuery) return;
+    if (resumableRun && resumableRun.query === pendingQuery) {
+        resumeTriage();
+    } else {
+        runTriage(pendingQuery);
+    }
+}
+
+async function resumeTriage() {
+    const run = resumableRun;
+    resumableRun = null;
+    openTriageLoading(run.query);
+    setTriageStatus('Checking on the running triage…');
+    try {
+        await finishTriageRun(run.query, { status: 'in process', session_id: run.sessionId }, run.sessionId);
+    } catch (err) {
+        resumableRun = run;   // still the same run: another Retry keeps waiting on it
+        showTriageError(run.query, err.message);
+    }
+}
+
+// One Done button after a success; Done + Retry after any failure.
+function setResultActions(failed) {
+    const ok = document.getElementById('resultActionsSuccess');
+    const bad = document.getElementById('resultActionsFailure');
+    if (ok) ok.style.display = failed ? 'none' : '';
+    if (bad) bad.style.display = failed ? '' : 'none';   // '' = the .triage-btn-row flex layout
 }
 
 function recheckTriageStatus() {
@@ -3864,6 +3923,7 @@ function showTriageResult(success, data, query, source) {   // source: undefined
     document.getElementById('triageLoading').style.display = 'none';
     document.getElementById('triageInfo').style.display = 'none';
     document.getElementById('triageResult').style.display = 'block';
+    setResultActions(!success);
 
     const iconWrap = document.getElementById('resultIconWrap');
     const icon = document.getElementById('resultIcon');
@@ -3894,6 +3954,7 @@ function showTriageError(query, message) {
     document.getElementById('triageLoading').style.display = 'none';
     document.getElementById('triageInfo').style.display = 'none';
     document.getElementById('triageResult').style.display = 'block';
+    setResultActions(true);
 
     const iconWrap = document.getElementById('resultIconWrap');
     const icon = document.getElementById('resultIcon');
