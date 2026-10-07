@@ -54,6 +54,14 @@
         .node-disabled { opacity: 0.4; filter: grayscale(1); cursor: not-allowed; }
         .node-disabled:hover { transform: none; box-shadow: 0 8px 32px rgba(0,0,0,0.04); }
 
+        /* ---------- Developer-only controls: invisible unless the URL has ?dev=1 ---------- */
+        .dev-only { display: none; }
+        body.dev-mode .dev-only { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin: 0;
+                                  font-size: 0.74rem; color: var(--text-sec); cursor: pointer; white-space: nowrap; }
+        body.dev-mode .dev-only input { cursor: pointer; margin: 0; }
+        .dev-tag { font-size: 0.58rem; font-weight: 800; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 6px;
+                   background: rgba(255,149,0,0.16); color: #b36200; }
+
         /* ---------- AI Recommendation hero (top of the workflow) ---------- */
         .reco-hero { cursor: default; border-top: 4px solid var(--green); }
         .reco-hero:hover { transform: none; box-shadow: 0 8px 32px rgba(0,0,0,0.04); }
@@ -283,6 +291,10 @@
                     <i class="bi bi-search" style="position: absolute; left: 15px; top: 12px; color: var(--text-sec);"></i>
                     <input type="text" id="masterSearch" class="search-input" placeholder="Filter by App ID, Incident, or Change..." onkeyup="handleSearch(event)">
                 </div>
+                <label class="dev-only" for="devReuseTriage" title="Developer option (only exists when the URL contains ?dev=1). When ticked, Enter reuses an existing COMPLETED triage instead of starting a new one. If there is none, or it failed, it triages as normal.">
+                    <input type="checkbox" id="devReuseTriage" onchange="persistDevReuse(this)">
+                    <span>Reuse existing triage</span><span class="dev-tag">DEV</span>
+                </label>
                 <button id="tryDemoBtn" class="btn-fw-check" style="white-space:nowrap; flex-shrink:0;" onclick="tryDemoData()">
                     <i class="bi bi-magic"></i> Try Demo Data
                 </button>
