@@ -23,6 +23,43 @@
         .navbar { border-bottom: 1px solid rgba(0,0,0,0.05); }
         h1.page-title { font-size: 1.4rem; font-weight: 700; margin:0; color: var(--text-main); }
 
+        /* ---------- GOC Toolkit bar: the slim, site-wide bar above this tool's own bar ----------
+           Full-bleed: the negative side/top margins cancel body's 30px padding, so the bar
+           reaches the window edges while everything below keeps its normal inset.
+           Not positioned and no z-index on purpose: the side panel and the modal overlays
+           are fixed and must always draw over it. */
+        .goc-bar { --goc-blue: #2b57d6; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+                   margin: -30px -30px 24px; padding: 10px 28px; min-height: 52px;
+                   background: rgba(255,255,255,0.72); backdrop-filter: blur(20px); border-bottom: 1px solid var(--border); }
+        .goc-crumbs { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .goc-brand { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; text-decoration: none; color: var(--text-main); }
+        .goc-brand:hover .goc-name { color: var(--goc-blue); }
+        .goc-brand:focus-visible { outline: 2px solid var(--goc-blue); outline-offset: 4px; border-radius: 8px; }
+        .goc-logo { width: 22px; height: 22px; border-radius: 7px; background: var(--goc-blue); color: #fff;
+                    display: inline-flex; align-items: center; justify-content: center; font-size: 0.78rem; flex-shrink: 0; }
+        .goc-name { font-size: 0.95rem; font-weight: 500; letter-spacing: -0.005em; transition: color 0.2s; }
+        .goc-sep { font-size: 0.62rem; color: var(--text-sec); opacity: 0.7; flex-shrink: 0; }
+        .goc-crumb-current { font-size: 0.9rem; font-weight: 600; color: var(--text-sec);
+                             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .goc-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--goc-blue); color: #fff; flex-shrink: 0;
+                      display: inline-flex; align-items: center; justify-content: center;
+                      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em; user-select: none; cursor: pointer;
+                      border: 0; padding: 0; transition: box-shadow 0.2s; }
+        .goc-avatar:hover, .goc-avatar[aria-expanded="true"] { box-shadow: 0 0 0 4px rgba(43,87,214,0.18); }
+        .goc-avatar:focus-visible { outline: 2px solid var(--goc-blue); outline-offset: 3px; }
+        .goc-bar { position: relative; z-index: 1030; }
+        .goc-user { position: relative; flex-shrink: 0; }
+        .goc-menu { position: absolute; right: 0; top: calc(100% + 10px); min-width: 210px; padding: 8px;
+                    background: rgba(255,255,255,0.96); backdrop-filter: blur(20px); border: 1px solid var(--border);
+                    border-radius: 16px; box-shadow: 0 12px 32px rgba(0,0,0,0.14); }
+        .goc-menu[hidden] { display: none; }
+        .goc-menu-title { padding: 8px 12px 6px; font-size: 0.82rem; color: var(--text-sec); }
+        .goc-menu a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
+                      font-size: 0.9rem; font-weight: 500; color: var(--text-main); text-decoration: none; }
+        .goc-menu a:hover, .goc-menu a:focus-visible { background: rgba(0,0,0,0.05); outline: none; }
+        .goc-menu hr { margin: 6px 4px; border: 0; border-top: 1px solid var(--border); opacity: 1; }
+        .goc-menu a.goc-logoff { color: #d63a4a; }
+
         /* make table header sticky */
         .table-container thead th {
             position: sticky;
@@ -287,7 +324,29 @@
 </head>
 <body>
 
-    <!-- top navigation bar -->
+    <!-- GOC Toolkit bar (site-wide): back to the Toolkit home, which tool this is, who is signed in -->
+    <nav class="goc-bar" aria-label="GOC Toolkit">
+        <div class="goc-crumbs">
+            <a class="goc-brand" href="/home/" title="Back to GOC Toolkit home">
+                <span class="goc-logo" aria-hidden="true"><i class="bi bi-cpu-fill"></i></span>
+                <span class="goc-name">GOC Toolkit</span>
+            </a>
+            <i class="bi bi-chevron-right goc-sep" aria-hidden="true"></i>
+            <span class="goc-crumb-current" aria-current="page">Triage Agent</span>
+        </div>
+        <div class="goc-user" id="gocUser">
+            <button type="button" class="goc-avatar" id="gocAvatar" aria-haspopup="true" aria-expanded="false"
+                    aria-controls="gocMenu" aria-label="User controls">US</button>
+            <div class="goc-menu" id="gocMenu" role="menu" hidden>
+                <div class="goc-menu-title">User Controls</div>
+                <a href="/home/" role="menuitem"><i class="bi bi-house"></i>Home</a>
+                <hr>
+                <a href="/logout/" class="goc-logoff" role="menuitem"><i class="bi bi-power"></i>Logoff</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- tool bar: page title + incident search -->
     <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-4">
         <div class="container-fluid dashboard-container">
             <a class="navbar-brand" href="#"><h1 class="page-title">Forensic RCA | Enterprise</h1></a>
@@ -503,6 +562,16 @@
     </div>
 </div>
 
+<script>
+(function () {
+    var btn = document.getElementById('gocAvatar'), menu = document.getElementById('gocMenu');
+    if (!btn || !menu) return;
+    function setOpen(o) { menu.hidden = !o; btn.setAttribute('aria-expanded', o ? 'true' : 'false'); }
+    btn.addEventListener('click', function (e) { e.stopPropagation(); setOpen(menu.hidden); });
+    document.addEventListener('click', function (e) { if (!menu.hidden && !menu.contains(e.target)) setOpen(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !menu.hidden) { setOpen(false); btn.focus(); } });
+})();
+</script>
 <script src="/static/js/forensic-rca-live.js"></script>
 </body>
 </html>
