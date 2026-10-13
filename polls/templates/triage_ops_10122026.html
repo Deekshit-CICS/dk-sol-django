@@ -58,7 +58,10 @@
                       font-size: 0.9rem; font-weight: 500; color: var(--text-main); text-decoration: none; }
         .goc-menu a:hover, .goc-menu a:focus-visible { background: rgba(0,0,0,0.05); outline: none; }
         .goc-menu hr { margin: 6px 4px; border: 0; border-top: 1px solid var(--border); opacity: 1; }
-        .goc-menu a.goc-logoff { color: #d63a4a; }
+        .goc-menu form { margin: 0; }
+        .goc-menu button.goc-logoff { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0;
+                      border-radius: 10px; background: none; text-align: left; font: inherit; font-size: 0.9rem; font-weight: 500; color: #d63a4a; cursor: pointer; }
+        .goc-menu button.goc-logoff:hover, .goc-menu button.goc-logoff:focus-visible { background: rgba(214,58,74,0.08); outline: none; }
 
         /* make table header sticky */
         .table-container thead th {
@@ -327,7 +330,7 @@
     <!-- GOC Toolkit bar (site-wide): back to the Toolkit home, which tool this is, who is signed in -->
     <nav class="goc-bar" aria-label="GOC Toolkit">
         <div class="goc-crumbs">
-            <a class="goc-brand" href="/home/" title="Back to GOC Toolkit home">
+            <a class="goc-brand" href="{% url 'home' %}" title="Back to GOC Toolkit home">
                 <span class="goc-logo" aria-hidden="true"><i class="bi bi-cpu-fill"></i></span>
                 <span class="goc-name">GOC Toolkit</span>
             </a>
@@ -339,9 +342,12 @@
                     aria-controls="gocMenu" aria-label="User controls">US</button>
             <div class="goc-menu" id="gocMenu" role="menu" hidden>
                 <div class="goc-menu-title">User Controls</div>
-                <a href="/home/" role="menuitem"><i class="bi bi-house"></i>Home</a>
+                <a href="{% url 'home' %}" role="menuitem"><i class="bi bi-house"></i>Home</a>
                 <hr>
-                <a href="/logout/" class="goc-logoff" role="menuitem"><i class="bi bi-power"></i>Logoff</a>
+                <form method="post" action="{% url 'logout' %}" class="goc-logout-form">
+                    {% csrf_token %}
+                    <button type="submit" class="goc-logoff" role="menuitem"><i class="bi bi-power"></i>Logoff</button>
+                </form>
             </div>
         </div>
     </nav>
