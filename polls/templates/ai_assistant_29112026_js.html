@@ -3759,8 +3759,27 @@ async function withTriageLimit(query, work) {
         return;
     }
     triageBusy = true;
+    setSearchBusy(true);
     try { await work(); }
-    finally { triageBusy = false; releaseTriageLock(); }
+    finally { triageBusy = false; releaseTriageLock(); setSearchBusy(false); }
+}
+
+// Loading state for the search box (the "submit" control): locked, with a hint, while a triage runs.
+let searchIdlePlaceholder = null;
+function setSearchBusy(busy) {
+    const box = document.getElementById('masterSearch');
+    if (!box) return;
+    if (busy) {
+        if (searchIdlePlaceholder === null) searchIdlePlaceholder = box.placeholder;
+        box.disabled = true;
+        box.setAttribute('aria-busy', 'true');
+        box.placeholder = 'Triage running…';
+    } else {
+        box.disabled = false;
+        box.removeAttribute('aria-busy');
+        if (searchIdlePlaceholder !== null) box.placeholder = searchIdlePlaceholder;
+        searchIdlePlaceholder = null;
+    }
 }
 
 /**
