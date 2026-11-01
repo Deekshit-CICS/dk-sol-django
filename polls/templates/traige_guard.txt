@@ -92,8 +92,9 @@ def _slot_key(i: int) -> str:
     return f"{_PREFIX}slot:{i}"
 
 
-def _session_key(session_id: str) -> str:
-    return f"{_PREFIX}session:{session_id}"
+def _session_key(session_id: Any) -> str:
+    # GUIDs come back in different casings from different services: compare them case-insensitively
+    return f"{_PREFIX}session:{str(session_id).strip().lower()}"
 
 
 # --------------------------------------------------------------------------- responses
@@ -113,15 +114,27 @@ def _same_run(payload: Any, why: str) -> JsonResponse:
 
 # --------------------------------------------------------------------------- helpers
 def _incident_of(request: HttpRequest) -> str:
-    """The incident number from the query string, a form post, or a JSON body."""
+    """The incident number from the query string, a form post, or a JSON body.
+
+    The JSON body is parsed whatever the Content-Type says (like the triage view itself does:
+    json.loads(request.body)), so a client that posts JSON as text/plain or without a header is still recognised.
+    request.body is cached by Django, so the view can read it again afterwards.
+    """
     name = _cfg("INCIDENT_PARAM", "incident_number")
-    found = request.GET.get(name) or request.POST.get(name)
-    if not found and "json" in (request.content_type or ""):
+    found = request.GET.get(name)
+    if not found:
         try:
-            body = json.loads(request.body.decode(request.encoding or "utf-8") or "null")
-            found = body.get(name) if isinstance(body, dict) else None
-        except Exception:
-            found = None
+            raw = request.body
+        except Exception:                                # e.g. RequestDataTooBig: let the view deal with it
+            raw = b""
+        if raw:
+            try:
+                body = json.loads(raw.decode(request.encoding or "utf-8"))
+                found = body.get(name) if isinstance(body, dict) else None
+            except Exception:
+                found = None
+            if not found and "json" not in (request.content_type or ""):
+                found = request.POST.get(name)           # form-encoded post
     return str(found or "").strip()
 
 
@@ -190,7 +203,7 @@ def _release(number: str, finished_ok: bool = False) -> None:
         if state.get("slot") is not None:
             cache.delete(_slot_key(state["slot"]))
         if state.get("session_id"):
-            cache.delete(_session_key(str(state["session_id"])))
+            cache.delete(_session_key(state["session_id"]))
         if finished_ok:
             _remember_finished(number, state.get("payload"))
     cache.delete(_incident_key(number))
@@ -223,7 +236,7 @@ def release_for_incident(number: str) -> None:
 
 def release_for_session(session_id: str, finished_ok: bool = False) -> None:
     """Free the lock of the run with this session id (idempotent)."""
-    number = _cache().get(_session_key(str(session_id)))
+    number = _cache().get(_session_key(session_id))
     if number:
         _release(number, finished_ok=finished_ok)
 
@@ -243,6 +256,7 @@ def triage_guard(view: Callable[..., HttpResponse]) -> Callable[..., HttpRespons
         if request.method != "POST":
             return view(request, *args, **kwargs)
         number = _incident_of(request)
+        log.debug("triage_guard: incident=%r method=%s", number, request.method)
         if not number:
             return view(request, *args, **kwargs)            # not a trigger we can reason about: the view answers (e.g. 400)
 
@@ -309,7 +323,7 @@ def triage_guard(view: Callable[..., HttpResponse]) -> Callable[..., HttpRespons
             return response
         cache.set(inc_key, {"state": "running", "slot": slot, "session_id": session_id, "payload": payload, "ts": _now()}, ttl)
         if session_id:
-            cache.set(_session_key(str(session_id)), number.upper(), ttl)
+            cache.set(_session_key(session_id), number.upper(), ttl)
         return response
 
     return wrapper
